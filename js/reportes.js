@@ -64,6 +64,7 @@ B.rep.documento = function (titulo, cuerpo, horizontal) {
   tr.falta td { background: #FFF2CC; }
   .faltan { color: #C00000; font-weight: bold; font-size: 6.5pt; }
   .com { color: #404040; font-size: 7pt; margin-top: 1px; }
+  .com.obs { font-size: 6.5pt; line-height: 1.15; }
   .est { font-weight: bold; font-size: 7pt; text-align: center; }
   `;
   return `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>${U.esc(titulo)}</title><style>${css}</style></head>
@@ -117,7 +118,7 @@ B.rep.turno = function (f, t) {
       <th>DÍA QUE SE LIBERÓ / HORA</th><th>PERSONAL TSI / OBSERVACIONES</th></tr>` +
       d.ec.map(e => `<tr class="${B.dom.ecFaltan(e).length ? "falta" : ""}"><td class="c b">${U.esc(B.dom.ecNum(e))}</td><td class="c">${U.esc(e.esp)}${faltan(e)}</td>` +
         ["o2", "hr", "temp", "lel", "co", "h2s"].map(k => `<td class="c ${B.dom.rango(k, e[k]) ? "fuera" : ""}">${U.esc(e[k])}</td>`).join("") +
-        `<td class="c">${U.fh(e.lib)}</td><td class="c">${U.esc(e.pers)}${e.obs ? "<br>" + U.esc(e.obs) : ""}</td></tr>`).join("") + `</table>`;
+        `<td class="c">${U.fh(e.lib)}</td><td class="c">${U.esc(e.pers)}${e.obs ? `<div class="com obs">${U.esc(e.obs)}</div>` : ""}</td></tr>`).join("") + `</table>`;
   }
   if (d.ultEc.length) {
     // completa hasta 5 con los ultimos liberados en turnos anteriores (en orden de #); los mas antiguos ("opc")
