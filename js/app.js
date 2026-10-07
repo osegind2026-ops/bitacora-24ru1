@@ -7,7 +7,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "1.8.2", servidorViejo: false,
+  info: {}, VERSION: "1.9", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -58,7 +58,7 @@ B.app = {
           ${msg ? `<div class="aviso r">${B.ico("alerta")}<div>${U.esc(msg)}</div></div>` : ""}
           <label class="btn bloque" style="cursor:pointer">${B.ico("descargar")} Cargar paquete de datos…<input type="file" id="mIni" accept=".json,.txt,application/json,text/plain" hidden></label>
         </div>
-        <div class="login-pie">Los datos se guardan solo en este celular. Tus capturas se mandan a la PC desde el menú <b>Celulares</b>.</div>
+        <div class="login-pie">Los datos se guardan solo en este celular. Tus capturas se mandan a la PC desde el menú <b>Enviar / recibir</b>.</div>
       </div>`;
     document.getElementById("mIni").onchange = async e => {
       const f = e.target.files[0]; if (!f) return;
@@ -181,14 +181,15 @@ B.app = {
         <aside class="lateral" data-tour="menu">
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
-            `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? "Supervisor" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "1.8.2")}</div>
+            `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
+          <div class="lateral-pie">${sup ? "Supervisor" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "1.9")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
             <button class="btn fantasma btn-icono btn-menu-movil" id="bMenuMovil">${B.ico("menu")}</button>
             <div><h1 id="tituloVista"></h1><div class="sub" id="subVista"></div></div>
             <div class="barra-der">
+              <a class="pend-movil oculto" id="insPend" href="#/celular" title="Capturas guardadas en este celular que falta enviar a la PC"></a>
               <div class="turno-insignia" id="insTurno"></div>
               <div class="turno-sel" data-tour="turno" title="Turno de trabajo (el T1 nocturno se rotula con la fecha de salida)">
                 ${B.ico("calendario", 'style="width:17px;height:17px;color:var(--texto-3)"')}
@@ -205,7 +206,8 @@ B.app = {
     document.getElementById("selFecha").onchange = e => { if (e.target.value) this.cambiarTrabajo(e.target.value, this.trabajo.t); };
     B.ui.activarSeg(document.querySelector(".turno-sel"), (s, v) => this.cambiarTrabajo(this.trabajo.f, v));
     document.getElementById("bAvatar").onclick = e => { e.stopPropagation(); this.menuUsuario(); };
-    document.getElementById("bMenuMovil").onclick = () => document.body.classList.toggle("nav-abierto");
+    document.getElementById("bMenuMovil").onclick = e => { e.stopPropagation(); document.body.classList.toggle("nav-abierto"); };
+    if (!this._cierraMenu) { this._cierraMenu = true; document.addEventListener("click", e => { if (document.body.classList.contains("nav-abierto") && !e.target.closest(".lateral")) document.body.classList.remove("nav-abierto"); }); }
     window.onhashchange = () => this.navegar();
     if (B.modoLocal && "BroadcastChannel" in window && !this._canal) {
       this._canal = new BroadcastChannel("bitacora24ru1");
@@ -269,6 +271,24 @@ B.app = {
   contadores() {
     const n = B.dom.pendientesGrupos(B.dom.esSup() ? null : B.usuario.ini).length, c = document.getElementById("cntPend");
     if (c) { c.textContent = n; c.classList.toggle("oculto", !n); }
+    if (B.modoMovil) this.estadoMovil();
+  },
+  // Celular: cuantas capturas faltan por enviar a la PC y que tan viejo es el paquete de datos (barra, menu y pantalla de inicio)
+  async estadoMovil() {
+    try {
+      const ruta = this.ruta, n = (await B.inter.pendientes()).length, paq = await B.inter.infoPaquete();
+      const ip = document.getElementById("insPend"), cc = document.getElementById("cntCel");
+      if (ip) { ip.innerHTML = B.ico("subir") + n; ip.classList.toggle("oculto", !n || ruta === "celular"); }
+      if (cc) { cc.textContent = n; cc.classList.toggle("oculto", !n); }
+      const v = document.getElementById("vista");
+      if (ruta !== "inicio" || this.ruta !== "inicio" || !v || v.querySelector(".movil-estado")) return;
+      const horas = paq && paq.generado ? Math.round((Date.now() - new Date(paq.generado + ":00").getTime()) / 36e5) : null, viejo = horas != null && horas >= 12;
+      const d = document.createElement("div");
+      d.className = "movil-estado" + (n ? " pend" : viejo ? " viejo" : "");
+      d.innerHTML = `<div>${n ? `<b>${n} captura(s) por enviar a la PC.</b> ` : "<b>Todo enviado.</b> "}Datos del ${paq ? U.fh(paq.generado) : "—"}${viejo ? ` · <b style="color:#8a5a00">hace ${horas} h: pide un paquete nuevo</b>` : ""}</div>
+        <a class="btn ${n ? "verde" : "sec"} chico" href="#/celular">${B.ico("subir")} ${n ? "Enviar" : "Enviar / recibir"}</a>`;
+      v.insertBefore(d, v.firstChild);
+    } catch (e) { }
   },
 
   menuUsuario() {

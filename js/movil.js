@@ -204,14 +204,14 @@ B.inter = {
     });
   },
   /* ---------- celular: archivo con las capturas pendientes (se comparte por WhatsApp) */
-  async exportarCapturas() {
+  async exportarCapturas(soloDescargar) {
     const ops = await this.pendientes();
     if (!ops.length) throw new Error("No tienes capturas pendientes de enviar.");
     const u = B.usuario, obj = { tipo: "b24-capturas", version: B.app.VERSION, generado: U.ahoraISO(), ini: u.ini, nombre: u.nombre, ops };
     // extension .txt: es la que los celulares permiten compartir directo a WhatsApp
     const nombre = "Bitacora24RU1 CAPTURAS " + u.ini + " " + U.ahoraISO().replace("T", " ").replace(":", "") + ".txt", texto = JSON.stringify(obj);
     await B.local.escribir("ultimoEnvio", { fecha: U.ahoraISO(), n: ops.length });
-    try {
+    if (!soloDescargar) try {
       const file = new File([texto], nombre, { type: "text/plain" });
       if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: nombre, text: "Capturas de la Bitácora 24RU1 · " + u.ini }); return { modo: "compartido", nombre, n: ops.length }; }
     } catch (e) { if (e.name === "AbortError") return { modo: "cancelado", nombre, n: ops.length }; }
@@ -269,13 +269,14 @@ V.celular = {
     c.innerHTML = `
       <div class="cuadricula">
       <div class="tarjeta c6" data-tour="cel-enviar">${cab("subir", "v", "Enviar mis capturas a la PC", pend.length ? `<b>${pend.length}</b> captura(s) guardadas en este celular que la PC todavía no confirma.` : "No hay capturas pendientes: la PC ya tiene todo lo de este celular.")}
-        <button class="btn verde bloque" id="mEnviar" ${pend.length ? "" : "disabled"}>${B.ico("subir")} Enviar por WhatsApp (${pend.length})</button>
+        <button class="btn verde bloque" id="mEnviar" ${pend.length ? "" : "disabled"} style="min-height:52px;font-size:15px">${B.ico("subir")} Enviar por WhatsApp (${pend.length})</button>
+        ${pend.length ? `<button class="btn sec bloque" id="mDescargar" style="margin-top:8px">${B.ico("descargar")} Guardar el archivo en el celular</button>` : ""}
         <p class="muted peque" style="margin:10px 0 0">Se genera un archivo «Bitacora24RU1 CAPTURAS ${U.esc(B.usuario.ini)} …»: elige <b>WhatsApp</b> y mándalo al grupo del turno o a tu propio chat. En la PC se importa en <b>Celulares → Importar capturas</b>.
           Puedes enviarlo varias veces: la PC ignora lo que ya recibió.${ult ? `<br>Último envío: ${U.fh(ult.fecha)} (${ult.n} capturas).` : ""}</p>
         ${pend.length ? `<details style="margin-top:10px"><summary class="peque" style="cursor:pointer;color:var(--azul);font-weight:600">Ver lo pendiente de enviar</summary><div class="lista" style="margin-top:8px">${pend.slice(-60).reverse().map(o => `<div class="item"><div class="cuerpo"><div class="tit" style="font-weight:500">${U.esc(B.inter.describir(o))}</div><div class="meta"><span>${U.esc(o.ini)}</span><span>capturado ${U.fh(o.t)}</span></div></div></div>`).join("")}</div></details>` : ""}
       </div>
       <div class="tarjeta c6" data-tour="cel-recibir">${cab("descargar", "d", "Recibir datos de la PC", paq ? `Datos del paquete generado el <b>${U.fh(paq.generado)}</b> por ${U.esc(paq.por || "")}${horas != null && horas >= 12 ? ` · <span style="color:var(--rojo)">hace ${horas} h: pide uno nuevo</span>` : ""}` : "Aún no se ha cargado ningún paquete.")}
-        <label class="btn dorado bloque" style="cursor:pointer">${B.ico("descargar")} Cargar paquete de datos…<input type="file" id="mPaq" accept=".json,.txt,application/json,text/plain" hidden></label>
+        <label class="btn dorado bloque" style="cursor:pointer;min-height:52px;font-size:15px">${B.ico("descargar")} Cargar paquete de datos…<input type="file" id="mPaq" accept=".json,.txt,application/json,text/plain" hidden></label>
         <p class="muted peque" style="margin:10px 0 0">El supervisor manda al grupo de WhatsApp el archivo «Bitacora24RU1 PAQUETE celulares …». Descárgalo en WhatsApp (tócalo) y elígelo aquí.
           Tus capturas que aún no llegan a la PC <b>no se pierden</b>: se conservan encima de los datos nuevos.</p>
         <div id="mRes"></div>
@@ -290,6 +291,8 @@ V.celular = {
         ui.toast(r.modo === "compartido" ? "Archivo compartido. Cuando se importe en la PC y cargues el siguiente paquete, estas capturas dejarán de aparecer como pendientes." : r.modo === "descargado" ? "Tu celular no permite compartir directo: el archivo <b>" + U.esc(r.nombre) + "</b> quedó en Descargas. Adjúntalo en WhatsApp como Documento." : "Envío cancelado.", r.modo === "cancelado" ? "" : "ok", 10000);
         B.app.render(); } catch (e) { ui.error(e); }
     };
+    const bd = c.querySelector("#mDescargar");
+    if (bd) bd.onclick = async () => { try { const r = await B.inter.exportarCapturas(true); ui.toast("Archivo <b>" + U.esc(r.nombre) + "</b> guardado en Descargas. Adjúntalo en WhatsApp como Documento o mándalo por correo.", "ok", 9000); B.app.render(); } catch (e) { ui.error(e); } };
     const cargar = async (texto, forzar) => {
       const caja = c.querySelector("#mRes");
       try {

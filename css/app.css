@@ -372,3 +372,75 @@ select.inp { appearance: auto; }
 .hoja-act { display: flex; gap: 10px; align-items: center; padding: 7px 10px; border: 1px solid var(--borde); border-radius: 10px; background: #fff; font-size: 13px; }
 .hoja-act .t { flex: 1; min-width: 0; }
 .hoja-sec { font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--guinda); margin: 14px 0 8px; }
+
+/* === CELULAR (pantallas angostas): acomodo para capturar con el pulgar; no afecta a la PC === */
+.pend-movil { display: inline-flex; align-items: center; gap: 5px; background: var(--verde); color: #fff !important; border-radius: 99px; padding: 6px 11px; font-weight: 700; font-size: 12.5px; text-decoration: none; white-space: nowrap; }
+.pend-movil svg { width: 14px; height: 14px; }
+.movil-estado { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; border-radius: 14px; padding: 12px 14px; margin-bottom: 14px; background: #fff; border: 1.5px solid var(--borde); font-size: 13px; line-height: 1.4; }
+.movil-estado.pend { border-color: var(--verde); background: #EFF7F2; }
+.movil-estado.viejo { border-color: #E0A526; background: #FFF8E6; }
+.movil-estado > div { flex: 1; min-width: 180px; }
+.movil-estado .btn { flex: none; }
+@media (max-width: 960px) {
+  body.nav-abierto::before { content: ""; position: fixed; inset: 0; background: rgba(20, 10, 14, .45); z-index: 19; }
+  .lateral { z-index: 21; }
+}
+@media (max-width: 640px) {
+  /* evita que el telefono haga zoom al tocar un campo y da botones comodos para el dedo */
+  .inp, select.inp, textarea.inp, .renglon textarea, .turno-sel input { font-size: 16px; }
+  .inp { min-height: 44px; }
+  .btn { min-height: 42px; } .btn.chico { min-height: 36px; } .btn-icono { min-height: 0; }
+  .tarjeta { padding: 14px; border-radius: 14px; }
+  /* encabezado de tarjeta: icono a la izquierda y texto al lado; las acciones bajan a su propio renglon */
+  .tarjeta-cab { align-items: flex-start; gap: 10px; }
+  .tarjeta-cab > div:nth-child(2) { flex: 1 1 0; min-width: 0; }
+  .tarjeta-cab h2 { font-size: 16px; }
+  .tarjeta-cab .acciones { width: 100%; margin-left: 0; }
+  .tarjeta-cab .acciones > .btn, .tarjeta-cab .acciones > .campo { flex: 1; min-width: 0 !important; }
+  .ico-tarjeta { width: 34px; height: 34px; }
+  /* indicadores de inicio en dos columnas */
+  .cuadricula > .c3 { grid-column: span 6; }
+  .kpi .valor { font-size: 26px; }
+  /* actividades: estatus a todo lo ancho y bote de basura en la esquina */
+  .renglon { position: relative; padding: 10px 10px 12px; }
+  .renglon textarea { padding-right: 34px; }
+  .renglon .seg { display: flex; width: 100%; }
+  .renglon .seg button { flex: 1; padding: 10px 4px; font-size: 12.5px; white-space: nowrap; }
+  .renglon .quitar { position: absolute; top: 8px; right: 6px; }
+  .renglon .guardado { line-height: 1.4; }
+  .aviso { font-size: 12.5px; padding: 10px 12px; }
+  .barra-guardar { bottom: 8px; padding: 8px 10px; } .barra-guardar .btn { flex: 1; max-width: 240px; }
+  /* segmentados y fichas: mas altos para tocar */
+  .seg button { padding: 9px 12px; }
+  .chip-ali span { padding-top: 9px; padding-bottom: 9px; }
+  /* espacios confinados: el nombre del espacio a todo lo ancho; hora y personal en un renglon */
+  .ec-fila { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); padding: 12px 12px 2px; position: relative; }
+  .ec-fila > .campo:first-child { grid-column: 1 / -1; padding-right: 38px; }
+  .ec-fila .quitar { position: absolute; top: 30px; right: 8px; margin: 0; }
+  .ec-fila .lecturas { gap: 0 8px; padding: 8px 8px 0; }
+  .ec-ult { align-items: stretch; } .ec-ult .btn { width: 100%; }
+  .ec-frases .frase { padding: 8px 12px; font-size: 12.5px; }
+  .tarjeta-aviso summary { padding: 6px 0; }
+  .grid4 { grid-template-columns: 1fr 1fr; }
+  /* horas extra */
+  .he-fila .campo { max-width: none !important; flex: 1 1 40%; }
+  .he-fila .seg { width: 100%; display: flex; } .he-fila .seg button { flex: 1; }
+  /* botones principales de los formularios a todo lo ancho */
+  #ecGuardar, #ecMas, #hGuardar, #hBorrar, #vGuardar, #asGuardar, #hRepetir, #hOficio { width: 100%; }
+  .lista .item { padding: 10px; }
+  .lista .item .btn.chico { flex: 1 1 auto; }
+  .tabla th, .tabla td { padding: 8px 8px; font-size: 12.5px; }
+  .modal { width: calc(100vw - 20px) !important; max-height: calc(100vh - 20px); }
+  .modal-pie { flex-wrap: wrap; } .modal-pie .btn { flex: 1 1 auto; }
+  .toasts, .toast { max-width: calc(100vw - 20px); }
+  .login-caja { padding: 22px 18px; }
+  .hoja-previa { overflow-x: auto; }
+  /* el aviso de capturas por enviar va en el primer renglon de la barra, a la derecha del titulo */
+  /* y el circulo de iniciales tambien, para que la fecha y el turno quepan completos abajo */
+  .barra .avatar { position: absolute; top: 6px; right: 12px; }
+  .barra .pend-movil { position: absolute; top: 9px; right: 62px; }
+  .barra > div:nth-child(2) { padding-right: 118px; min-width: 0; flex: 1 1 0; }
+  .barra h1 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .turno-sel input { min-width: 0; font-size: 14px; }
+  .btn.bloque { white-space: normal; line-height: 1.25; }
+}
