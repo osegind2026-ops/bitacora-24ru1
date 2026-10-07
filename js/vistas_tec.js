@@ -409,28 +409,73 @@ V.espacios = {
       if (!v) return; const antes = capt(); this.capt = U.ini(v);
       tb.querySelectorAll('[data-k="pers"]').forEach(i => { if (!i.value.trim() || U.ini(i.value) === antes) i.value = this.capt; });
     } });
+    // Lo capturado en liberaciones anteriores se ofrece para volver a usarlo (lo mas frecuente primero)
+    const prev = [...B.estado.ec].sort((a, b) => b.num - a.num);
+    const cuenta = vals => { const m = new Map(); for (const v of vals) { const x = String(v || "").trim(); if (!x) continue; const k = U.norm(x); if (!m.has(k)) m.set(k, { t: x, n: 0 }); m.get(k).n++; } return [...m.values()].sort((a, b) => b.n - a.n); };
+    const EJ_OBS = "Regla 2 hombres más un observador, hidratación previa, chequeo médico previo";
+    const obsPrev = cuenta(prev.map(e => e.obs)).slice(0, 60);
+    const obsItems = [...obsPrev.map(o => ({ value: o.t, label: o.t, sub: o.n > 1 ? "usada " + o.n + " veces" : "usada antes" })),
+      ...(obsPrev.some(o => U.norm(o.t) === U.norm(EJ_OBS)) ? [] : [{ value: EJ_OBS, label: EJ_OBS, sub: "ejemplo" }])];
+    // frases sueltas (separadas por coma) para armar la observacion con toques
+    const frases = cuenta([...prev.flatMap(e => String(e.obs || "").split(/[,;]+/)), ...EJ_OBS.split(",")]).filter(o => o.t.length <= 60).slice(0, 8).map(o => o.t);
+    const TARJ = [["edif", "Edificio", "TGB"], ["elev", "Elevación", "1.90"], ["equipo", "Equipo", "Caja de agua sur entrada"], ["cuarto", "Cuarto", ""], ["ilum", "Iluminación", "Parcial"], ["ruido", "Ruido (dB)", ""], ["otros", "Otros", ""]];
+    const TIEM = [["tLig", "Trabajo ligero", "2 h 30 min"], ["tMod", "Trabajo moderado", "50 min"], ["tPes", "Trabajo pesado", "35 min"], ["tDesc", "Descanso", "30 min"]];
+    // listas desplegables de la tarjeta de aviso: valores usados antes + el ejemplo del campo
+    const dls = document.createElement("div");
+    dls.innerHTML = [...TARJ, ...TIEM].map(([k, , ej]) => { const l = cuenta(prev.map(e => e[k])).slice(0, 25).map(o => o.t); if (ej && !l.some(x => U.norm(x) === U.norm(ej))) l.push(ej);
+      return `<datalist id="dlEc_${k}">${l.map(x => `<option value="${U.esc(x)}">`).join("")}</datalist>`; }).join("");
+    c.appendChild(dls);
     const fila = () => {
       const tr = document.createElement("div");
       tr.className = "ec-fila";
       tr.innerHTML = `<div class="campo"><label>Espacio confinado</label><input class="inp" data-k="esp" placeholder="Busca o escribe el espacio"></div>
-        <div class="campo"><label>Hora en que se liberó</label><input class="inp tnum h24" type="text" inputmode="numeric" maxlength="5" placeholder="HH:MM (24 h)" autocomplete="off" data-k="hora"></div>
+        <div class="campo"><label>Hora en que se liberó · <a href="#" data-ahora title="Poner la hora actual">ahora</a></label><input class="inp tnum h24" type="text" inputmode="numeric" maxlength="5" placeholder="HH:MM (24 h)" autocomplete="off" data-k="hora"></div>
         <div class="campo"><label>Personal TSI</label><input class="inp" data-k="pers" value="${U.esc(capt())}" style="text-transform:uppercase" placeholder="JESC/MAOH"></div>
         <button class="btn fantasma btn-icono quitar" title="Quitar">${B.ico("basura")}</button>
         <div class="ec-req"></div>
+        <div class="ec-ult"></div>
         <div class="lecturas">${[["o2", "O2 (%)"], ["hr", "HR (%)"], ["temp", "Temp (°C)"], ["lel", "LEL (%)"], ["co", "CO (ppm)"], ["h2s", "H2S (ppm)"]]
           .map(([k, e]) => `<div class="campo"><label>${e}</label><input class="inp tnum" data-k="${k}" inputmode="decimal"></div>`).join("")}</div>
-        <div class="campo obs"><label>Observaciones</label><input class="inp" data-k="obs" placeholder="Ej. Regla 2 hombres más un observador, hidratación previa, chequeo médico previo"></div>
+        <div class="campo obs"><label>Observaciones <span style="font-weight:400;text-transform:none;letter-spacing:0">· elige una anterior de la lista, toca las frases o escribe</span></label>
+          <input class="inp" data-k="obs" placeholder="Ej. ${U.esc(EJ_OBS)}">
+          <div class="ec-frases">${frases.map(x => `<button type="button" class="frase" data-frase="${U.esc(x)}">+ ${U.esc(x)}</button>`).join("")}</div></div>
         <details class="obs tarjeta-aviso"><summary>Datos de la tarjeta de AVISO (opcional): edificio, elevación, equipo, iluminación, ruido, equipo de protección y tiempos de estancia</summary>
-          <div class="grid4">${[["edif", "Edificio", "TGB"], ["elev", "Elevación", "1.90"], ["equipo", "Equipo", "Caja de agua sur entrada"], ["cuarto", "Cuarto", ""], ["ilum", "Iluminación", "Parcial"], ["ruido", "Ruido (dB)", ""], ["otros", "Otros", ""]]
-            .map(([k, e, ph]) => `<div class="campo"><label>${e}</label><input class="inp" data-k="${k}" placeholder="${ph}"></div>`).join("")}</div>
+          <div class="grid4">${TARJ.map(([k, e, ph]) => `<div class="campo"><label>${e}</label><input class="inp" data-k="${k}" list="dlEc_${k}" placeholder="${ph ? "Ej. " + ph : ""}" autocomplete="off"></div>`).join("")}</div>
           <div class="campo"><label>Equipo de protección requerido</label><div class="chips-ali">${V.espacios.EPP.map(x => `<label class="chip-ali"><input type="checkbox" data-epp="${x}"><span>${x}</span></label>`).join("")}</div></div>
-          <div class="campo" style="margin-bottom:0"><label>Tiempo de estancia</label><div class="grid4">${[["tLig", "Trabajo ligero", "2 h 30 min"], ["tMod", "Trabajo moderado", "50 min"], ["tPes", "Trabajo pesado", "35 min"], ["tDesc", "Descanso", "30 min"]]
-            .map(([k, e, ph]) => `<div class="campo"><label>${e}</label><input class="inp" data-k="${k}" placeholder="${ph}"></div>`).join("")}</div></div>
+          <div class="campo" style="margin-bottom:0"><label>Tiempo de estancia</label><div class="grid4">${TIEM.map(([k, e, ph]) => `<div class="campo"><label>${e}</label><input class="inp" data-k="${k}" list="dlEc_${k}" placeholder="Ej. ${ph}" autocomplete="off"></div>`).join("")}</div></div>
         </details>`;
       tb.appendChild(tr);
       // se sugiere la lista oficial de espacios confinados (Anexo SI-9974-2) y el catalogo propio; tambien se puede escribir otro
       const req = tr.querySelector(".ec-req"), iEsp = tr.querySelector('[data-k="esp"]');
+      const iObs = tr.querySelector('[data-k="obs"]'), cajaUlt = tr.querySelector(".ec-ult");
+      // observaciones: lista de las anteriores (mientras escribe se filtra) y frases para agregar con un toque
+      ui.combo(iObs, { items: () => obsItems, estricto: false, max: 40 });
+      tr.querySelectorAll("[data-frase]").forEach(b => b.onclick = () => {
+        const fr = b.dataset.frase, v = iObs.value.trim();
+        if (U.norm(v).includes(U.norm(fr))) return;
+        const min = /^[A-ZÁÉÍÓÚÑ][a-záéíóúñ]/.test(fr) ? fr.charAt(0).toLowerCase() + fr.slice(1) : fr;      // "Regla 2..." -> "regla 2..." al ir en medio; las siglas o mayusculas se respetan
+        iObs.value = v ? v.replace(/[\s,;.]+$/, "") + ", " + min : fr.charAt(0).toUpperCase() + fr.slice(1);
+        delete iObs.dataset.valor; b.classList.add("on");
+      });
+      tr.querySelector("[data-ahora]").onclick = e => { e.preventDefault(); tr.querySelector('[data-k="hora"]').value = U.ahoraISO().slice(11, 16); };
+      // si ese espacio ya se libero antes, se ofrece reutilizar sus observaciones y los datos de la tarjeta de aviso
+      const alUlt = () => {
+        const k = U.norm(iEsp.value), u = k ? prev.find(e => U.norm(e.esp) === k && (e.obs || e.epp || [...TARJ, ...TIEM].some(([x]) => e[x]))) : null;
+        if (!u) { cajaUlt.innerHTML = ""; return; }
+        cajaUlt.innerHTML = `${B.ico("reutilizar", 'style="width:14px;height:14px;flex:none"')}<span>Este espacio ya se liberó el <b>${U.corta(u.fecha)}</b> (EC #${U.esc(B.dom.ecNum(u))}, ${U.esc(u.pers || u.capt || "")})${u.obs ? ": " + U.esc(u.obs) : ""}</span>
+          <button type="button" class="btn chico sec">Usar sus observaciones y tarjeta de aviso</button>`;
+        cajaUlt.querySelector("button").onclick = () => {
+          if (u.obs) { iObs.value = u.obs; delete iObs.dataset.valor; }
+          let n = 0;
+          for (const [x] of [...TARJ, ...TIEM]) if (u[x]) { tr.querySelector(`[data-k="${x}"]`).value = u[x]; n++; }
+          const epp = String(u.epp || "").split(",").map(z => U.norm(z)).filter(Boolean);
+          tr.querySelectorAll("[data-epp]").forEach(ch => { if (epp.includes(U.norm(ch.dataset.epp))) { ch.checked = true; n++; } });
+          if (n) tr.querySelector("details.tarjeta-aviso").open = true;
+          ui.toast("Datos de la liberación anterior copiados. Las lecturas y la hora se capturan de nuevo.", "ok", 4500);
+        };
+      };
       const alEsp = () => {
+        alUlt();
         const o = B.ecLista.buscar(iEsp.value);
         tr.querySelectorAll(".lecturas label").forEach(l => l.style.fontWeight = "");
         if (!o) { req.innerHTML = ""; return; }
