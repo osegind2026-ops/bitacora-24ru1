@@ -1,0 +1,22 @@
+{
+ "name": "Bitácora 24RU1 · Seguridad Industrial",
+ "short_name": "Bitácora S.I.",
+ "start_url": "./",
+ "scope": "./",
+ "display": "standalone",
+ "background_color": "#F5F3F1",
+ "theme_color": "#691C32",
+ "lang": "es",
+ "icons": [
+  {
+   "src": "img/icono-192.png",
+   "sizes": "192x192",
+   "type": "image/png"
+  },
+  {
+   "src": "img/icono-512.png",
+   "sizes": "512x512",
+   "type": "image/png"
+  }
+ ]
+}
