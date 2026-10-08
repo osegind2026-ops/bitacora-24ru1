@@ -1,13 +1,17 @@
-// Bitacora 24RU1 para celular - funciona sin senal con la ultima version descargada
-const CACHE = "b24-2.2-202610072307";
-const ARCHIVOS = ["./", "ayuda/Guia_Rapida_Tecnicos.pdf", "css/app.css", "fonts/montserrat-latin-400-normal.woff2", "fonts/montserrat-latin-500-normal.woff2", "fonts/montserrat-latin-600-normal.woff2", "fonts/montserrat-latin-700-normal.woff2", "img/bitacora.ico", "img/hojaCfe.png", "img/hojaEscudo.png", "img/hojaPlanta.png", "img/ico1.png", "img/ico2.png", "img/ico3.png", "img/icono-192.png", "img/icono-512.png", "img/membrete.png", "img/ofDer.png", "img/ofIzq.png", "img/ofPie.png", "img/pie.png", "index.html", "js/app.js", "js/ec_lista.js", "js/hoja.js", "js/horasextra.js", "js/local.js", "js/monitoreo.js", "js/movil.js", "js/nucleo.js", "js/oficio.js", "js/reportes.js", "js/tour.js", "js/ui.js", "js/vistas_sup.js", "js/vistas_tec.js", "manifest.webmanifest"];
-self.addEventListener("install", e => e.waitUntil(caches.open(CACHE).then(c => c.addAll(ARCHIVOS)).then(() => self.skipWaiting())));
-self.addEventListener("activate", e => e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim())));
+// Bitacora 24RU1 para celular (version 2.3). La aplicacion se sirve desde la copia guardada en el telefono.
+const CACHE = "b24-2.3-202610072316";
+const ESENCIAL = ["./", "css/app.css?v=202610072316", "js/bitacora.js?v=202610072316", "fonts/montserrat-latin-400-normal.woff2", "fonts/montserrat-latin-500-normal.woff2", "fonts/montserrat-latin-600-normal.woff2", "fonts/montserrat-latin-700-normal.woff2", "img/bitacora.ico", "img/icono-192.png", "img/membrete.png", "manifest.webmanifest"];
+const RESTO = ["ayuda/Guia_Rapida_Tecnicos.pdf", "img/hojaCfe.png", "img/hojaEscudo.png", "img/hojaPlanta.png", "img/ico1.png", "img/ico2.png", "img/ico3.png", "img/icono-512.png", "img/icono-adaptable-512.png", "img/icono-apple-180.png", "img/ofDer.png", "img/ofIzq.png", "img/ofPie.png", "img/pie.png"];
+self.addEventListener("install", e => e.waitUntil(caches.open(CACHE).then(c => c.addAll(ESENCIAL)).then(() => self.skipWaiting())));
+self.addEventListener("activate", e => e.waitUntil(
+  caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim())
+    .then(() => { caches.open(CACHE).then(c => Promise.all(RESTO.map(u => c.add(u).catch(() => { })))); })));
 self.addEventListener("fetch", e => {
   const r = e.request;
   if (r.method !== "GET" || new URL(r.url).origin !== location.origin) return;
-  e.respondWith(fetch(r, { cache: "no-cache" }).then(resp => {
-    if (resp && resp.ok) { const copia = resp.clone(); caches.open(CACHE).then(c => c.put(r, copia)); }
+  const clave = r.mode === "navigate" ? "./" : r;
+  e.respondWith(caches.open(CACHE).then(c => c.match(clave, { ignoreSearch: r.mode !== "navigate" && !/[?&]v=/.test(r.url) }).then(x => x || fetch(r).then(resp => {
+    if (resp && resp.ok && resp.type === "basic") c.put(clave, resp.clone());
     return resp;
-  }).catch(() => caches.match(r, { ignoreSearch: true }).then(x => x || caches.match("./"))));
+  }).catch(() => c.match("./")))));
 });

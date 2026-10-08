@@ -382,6 +382,10 @@ select.inp { appearance: auto; }
 .hoja-sec { font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--guinda); margin: 14px 0 8px; }
 
 /* === CELULAR (pantallas angostas): acomodo para capturar con el pulgar; no afecta a la PC === */
+.pwa-caja { display: flex; gap: 10px; align-items: center; margin-top: 14px; padding: 10px 12px; border-radius: 12px; background: #EEF4FB; border: 1px solid #C9DBEF; font-size: 12.5px; line-height: 1.45; text-align: left; }
+.pwa-caja > div { flex: 1; }
+.pwa-nueva { position: fixed; left: 10px; right: 10px; bottom: 12px; z-index: 500; display: flex; gap: 10px; align-items: center; background: #1E2A44; color: #fff; border-radius: 14px; padding: 12px 14px; font-size: 13px; line-height: 1.4; box-shadow: 0 8px 30px rgba(0, 0, 0, .35); }
+.pwa-nueva span { flex: 1; }
 .pend-movil { display: inline-flex; align-items: center; gap: 5px; background: var(--verde); color: #fff !important; border-radius: 99px; padding: 6px 11px; font-weight: 700; font-size: 12.5px; text-decoration: none; white-space: nowrap; }
 .pend-movil svg { width: 14px; height: 14px; }
 .movil-estado { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; border-radius: 14px; padding: 12px 14px; margin-bottom: 14px; background: #fff; border: 1.5px solid var(--borde); font-size: 13px; line-height: 1.4; }
