@@ -84,17 +84,14 @@ B.rep.documento = function (titulo, cuerpo, horizontal) {
   <script>
   // Si el contenido rebasa ligeramente una hoja, se reduce para que quepa en una sola
   function ajustar() {
-    var c = document.querySelector(".contenido"), disp = ${disp.toFixed(1)};
+    var c = document.querySelector(".p1") || document.querySelector(".contenido"), disp = ${disp.toFixed(1)};
     c.style.zoom = "";
     // renglones opcionales (4o y 5o de "ultimos espacios confinados"): se quitan si el reporte no cabe en una hoja
     var op = c.querySelectorAll("tr.opc"), i;
     for (i = 0; i < op.length; i++) op[i].style.display = "";
     for (i = 0; i < op.length && c.scrollHeight > disp; i++) op[i].style.display = "none";
     var h = c.scrollHeight;
-    // si aun asi no cabe en una hoja, los espacios que siguen liberados (ultimo monitoreo) pasan a una segunda hoja
-    var m = c.querySelector(".ecmon");
-    if (m && h > disp * 1.25) { m.classList.add("aparte"); c.appendChild(m); h = c.scrollHeight - m.offsetHeight; }
-    if (h > disp && h <= disp * 1.25 && !(m && m.classList.contains("aparte"))) c.style.zoom = (disp / h * 0.96).toFixed(3);
+    if (h > disp && h <= disp * 1.25) c.style.zoom = (disp / h * 0.96).toFixed(3);
   }
   if (document.readyState === "complete") ajustar(); else window.addEventListener("load", ajustar);
   </script></body></html>`;
@@ -111,7 +108,7 @@ B.rep.turno = function (f, t) {
   <div class="sub"><span class="izq">${U.esc(B.t.periodo())} &nbsp;|&nbsp; Horario: ${U.esc(B.t.horario(t))}</span><span class="fecha">${U.larga(f)}</span></div>
   <div class="resumen">RESUMEN: &nbsp;Esp. confinados liberados: ${d.ec.length} (acumulado: ${d.acum})${d.ecMon.length ? ` &nbsp;|&nbsp; Siguen liberados: ${d.ecMon.length}${d.ecMon.some(x => !x.ok) ? " (sin monitoreo en el turno: " + d.ecMon.filter(x => !x.ok).length + ")" : ""}` : ""} &nbsp;|&nbsp; Vigilancias C.I.: ${d.vig.length}
    &nbsp;|&nbsp; Realizadas: ${d.nReal} &nbsp;|&nbsp; En proceso: ${d.nProc} &nbsp;|&nbsp; Pendientes: ${d.nPend} &nbsp;|&nbsp; Personal: ${d.nPers}</div>`;
-  let algo = false;
+  let algo = false, hMon = "";
   if (d.vig.length) {
     algo = true;
     h += `<table class="sec">${pct([14.4, 4.3, 23.5, 16.9, 11.1, 29.8])}
@@ -137,7 +134,7 @@ B.rep.turno = function (f, t) {
   if (d.ecMon.length) {
     // espacios de turnos anteriores que siguen liberados: valores de su ULTIMO monitoreo; se resalta el que no tuvo monitoreo en el turno
     algo = true;
-    h += `<div class="ecmon"><div class="tit2">ESPACIOS CONFINADOS QUE SIGUEN LIBERADOS · ÚLTIMO MONITOREO &nbsp; <span class="rojo">${t} ${U.corta(f)}</span></div>
+    hMon = `<div class="ecmon aparte"><div class="tit2">ESPACIOS CONFINADOS QUE SIGUEN LIBERADOS · ÚLTIMO MONITOREO &nbsp; <span class="rojo">${t} ${U.corta(f)}</span></div>
       <table class="sec">${d.ecMon.length > 10 ? pct([5, 20.1, 6.6, 6.6, 6.6, 6.6, 6.6, 6.6, 13, 22.3]) : pct([14.4, 4.3, 17.2, 5.6, 5.6, 5.6, 5.6, 5.6, 5.6, 11.1, 19.4])}
       ${d.ecMon.length > 10 ? `<tr><th colspan="10" style="font-size:8pt">ESPACIOS CONFINADOS QUE SIGUEN LIBERADOS (ÚLTIMO MONITOREO)</th></tr><tr>`   /* tabla larga: sin la celda lateral, para que pueda continuar en otra hoja */
         : `<tr><td class="lbl" rowspan="${d.ecMon.length + 1}">ESPACIOS<br>CONFINADOS<br>QUE SIGUEN<br>LIBERADOS<br><span style="font-weight:normal;font-size:7pt">(último monitoreo)</span></td>`}
@@ -163,7 +160,7 @@ B.rep.turno = function (f, t) {
       (() => {      // las actividades del mismo equipo o persona van juntas, con UN solo cuadro de iniciales
         const gr = new Map(); for (const x of d.acts) { if (!gr.has(x.inis)) gr.set(x.inis, []); gr.get(x.inis).push(x); }
         return [...gr.values()].flatMap(l => l.map((x, i) => ({ ...x, n: i ? 0 : l.length })));
-      })().map(x => `<tr>${x.n ? `<td class="c b" style="font-size:7.5pt" rowspan="${x.n}">${x.inis ? U.esc(x.inis).replace(/\//g, "/<wbr>") : "POR<br>ASIGNAR"}</td>` : ""}
+      })().map(x => `<tr>${x.n ? `<td class="c b" style="font-size:7.5pt" rowspan="${x.n}">${x.inis ? U.esc(x.inis).replace(/\//g, "/<wbr>") : "SIN<br>ASIGNAR"}</td>` : ""}
         <td>${U.br(x.txt)}${x.desde ? ` <span class="gris">(desde ${x.desde})</span>` : ""}${x.coms.map(c => `<div class="com">↳ ${c.inis ? "<b>" + U.esc(c.inis) + ":</b> " : ""}${U.esc(c.txt)}</div>`).join("")}</td>
         <td class="est">${U.esc(x.est.toUpperCase())}</td></tr>`).join("") + `</table>`;
   }
@@ -176,7 +173,8 @@ B.rep.turno = function (f, t) {
   }
   if (d.notas) { algo = true; h += `<table class="sec">${pct([14.4, 85.6])}<tr><td class="lbl">NOTAS<br>ADICIONALES</td><td>${lineas(d.notas.split("\n").filter(x => x.trim()))}</td></tr></table>`; }
   h += `<table class="sec firmas">${pct([50, 50])}<tr><th>ELABORÓ</th><th>REVISÓ</th></tr><tr><td style="height:24px">${firma(d.elab)}</td><td>${firma(d.rev)}</td></tr></table>`;
-  return { html: B.rep.documento("Bitácora " + t + " " + U.corta(f), h), nombre: `BITACORA ${c.proyecto} ${t} ${U.corta(f).replace(/\//g, ".")}`, carpeta: "", tipo: "turno", f, t, algo };
+  // primera hoja: el reporte de siempre; segunda hoja: monitoreo de los espacios que siguen liberados
+  return { html: B.rep.documento("Bitácora " + t + " " + U.corta(f), `<div class="p1">${h}</div>${hMon}`), nombre: `BITACORA ${c.proyecto} ${t} ${U.corta(f).replace(/\//g, ".")}`, carpeta: "", tipo: "turno", f, t, algo };
 };
 
 /* ---------------------------------------------------------------- bitacora de monitoreo por espacio confinado (para llenar a mano) */

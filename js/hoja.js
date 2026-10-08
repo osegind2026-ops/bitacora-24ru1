@@ -48,7 +48,8 @@ B.hoja = {
     h.fechaHoja = n.fechaHoja;
     // juntas y personal: son recurrentes por turno, asi que se toman de la ultima hoja del MISMO turno (T1 de T1, T2 de T2)
     const m = this.anterior(f, t, true);
-    const REC = ["agenda", "sup", "vac", "sitio", "incap", "comis", "espec", "sinmov"];
+    // las NOTAS EXTRA tambien son de cada turno: persisten de dia a dia (o de noche a noche) hasta que se borran a mano, sin mezclarse con las del otro turno
+    const REC = ["agenda", "sup", "vac", "sitio", "incap", "comis", "espec", "sinmov", "extraU1", "extraU2"];
     for (const k of REC) h[k] = JSON.parse(JSON.stringify(m && m[k] != null && String(m[k]) !== "" ? m[k] : n[k]));
     h._mismo = m ? B.t.corto(m.fecha, m.turno) : "";
     const dias = U.dia(n.fechaHoja) - U.dia(a.fechaHoja || this.fechaHoja(a.fecha, a.turno));
@@ -201,6 +202,7 @@ V.hoja = {
         <div class="tarjeta c6" data-tour="hoja-acts">${cab("lista", "g", "Actividades (" + acts.length + ")", "Salen solas de la bitácora: solo las pendientes, en proceso y por asignar (las ya realizadas no aparecen). Elige la unidad de cada una; las por asignar se pueden editar con el lápiz.", `<a class="btn chico sec" href="#/actividades">Asignar…</a>`)}
           <div class="hoja-lista">${acts.length ? acts.map(a => `<div class="hoja-act"><div class="t"><b>${e(a.inis || "POR ASIGNAR")}</b> · ${e(a.txt)} <span class="muted peque">${e(a.est)}${a.desde ? " · de turnos anteriores" : ""}</span>${a.com ? `<div class="muted peque">↳ ${e(a.com)}</div>` : ""}</div>
             ${a.libre ? `<button class="btn fantasma btn-icono" data-edlibre="${a.id}" title="Editar el texto o agregar una nota">${B.ico("editar")}</button>` : ""}${ui.seg("u" + a.id, ["U1", "U2"], a.col)}</div>`).join("") : ui.vacio("Sin actividades pendientes, en proceso ni por asignar.", "lista")}</div>
+          <p class="muted peque" style="margin:10px 0 0">Las <b>notas extra</b> son de este turno (${t === "T1" ? "noche" : "día"}): se conservan en las siguientes hojas del mismo turno hasta que las quites, y no afectan a las del otro turno.</p>
           <div class="hoja-sec">Notas extra en Unidad 1</div>${lista("extraU1", "Texto libre para la columna de Unidad 1")}
           <div class="hoja-sec">Notas extra en Unidad 2</div>${lista("extraU2", "Texto libre para la columna de Unidad 2")}
         </div>
@@ -220,9 +222,11 @@ V.hoja = {
       fr.addEventListener("load", () => { try { const z = Math.min(1, (prev.clientWidth - 24) / 800); fr.contentDocument.body.style.zoom = z.toFixed(3); fr.style.height = Math.ceil(fr.contentDocument.body.scrollHeight * z + 30) + "px"; } catch (x) { } });
     };
     const cambio = U.debounce(pintar, 350);
+    // volver a dibujar SIN que la pagina salte al inicio (al agregar o quitar renglones)
+    const rer = foco => { const y = window.scrollY; B.app.render(); window.scrollTo(0, y); if (foco) { const l = document.querySelectorAll(`[data-h^="${foco}."]`), i = l[l.length - 1]; if (i) i.focus({ preventScroll: true }); } };
     c.querySelectorAll("[data-h]").forEach(i => i.addEventListener("input", () => { poner(i.dataset.h, i.value); cambio(); }));
-    c.querySelectorAll("[data-add]").forEach(b => b.onclick = () => { (h[b.dataset.add] = h[b.dataset.add] || []).push(b.dataset.obj ? { c: "", i: "", v: "" } : ""); B.app.render(); });
-    c.querySelectorAll("[data-del]").forEach(b => b.onclick = () => { const [r, i] = b.dataset.del.split("."); h[r].splice(+i, 1); B.app.render(); });
+    c.querySelectorAll("[data-add]").forEach(b => b.onclick = () => { (h[b.dataset.add] = h[b.dataset.add] || []).push(b.dataset.obj ? { c: "", i: "", v: "" } : ""); rer(b.dataset.add); });
+    c.querySelectorAll("[data-del]").forEach(b => b.onclick = () => { const [r, i] = b.dataset.del.split("."); h[r].splice(+i, 1); rer(); });
     ui.activarSeg(c, async (s, v) => {
       const id = +String(s.dataset.seg).slice(1); if (!id) return;
       try { await B.api.op("actividades", "unidad", { id, uni: v }); await B.api.recargar(); pintar(); } catch (x) { ui.error(x); }
@@ -233,11 +237,11 @@ V.hoja = {
         const comp = [v.inop, v.desc, v.comp].filter(Boolean).join(" · "), ya = [...(h.inop1 || []), ...(h.inop2 || [])].some(x => U.norm(x.c) === U.norm(comp));
         if (!ya) { (h.inop1 = h.inop1 || []).push({ c: comp, i: U.corta(v.inicio), v: "" }); n++; }
       }
-      if (n) B.app.render(); ui.toast(n ? n + " vigilancia(s) agregadas a INOP's de Unidad 1; muévelas o completa el vencimiento si hace falta." : "No hay vigilancias activas nuevas por agregar.", n ? "ok" : "");
+      if (n) rer(); ui.toast(n ? n + " vigilancia(s) agregadas a INOP's de Unidad 1; muévelas o completa el vencimiento si hace falta." : "No hay vigilancias activas nuevas por agregar.", n ? "ok" : "");
     };
     const limpia = () => { const x = JSON.parse(JSON.stringify(h)); delete x._arrastrada; delete x._mismo; return x; };
     c.querySelectorAll("[data-edlibre]").forEach(b => b.onclick = () => V.actividades.editarLibre(+b.dataset.edlibre));
-    const bPers = c.querySelector("#hjPers"); if (bPers) bPers.onclick = () => { const n = H.nueva(f, t); h.sitio = n.sitio; h.espec = n.espec; h.sup = n.sup; B.app.render(); };
+    const bPers = c.querySelector("#hjPers"); if (bPers) bPers.onclick = () => { const n = H.nueva(f, t); h.sitio = n.sitio; h.espec = n.espec; h.sup = n.sup; rer(); };
     c.querySelector("#hjGuardar").onclick = async () => {
       const r = await ejecutar(() => B.api.op("hojas", "guardar", { fecha: f, turno: t, hoja: limpia() }), "Hoja de asignación guardada.");
       if (r) delete this.borr[k];

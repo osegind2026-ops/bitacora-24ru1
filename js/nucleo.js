@@ -413,9 +413,10 @@ B.dom = {
     // liberados en turnos anteriores, en orden de # de liberacion, para tener a la vista los mas recientes.
     const ec = this.ecDelTurno(f, t);
     const acum = B.estado.ec.filter(e => !e.pre && e.fecha && B.t.clave(e.fecha, e.turno) <= K).length;
-    // Espacios de turnos anteriores que SIGUEN LIBERADOS: salen con su ultimo monitoreo (y sustituyen a "ultimos liberados")
-    const ecMon = this.ecFilasMon(f, t, true);
-    const ultEc = ecMon.length || ec.length >= 5 ? [] : B.estado.ec.filter(e => e.fecha && B.t.clave(e.fecha, e.turno) < K)
+    // Todos los espacios que SIGUEN LIBERADOS al cierre del turno, con su ultimo monitoreo: van en una SEGUNDA HOJA del reporte.
+    // La primera hoja conserva el modelo de siempre: liberados en el turno + ultimos liberados.
+    const ecMon = this.ecFilasMon(f, t, false);
+    const ultEc = ec.length >= 5 ? [] : B.estado.ec.filter(e => e.fecha && B.t.clave(e.fecha, e.turno) < K)
       .sort((a, b) => b.num - a.num).slice(0, 5 - ec.length).sort((a, b) => a.num - b.num);
     const n = e => lista.filter(x => e.includes(x.est)).length;
     return {
@@ -498,17 +499,17 @@ B.dom = {
   historial(ini, d1, d2) {
     ini = U.ini(ini); const r = [], dentro = f => f && f >= d1 && f <= d2;
     for (const a of B.estado.actividades) {
-      if (U.ini(a.ini) === ini && dentro(a.fecha)) r.push({ f: a.fecha, t: a.turno, tipo: "Actividad", desc: a.txt + (a.seg ? "\nSeguimiento: " + a.seg.replace(/\n/g, " | ") : ""), est: a.est + (a.est === "Concluida" && a.fCierre ? " " + B.t.corto(a.fCierre, a.tCierre) : ""), ref: "ACT " + a.id });
+      if (U.ini(a.ini) === ini && dentro(a.fecha)) r.push({ f: a.fecha, t: a.turno, tipo: "Actividad", desc: a.txt + (a.seg ? "\nSeguimiento: " + a.seg.replace(/\n/g, " | ") : ""), est: a.est + (a.est === "Concluida" && a.fCierre ? " " + B.t.corto(a.fCierre, a.tCierre) : ""), ref: "ACT " + a.id, k: "act:" + a.id });
       if (U.ini(a.cerro) === ini && U.ini(a.ini) !== ini && dentro(a.fCierre)) r.push({ f: a.fCierre, t: a.tCierre, tipo: "Cierre de pendiente", desc: a.txt + "  (registrado por " + a.ini + ")", est: "Concluida", ref: "ACT " + a.id });
     }
     for (const e of B.estado.ec) if (dentro(e.fecha) && (U.ini(e.capt) === ini || this.tokensIni(e.pers).includes(ini)))
-      r.push({ f: e.fecha, t: e.turno, tipo: "Espacio confinado", desc: e.esp + "  |  O2 " + e.o2 + "%  LEL " + e.lel + "%  CO " + e.co + "  H2S " + e.h2s + (e.lib ? "  |  Liberado " + U.fh(e.lib) : ""), est: "Liberado", ref: "EC " + this.ecNum(e) });
+      r.push({ f: e.fecha, t: e.turno, tipo: "Espacio confinado", desc: e.esp + "  |  O2 " + e.o2 + "%  LEL " + e.lel + "%  CO " + e.co + "  H2S " + e.h2s + (e.lib ? "  |  Liberado " + U.fh(e.lib) : ""), est: "Liberado", ref: "EC " + this.ecNum(e), k: "ec:" + e.num });
     for (const v of B.estado.vig) {
-      if (U.ini(v.capAlta) === ini && dentro(v.fecha)) r.push({ f: v.fecha, t: v.turno, tipo: "Vigilancia (alta)", desc: v.desc + "  |  " + v.ubic + "  |  INOP " + v.inop, est: v.est, ref: "VIG " + v.num });
+      if (U.ini(v.capAlta) === ini && dentro(v.fecha)) r.push({ f: v.fecha, t: v.turno, tipo: "Vigilancia (alta)", desc: v.desc + "  |  " + v.ubic + "  |  INOP " + v.inop, est: v.est, ref: "VIG " + v.num, k: "vig:" + v.num });
       if (U.ini(v.capRet) === ini && v.retiro) { const s = B.t.de(v.retiro); if (dentro(s.f)) r.push({ f: s.f, t: s.t, tipo: "Vigilancia (retiro)", desc: v.desc + "  |  Retirada " + U.fh(v.retiro), est: "RETIRADA", ref: "VIG " + v.num }); }
     }
     for (const h of B.estado.he) if (U.ini(h.ini) === ini && dentro(h.fecha) && String(h.he) !== "")
-      r.push({ f: h.fecha, t: h.turno, tipo: "Horas extra", desc: h.he + " h" + (h.de ? " (" + h.de + " a " + h.a + ")" : "") + (h.mot ? "  |  " + h.mot : ""), est: U.norm(h.verif) === "SI" ? "Verificada" : "Por verificar", ref: "" });
+      r.push({ f: h.fecha, t: h.turno, tipo: "Horas extra", desc: h.he + " h" + (h.de ? " (" + h.de + " a " + h.a + ")" : "") + (h.mot ? "  |  " + h.mot : ""), est: U.norm(h.verif) === "SI" ? "Verificada" : "Por verificar", ref: "", k: "he:" + h.fecha + ":" + h.turno + ":" + this.tramo(h) });
     return r.sort((a, b) => B.t.clave(a.f, a.t) - B.t.clave(b.f, b.t));
   }
 };

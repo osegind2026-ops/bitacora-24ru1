@@ -180,7 +180,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "2.0", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "2.1", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = JSON.parse(sessionStorage.getItem("b_local_sesion") || "null");
@@ -450,13 +450,33 @@ B.local = {
         for (const x of L) if (x === a || (a.grupo && x.grupo === a.grupo) || (U.norm(x.txt) === k && x.est !== "Concluida" && x.est !== "Realizada")) x.uni = u;
         await this.escribir("actividades", L); return { ok: true };
       }
+      case "actividades.reasignar": {
+        if (!sup) throw new Error("Solo supervisores pueden reasignar actividades.");
+        const L = await this.leer("actividades") || [], per = await this.leer("personal") || [], a = L.find(x => +x.id === +d.id);
+        if (!a) throw new Error("Actividad no encontrada.");
+        const inis = [];
+        for (const o of d.inis || []) { const i = U.ini(o); if (!i || inis.includes(i)) continue; if (!per.some(p => U.ini(p.ini) === i)) throw new Error("Iniciales no encontradas en el personal: " + i); inis.push(i); }
+        const nom = i => per.find(p => U.ini(p.ini) === i).nombre;
+        if (!a.grupo && inis.length > 1) a.grupo = Date.now() + "r" + a.id;
+        const grp = grupoDe(L, a), quedan = grp.filter(x => inis.includes(U.ini(x.ini))), quitar = grp.filter(x => !inis.includes(U.ini(x.ini)));
+        const faltan = inis.filter(i => !quedan.some(x => U.ini(x.ini) === i)), base = quedan[0] || a;
+        let primero = true;
+        for (const x of quitar) {
+          if (faltan.length) { const i = faltan.shift(); x.ini = i; x.nombre = nom(i); }
+          else if (!inis.length && primero) { x.ini = ""; x.nombre = ""; }
+          else { L.splice(L.indexOf(x), 1); primero = false; continue; }
+          primero = false; x.asig = s.ini; x.mod = ahora() + " " + s.ini;
+        }
+        for (const i of faltan) { const n = { ...base, id: sig(L, "id"), ini: i, nombre: nom(i), reg: ahora(), capturo: s.ini, asig: s.ini }; delete n.tomo; L.push(n); }
+        await this.escribir("actividades", L); return { ok: true, inis };
+      }
       case "actividades.estatus": {
         if (!sup) throw new Error("Solo supervisores pueden cambiar el estatus de una actividad guardada.");
         const L = await this.leer("actividades") || [], a = L.find(x => +x.id === +d.id);
         if (!a) throw new Error("Actividad no encontrada.");
         const est = d.est, txt = String(d.txt || "").trim();
         if (!["Realizada", "En proceso", "Pendiente", "Concluida"].includes(est)) throw new Error("Estatus no válido.");
-        if (!a.ini && est !== "Pendiente") throw new Error("Una actividad por asignar solo puede estar Pendiente: asígnala primero.");
+        if (!a.ini && est !== "Pendiente" && est !== a.est) throw new Error("Una actividad por asignar solo puede estar Pendiente: asígnala primero.");
         if (est === "Concluida" && (!d.fecha || !["T1", "T2"].includes(d.turno))) throw new Error("Fecha o turno no válidos.");
         for (const x of grupoDe(L, a)) {
           if (est === "Concluida") {

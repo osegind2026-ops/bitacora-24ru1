@@ -446,7 +446,7 @@ V.registros = {
         ${lista.slice(0, 800).map(a => `<tr><td class="tnum">${U.corta(a.fecha)}</td><td>${a.turno}</td><td style="min-width:170px">${a.ini ? `<a href="#" data-per="${U.esc(a.ini)}"><b>${U.esc(a.ini)}</b></a><div class="muted peque">${U.esc(B.dom.nombre(a.ini))}</div>` : '<span class="badge d">POR ASIGNAR</span>'}</td>
           <td class="muted peque">${U.esc(B.dom.catCorta((B.dom.persona(a.ini) || {}).cat || ""))}</td><td style="min-width:280px">${U.esc(a.txt)}</td><td>${ui.estatusBadge(a.est)}</td>
           <td class="muted peque" style="min-width:180px">${a.com ? `<div>↳ ${U.esc(a.com)}</div>` : ""}${U.esc(B.dom.ultimaLinea(a.seg))}${B.dom.comentarios(a).length ? `<div><a href="#" data-coms="${a.id}">Editar o eliminar comentarios (${B.dom.comentarios(a).length})</a></div>` : ""}</td>
-          <td class="acc"><button class="btn fantasma btn-icono" data-edact="${a.id}" title="Cambiar estatus o corregir texto">${B.ico("editar")}</button></td></tr>`).join("")}</tbody></table>${lista.length > 800 ? `<p class="muted peque" style="padding:8px 12px">Se muestran 800 de ${lista.length}; usa los filtros o exporta a Excel.</p>` : ""}`
+          <td class="acc" style="white-space:nowrap"><button class="btn fantasma btn-icono" data-edact="${a.id}" title="Cambiar estatus o corregir texto">${B.ico("editar")}</button><button class="btn fantasma btn-icono" data-reasig="${a.id}" title="Reasignar o dejar sin asignar">${B.ico("usuarios")}</button></td></tr>`).join("")}</tbody></table>${lista.length > 800 ? `<p class="muted peque" style="padding:8px 12px">Se muestran 800 de ${lista.length}; usa los filtros o exporta a Excel.</p>` : ""}`
         : ui.vacio("Sin actividades con estos filtros.", "lista"))
         : (personas.length ? `<table class="tabla"><thead><tr><th>Persona</th><th>Categoría</th><th class="c">Turnos con actividad</th><th class="c">Actividades</th><th class="c">Realizadas</th><th class="c">Abiertas</th><th class="c">Esp. confinados</th><th class="c">Vigilancias</th><th class="c">Horas extra</th></tr></thead><tbody>
         ${personas.map(i => { const x = per.get(i), p = B.dom.persona(i); return `<tr><td style="min-width:280px"><a href="#" data-per="${U.esc(i)}"><b>${U.esc(i)}</b></a> <span class="muted">${U.esc(p.nombre)}</span></td><td class="muted">${U.esc(B.dom.catCorta(p.cat))}</td>
@@ -462,9 +462,22 @@ V.registros = {
     ui.combo(c.querySelector("#rgP"), { items: () => ui.personas(null, true), estricto: false, alElegir: v => { F.ini = v && B.dom.persona(v) ? U.ini(v) : ""; re(); } });
     c.querySelectorAll("[data-v]").forEach(b => b.onclick = () => { this.vista = b.dataset.v; re(); });
     c.querySelectorAll("[data-coms]").forEach(b => b.onclick = e => { e.preventDefault(); V.actividades.comentarios(+b.dataset.coms); });
-    c.querySelectorAll("[data-edact]").forEach(b => b.onclick = async () => {
-      const a = B.estado.actividades.find(x => x.id === +b.dataset.edact); if (!a) return;
-      const T0 = B.app.trabajo, ops = a.ini ? ["Realizada", "En proceso", "Pendiente", "Concluida"] : ["Pendiente"];
+    c.querySelectorAll("[data-edact]").forEach(b => b.onclick = () => B.editarActividad(+b.dataset.edact));
+    c.querySelectorAll("[data-reasig]").forEach(b => b.onclick = () => V.actividades.reasignar(+b.dataset.reasig));
+    c.querySelectorAll("[data-per]").forEach(a => a.onclick = e => { e.preventDefault(); V.historial.persona = a.dataset.per; V.historial.d1 = F.d1; V.historial.d2 = F.d2; location.hash = "#/historial"; });
+    c.querySelector("#rgCsv").onclick = () => this.vista === "he" ? U.csv("Horas extra del personal " + U.corta(F.d1).replace(/\//g, ".") + " al " + U.corta(F.d2).replace(/\//g, "."),
+      ["Fecha", "Turno", "Iniciales", "Nombre", "Categoría", "Horas", "De", "A", "Desayuno", "Comida", "Cena", "Motivo", "Verificada", "Obs. supervisor"],
+      heLista.map(h => [U.corta(h.fecha), h.turno, h.ini, B.dom.nombre(h.ini), B.dom.catCorta((B.dom.persona(h.ini) || {}).cat || ""), U.num(h.he), h.de || "", h.a || "", h.alD ? 1 : "", h.alC ? 1 : "", h.alCe ? 1 : "", h.mot || "", U.norm(h.verif) === "SI" ? "SI" : "NO", h.obs || ""]))
+      : U.csv("Registros del personal " + U.corta(F.d1).replace(/\//g, ".") + " al " + U.corta(F.d2).replace(/\//g, "."),
+      ["Fecha", "Turno", "Iniciales", "Nombre", "Categoría", "Actividad", "Estatus", "Seguimiento", "Fecha cierre", "Cerró"],
+      lista.map(a => [U.corta(a.fecha), a.turno, a.ini, B.dom.nombre(a.ini), B.dom.catCorta((B.dom.persona(a.ini) || {}).cat || ""), a.txt, a.est, (a.seg || "").replace(/\n/g, " | "), U.corta(a.fCierre), a.cerro]));
+  }
+};
+
+/* Supervisor: corregir una actividad guardada (texto, estatus, unidad). Se usa en Registros del personal y en Historial por persona */
+B.editarActividad = async function (id) {
+      const a = B.estado.actividades.find(x => x.id === id); if (!a) return;
+      const T0 = B.app.trabajo, ops = a.ini ? ["Realizada", "En proceso", "Pendiente", "Concluida"] : [...new Set(["Pendiente", a.est])];      // sin asignar: conserva su estatus o vuelve a pendiente
       const r = await ui.modal({
         titulo: "Editar actividad · ID " + a.id, icono: "editar", ancho: true,
         html: `<p class="muted peque" style="margin:0 0 10px">${a.ini ? "<b>" + U.esc(a.ini) + "</b> " + U.esc(B.dom.nombre(a.ini)) : "Por asignar"} · ${B.t.corto(a.fecha, a.turno)}</p>
@@ -481,13 +494,4 @@ V.registros = {
       if (!r.txt) { ui.toast("La actividad no puede quedar vacía.", "error"); return; }
       if (r.txt === a.txt && r.est === a.est && r.uni === (a.uni || "")) { ui.toast("Sin cambios.", ""); return; }
       await ejecutar(() => B.api.op("actividades", "estatus", { id: a.id, est: r.est, txt: r.txt, uni: r.uni, fecha: T0.f, turno: T0.t }), "Actividad actualizada.");
-    });
-    c.querySelectorAll("[data-per]").forEach(a => a.onclick = e => { e.preventDefault(); V.historial.persona = a.dataset.per; V.historial.d1 = F.d1; V.historial.d2 = F.d2; location.hash = "#/historial"; });
-    c.querySelector("#rgCsv").onclick = () => this.vista === "he" ? U.csv("Horas extra del personal " + U.corta(F.d1).replace(/\//g, ".") + " al " + U.corta(F.d2).replace(/\//g, "."),
-      ["Fecha", "Turno", "Iniciales", "Nombre", "Categoría", "Horas", "De", "A", "Desayuno", "Comida", "Cena", "Motivo", "Verificada", "Obs. supervisor"],
-      heLista.map(h => [U.corta(h.fecha), h.turno, h.ini, B.dom.nombre(h.ini), B.dom.catCorta((B.dom.persona(h.ini) || {}).cat || ""), U.num(h.he), h.de || "", h.a || "", h.alD ? 1 : "", h.alC ? 1 : "", h.alCe ? 1 : "", h.mot || "", U.norm(h.verif) === "SI" ? "SI" : "NO", h.obs || ""]))
-      : U.csv("Registros del personal " + U.corta(F.d1).replace(/\//g, ".") + " al " + U.corta(F.d2).replace(/\//g, "."),
-      ["Fecha", "Turno", "Iniciales", "Nombre", "Categoría", "Actividad", "Estatus", "Seguimiento", "Fecha cierre", "Cerró"],
-      lista.map(a => [U.corta(a.fecha), a.turno, a.ini, B.dom.nombre(a.ini), B.dom.catCorta((B.dom.persona(a.ini) || {}).cat || ""), a.txt, a.est, (a.seg || "").replace(/\n/g, " | "), U.corta(a.fCierre), a.cerro]));
-  }
 };

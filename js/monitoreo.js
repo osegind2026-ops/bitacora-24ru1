@@ -75,52 +75,70 @@ V.monitoreo = {
   async capturar(e) {
     const D = B.dom, of = B.ecLista.buscar(e.esp), req = of ? of.campos : D.LECT.map(x => x[0]), u = D.ecUltimoMon(e);
     const hoy = U.iso(new Date()), pozo = D.ecPorElev(e), elevs = pozo ? D.ecElevs(e).filter(Boolean) : [];
-    const fila = (fe, pe) => `<div class="mon-fila">
-      ${pozo ? `<div class="campo obs"><label style="font-weight:800">Elevación (pozo seco)</label><input class="inp" data-k="elev" list="mnElevs" placeholder="Ej. 10.15" autocomplete="off"></div>` : ""}
+    // valores del ultimo monitoreo (o de la liberacion): vienen ya escritos para solo corregir lo que cambio
+    const previo = el => { const l = D.ecMons(e).filter(m => !pozo || !el || U.norm(m.elev || "") === U.norm(el)); return l.length ? l[l.length - 1] : (pozo ? null : u); };
+    const lectDe = m => D.LECT.map(([k]) => String((m && m[k]) ?? "").trim());
+    // observaciones usadas antes (liberaciones y monitoreos), las mas frecuentes primero
+    const cnt = new Map();
+    for (const x of B.estado.ec) for (const t of [x.obs, ...(x.mon || []).map(m => m.obs)]) { const v = String(t || "").trim(); if (!v) continue; const k = U.norm(v); if (!cnt.has(k)) cnt.set(k, { t: v, n: 0 }); cnt.get(k).n++; }
+    const obsItems = [...cnt.values()].sort((a, b) => b.n - a.n).slice(0, 60).map(o => ({ value: o.t, label: o.t, sub: o.n > 1 ? "usada " + o.n + " veces" : "usada antes" }));
+    const fila = (fe, pe, m, el) => { const v = lectDe(m);
+      return `<div class="mon-fila" data-pre="${U.esc(JSON.stringify(v))}">
+      ${pozo ? `<div class="campo obs"><label style="font-weight:800">Elevación (pozo seco)</label><input class="inp" data-k="elev" list="mnElevs" placeholder="Ej. 10.15" autocomplete="off" value="${U.esc(el || "")}"></div>` : ""}
       <div class="campo"><label>Fecha</label><input class="inp" type="date" data-k="f" value="${fe || hoy}" max="${hoy}"></div>
       <div class="campo"><label>Hora (24 h)</label><input class="inp tnum h24" data-k="h" type="text" inputmode="numeric" maxlength="5" placeholder="HH:MM" autocomplete="off"></div>
       <div class="campo"><label>Iniciales</label><input class="inp" data-k="pers" value="${U.esc(pe || yo())}" style="text-transform:uppercase"></div>
       <button class="btn fantasma btn-icono quitar" title="Quitar renglón">${B.ico("basura")}</button>
-      <div class="lecturas">${D.LECT.map(([k, et]) => `<div class="campo"><label style="${req.includes(k) ? "font-weight:800" : ""}">${et}</label><input class="inp tnum" data-k="${k}" inputmode="decimal"></div>`).join("")}</div>
-      <div class="campo obs"><label>Observaciones</label><input class="inp" data-k="obs"></div></div>`;
+      <div class="lecturas">${D.LECT.map(([k, et], n) => `<div class="campo"><label style="${req.includes(k) ? "font-weight:800" : ""}">${et}</label><input class="inp tnum" data-k="${k}" inputmode="decimal" value="${U.esc(v[n])}"></div>`).join("")}</div>
+      <div class="campo obs"><label>Observaciones <span style="font-weight:400;text-transform:none;letter-spacing:0">· elige una anterior o escribe</span></label><input class="inp" data-k="obs"></div></div>`; };
+    const el0 = pozo ? String(u.elev || elevs[0] || "") : "";
     let items = null;
     await ui.modal({ titulo: `Capturar monitoreos · EC #${U.esc(D.ecNum(e))}`, icono: "reloj", ancho: true,
       html: `<p style="margin:0 0 4px"><b>${U.esc(e.esp)}</b></p>
         <p class="muted peque" style="margin:0 0 10px">Liberado ${e.lib ? U.fh(e.lib) : U.corta(e.fecha)} · último monitoreo ${U.fh(u.fh)} (${U.esc(u.pers)})${of ? " · muestreo requerido: <b>" + U.esc(of.reqTxt) + "</b>" : ""}.
-          Transcribe cada renglón de la bitácora impresa con su fecha y hora real.</p>
-        ${pozo ? `<div class="aviso d" style="margin-bottom:10px">${B.ico("info")}<div>El pozo seco es <b>un solo espacio confinado</b>: captura un renglón por cada <b>elevación</b> monitoreada.</div></div><datalist id="mnElevs">${elevs.map(x => `<option value="${U.esc(x)}">`).join("")}</datalist>` : ""}
-        <div id="mnFilas">${fila()}</div>
+          Las lecturas vienen con los valores del <b>último monitoreo</b>: anota la hora y corrige solo lo que cambió.</p>
+        ${pozo ? `<div class="aviso d" style="margin-bottom:10px">${B.ico("info")}<div>El pozo seco es <b>un solo espacio confinado</b>: captura un renglón por cada <b>elevación</b> monitoreada. Al elegir la elevación se cargan sus últimos valores.</div></div><datalist id="mnElevs">${elevs.map(x => `<option value="${U.esc(x)}">`).join("")}</datalist>` : ""}
+        <div id="mnFilas">${fila(null, null, previo(el0), el0)}</div>
         <button class="btn sec chico" id="mnMas">${B.ico("mas")} Otro renglón</button>`,
       botones: [{ t: "Cancelar", c: "sec", v: null }, { t: "Guardar monitoreos", c: "verde", v: true, antes: async v => {
         const l = [], fuera = [];
         for (const tr of v.querySelectorAll(".mon-fila")) {
           const g = k => tr.querySelector(`[data-k="${k}"]`).value.trim();
-          const lect = D.LECT.map(([k]) => g(k)), vacio = lect.every(x => !x) && !g("h") && !g("obs");
-          if (vacio) continue;
+          const lect = D.LECT.map(([k]) => g(k)), sinTocar = JSON.stringify(lect) === tr.dataset.pre;
+          if (!g("h") && !g("obs") && (sinTocar || lect.every(x => !x))) continue;          // renglon que no se uso
           const h = U.hora24(g("h"));
-          if (!g("f") || !h) { ui.toast("Cada renglón necesita su fecha y su hora (24 h).", "error"); return false; }
+          if (!g("f") || !h) { ui.toast("Cada renglón necesita su fecha y su hora (24 h).", "error"); tr.querySelector('[data-k="h"]').focus(); return false; }
           if (lect.every(x => !x)) { ui.toast("Anota al menos una lectura en el renglón de las " + h + ".", "error"); return false; }
           if (pozo && !g("elev")) { ui.toast("Pozo seco: anota la elevación del monitoreo de las " + h + ".", "error"); return false; }
           const it = { fh: g("f") + "T" + h, pers: U.ini(g("pers")) || yo(), obs: g("obs"), ...(pozo ? { elev: g("elev") } : {}) };
-          D.LECT.forEach(([k], i) => { it[k] = lect[i]; if (D.rango(k, lect[i])) fuera.push(h + " · " + k.toUpperCase() + " = " + lect[i]); });
+          D.LECT.forEach(([k], n) => { it[k] = lect[n]; if (D.rango(k, lect[n])) fuera.push(h + " · " + k.toUpperCase() + " = " + lect[n]); });
           l.push(it);
         }
-        if (!l.length) { ui.toast("Captura al menos un monitoreo.", "error"); return false; }
+        if (!l.length) { ui.toast("Anota la hora de al menos un monitoreo.", "error"); return false; }
         if (fuera.length && !(await ui.confirmar("Valores fuera del rango de referencia:<br><b>" + fuera.map(U.esc).join("<br>") + "</b><br><br>¿Registrar de todos modos?", "Atención", "Registrar", true))) return false;
         items = l;
       } }],
       alAbrir: v => {
         const caja = v.querySelector("#mnFilas");
+        const poner = (tr, m) => { const x = lectDe(m); D.LECT.forEach(([k], n) => { const i = tr.querySelector(`[data-k="${k}"]`); i.value = x[n]; i.classList.toggle("invalido", D.rango(k, x[n])); }); tr.dataset.pre = JSON.stringify(x); };
         const enlazar = () => caja.querySelectorAll(".mon-fila").forEach(tr => {
+          if (tr._listo) return; tr._listo = true;
           tr.querySelector(".quitar").onclick = () => { if (caja.children.length > 1) tr.remove(); };
-          tr.querySelectorAll('[data-k="o2"],[data-k="lel"],[data-k="co"],[data-k="h2s"]').forEach(i => i.oninput = () => i.classList.toggle("invalido", D.rango(i.dataset.k, i.value)));
+          tr.querySelectorAll('[data-k="o2"],[data-k="lel"],[data-k="co"],[data-k="h2s"]').forEach(i => { i.oninput = () => i.classList.toggle("invalido", D.rango(i.dataset.k, i.value)); i.oninput(); });
+          ui.combo(tr.querySelector('[data-k="obs"]'), { items: () => obsItems, estricto: false, max: 40 });
+          // pozo seco: al elegir la elevacion se cargan sus ultimos valores (si el renglon no se ha modificado a mano)
+          const ie = tr.querySelector('[data-k="elev"]');
+          if (ie) ie.addEventListener("change", () => { const act = JSON.stringify(D.LECT.map(([k]) => tr.querySelector(`[data-k="${k}"]`).value.trim())); if (act === tr.dataset.pre) poner(tr, previo(ie.value.trim())); });
         });
         v.querySelector("#mnMas").onclick = () => {
-          const ult = caja.lastElementChild, d = document.createElement("div");
-          d.innerHTML = fila(ult.querySelector('[data-k="f"]').value, ult.querySelector('[data-k="pers"]').value);
-          caja.appendChild(d.firstElementChild); enlazar(); caja.lastElementChild.querySelector('[data-k="h"]').focus();
+          const ult = caja.lastElementChild, d = document.createElement("div"), g = k => { const i = ult.querySelector(`[data-k="${k}"]`); return i ? i.value.trim() : ""; };
+          // el renglon nuevo arranca con lo del renglon anterior (misma fecha, iniciales y valores)
+          const m = {}; D.LECT.forEach(([k]) => m[k] = g(k));
+          d.innerHTML = fila(g("f"), g("pers"), pozo ? null : m, "");
+          caja.appendChild(d.firstElementChild); enlazar(); caja.lastElementChild.querySelector(pozo ? '[data-k="elev"]' : '[data-k="h"]').focus();
         };
         enlazar();
+        setTimeout(() => { const h = caja.querySelector('[data-k="h"]'); if (h) h.focus(); }, 80);
       } });
     if (!items) return;
     await ejecutar(() => B.api.op("ec", "monitoreo", { num: e.num, items }),

@@ -307,6 +307,32 @@ V.actividades = {
       await ejecutar(() => B.api.op("actividades", "borrar", { id: a.id }), a.ini ? "Asignación quitada." : "Actividad eliminada.");
     });
   },
+  /* Supervisor: reasignar o dejar sin asignar una actividad (pendiente, en proceso o realizada) */
+  async reasignar(id) {
+    const a = B.estado.actividades.find(x => x.id === id); if (!a) return;
+    const D = B.dom, grp = a.grupo ? B.estado.actividades.filter(x => x.grupo === a.grupo) : [a];
+    const actuales = D.ordenados([...new Set(grp.map(x => U.ini(x.ini)).filter(Boolean))]), sel = new Set(actuales), lista = [...actuales];
+    const r = await ui.modal({ titulo: "Reasignar actividad · ID " + a.id, icono: "usuarios", ancho: true,
+      html: `<p style="margin:0 0 4px"><b>${U.esc(a.txt)}</b></p>
+        <p class="muted peque" style="margin:0 0 12px">${B.t.corto(a.fecha, a.turno)} · ${U.esc(a.est)} · ahora: ${actuales.length ? "<b>" + U.esc(actuales.join("/")) + "</b>" : "<b>sin asignar</b>"}</p>
+        <div class="campo"><label>Quién la tiene (desmarca para quitar; sin nadie marcado queda SIN ASIGNAR)</label><div class="chips-ali" id="raChips"></div></div>
+        <div class="campo" style="margin-bottom:0"><label>Agregar a otra persona</label><input class="inp" id="raOtro" placeholder="Busca por iniciales o apellido…"></div>
+        <p class="muted peque" style="margin:10px 0 0">La actividad sigue siendo una sola: conserva su estatus, comentarios y seguimiento. Deja de aparecer en el historial de quien quites.</p>`,
+      alAbrir: v => {
+        const caja = v.querySelector("#raChips");
+        const pintar = () => { caja.innerHTML = lista.length ? lista.map(i => `<label class="chip-ali" title="${U.esc(D.nombre(i))}"><input type="checkbox" data-i="${U.esc(i)}" ${sel.has(i) ? "checked" : ""}><span><b>${U.esc(i)}</b>&nbsp;${U.esc((D.nombre(i) || "").split(" ").slice(0, 2).join(" "))}</span></label>`).join("") : `<span class="muted peque">Sin asignar. Agrega personas con el buscador.</span>`;
+          caja.querySelectorAll("[data-i]").forEach(x => x.onchange = () => x.checked ? sel.add(x.dataset.i) : sel.delete(x.dataset.i)); };
+        pintar();
+        const io = v.querySelector("#raOtro");
+        ui.combo(io, { items: () => ui.personas(p => !lista.includes(U.ini(p.ini))), alElegir: x => { if (!x) return; x = U.ini(x); if (!lista.includes(x)) lista.push(x); sel.add(x); pintar(); io.value = ""; delete io.dataset.valor; } });
+      },
+      botones: [{ t: "Cancelar", c: "sec", v: null }, { t: "Guardar asignación", c: "verde", v: () => [...sel] }] });
+    if (!r) return;
+    const nuevo = D.ordenados(r);
+    if (nuevo.join("/") === actuales.join("/")) { ui.toast("Sin cambios.", ""); return; }
+    if (!nuevo.length && !(await ui.confirmar("La actividad quedará <b>sin asignar</b>." + (a.est === "Pendiente" || a.est === "En proceso" ? " Aparecerá en «por asignar» para que alguien la tome." : ""), "Dejar sin asignar", "Dejar sin asignar", true))) return;
+    await ejecutar(() => B.api.op("actividades", "reasignar", { id: a.id, inis: nuevo }), nuevo.length ? "Actividad asignada a " + nuevo.join("/") + "." : "Actividad sin asignar.");
+  },
   /* Supervisor: editar una actividad POR ASIGNAR (texto, nota, unidad y si sale en el reporte del turno como pendiente) */
   async editarLibre(id) {
     const a = B.estado.actividades.find(x => x.id === id && !x.ini); if (!a) return;
@@ -605,10 +631,12 @@ V.pendientes = {
             <button class="btn chico sec" data-a="En proceso">En proceso</button>
             <button class="btn chico sec" data-a="Pendiente">Pendiente</button>
             <button class="btn chico fantasma" data-a="">Solo comentario</button>
+            ${sup ? `<button class="btn chico fantasma" data-reasig="${a.id}" title="Cambiar quién la tiene o dejarla sin asignar">${B.ico("usuarios")} Reasignar</button>` : ""}
             ${B.dom.comentarios(a).length ? `<button class="btn chico fantasma" data-coms="${a.id}" title="Editar o eliminar comentarios">${B.ico("editar")} Comentarios (${B.dom.comentarios(a).length})</button>` : ""}</div>
         </div>`).join("") : ui.vacio("No hay pendientes abiertos. ¡Bien!", "ok")}</div></div>`;
     if (sup) ui.combo(c.querySelector("#pFiltro"), { items: () => ui.personas(null, true), estricto: false, alElegir: v => { V.pendientes.filtro = v && B.dom.persona(v) ? v : ""; B.app.render(); } });
     c.querySelectorAll("button[data-coms]").forEach(b => b.onclick = () => V.actividades.comentarios(+b.dataset.coms));
+    c.querySelectorAll("button[data-reasig]").forEach(b => b.onclick = () => V.actividades.reasignar(+b.dataset.reasig));
     c.querySelectorAll(".item[data-id]").forEach(it => it.querySelectorAll("button[data-a]").forEach(b => b.onclick = async () => {
       const a = B.estado.actividades.find(x => x.id === +it.dataset.id), com = it.querySelector("input").value.trim();
       if (B.t.clave(a.fecha, a.turno) > B.t.clave(f, t)) { ui.toast("La actividad es de un turno posterior al turno de trabajo seleccionado. Cambia la fecha/turno arriba.", "error"); return; }
@@ -636,12 +664,21 @@ V.historial = {
       <div class="cuadricula" style="margin-bottom:16px">
         ${[["Turnos con registro", new Set(r.map(x => x.f + x.t)).size], ["Actividades", r.filter(x => x.tipo === "Actividad").length], ["Espacios confinados", r.filter(x => x.tipo === "Espacio confinado").length], ["Horas extra", U.fmtNum(he)]]
         .map(([e, v]) => `<div class="c3" style="background:#FAF8F6;border-radius:12px;padding:12px 14px"><div class="kpi"><div class="valor tnum" style="font-size:24px">${v}</div><div class="etiqueta">${e}</div></div></div>`).join("")}</div>
-      ${r.length ? `<div class="tabla-cont"><table class="tabla"><thead><tr><th>Fecha</th><th>Turno</th><th>Tipo</th><th>Descripción</th><th>Estatus</th><th>Ref.</th></tr></thead><tbody>
-        ${r.map(x => `<tr><td class="tnum">${U.corta(x.f)}</td><td>${x.t}</td><td>${U.esc(x.tipo)}</td><td style="white-space:pre-line">${U.esc(x.desc)}</td><td>${ui.estatusBadge(x.est)}</td><td class="muted">${U.esc(x.ref)}</td></tr>`).join("")}</tbody></table></div>`
+      ${r.length ? `<div class="tabla-cont"><table class="tabla"><thead><tr><th>Fecha</th><th>Turno</th><th>Tipo</th><th>Descripción</th><th>Estatus</th><th>Ref.</th>${sup ? "<th></th>" : ""}</tr></thead><tbody>
+        ${r.map(x => `<tr><td class="tnum">${U.corta(x.f)}</td><td>${x.t}</td><td>${U.esc(x.tipo)}</td><td style="white-space:pre-line">${U.esc(x.desc)}</td><td>${ui.estatusBadge(x.est)}</td><td class="muted">${U.esc(x.ref)}</td>
+          ${sup ? `<td class="acc" style="white-space:nowrap">${x.k ? `<button class="btn fantasma btn-icono" data-hk="${U.esc(x.k)}" title="Editar este registro">${B.ico("editar")}</button>` : ""}${x.k && x.k.startsWith("act:") ? `<button class="btn fantasma btn-icono" data-reasig="${x.k.slice(4)}" title="Reasignar o dejar sin asignar">${B.ico("usuarios")}</button>` : ""}</td>` : ""}</tr>`).join("")}</tbody></table></div>`
         : ui.vacio("Sin registros en el periodo.", "historial")}</div>`;
     if (sup) ui.combo(c.querySelector("#hPer"), { items: () => ui.personas(null, true), alElegir: v => { if (v) { V.historial.persona = v; B.app.render(); } } });
     c.querySelector("#hD1").onchange = e => { this.d1 = e.target.value; B.app.render(); };
     c.querySelector("#hD2").onchange = e => { this.d2 = e.target.value; B.app.render(); };
+    // supervisor: cada renglon abre el editor de ese tipo de registro
+    c.querySelectorAll("[data-reasig]").forEach(b => b.onclick = () => V.actividades.reasignar(+b.dataset.reasig));
+    c.querySelectorAll("[data-hk]").forEach(b => b.onclick = () => {
+      const [tipo, a1, a2, a3] = b.dataset.hk.split(":");
+      if (tipo === "act") return B.editarActividad(+a1);
+      if (tipo === "ec" || tipo === "vig") return V.concentrados.editar(tipo, +a1);
+      if (tipo === "he") { V.horasextra.ini = this.persona; V.horasextra.f = a1; V.horasextra.t = a2; V.horasextra.tramo = a3; location.hash = "#/horasextra"; }
+    });
     const doc = () => B.rep.historial(this.persona, this.d1, this.d2);
     c.querySelector("#hImp").onclick = () => B.rep.imprimir(doc());
     c.querySelector("#hPdf").onclick = e => B.rep.pdf(doc(), e.currentTarget);
