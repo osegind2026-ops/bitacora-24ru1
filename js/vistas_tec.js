@@ -481,7 +481,7 @@ V.espacios = {
         if (!o) { req.innerHTML = ""; return; }
         const pozo = B.ecLista.esPozo(iEsp.value);
         req.innerHTML = `<b>${U.esc(o.edif)}</b> · nivel ${U.esc(o.nivel)} · muestreo requerido: <b>${U.esc(o.reqTxt)}</b>` +
-          (pozo ? `<br>Pozo seco: si la liberación fue en otra elevación, agrégala al nombre (ej. <b>${U.esc(o.esp)} ELEV. 10.15</b>) y anótala en la tarjeta de aviso; así cada elevación queda como un registro distinto.` : "");
+          (pozo ? `<br>Pozo seco: es <b>un solo espacio confinado</b>. Anota la elevación de esta liberación en la tarjeta de aviso; los monitoreos de cada elevación se registran en <b>Monitoreo de E.C.</b>` : "");
         o.campos.forEach(k => { const i = tr.querySelector(`.lecturas [data-k="${k}"]`); if (i) i.parentNode.querySelector("label").style.fontWeight = "800"; });
         const ed = tr.querySelector('[data-k="edif"]'), el = tr.querySelector('[data-k="elev"]');
         // edificio y elevacion se proponen solos (y se actualizan si cambia el espacio, salvo que los hayan escrito a mano)

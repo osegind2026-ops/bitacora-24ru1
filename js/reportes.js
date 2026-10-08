@@ -66,6 +66,17 @@ B.rep.documento = function (titulo, cuerpo, horizontal) {
   .com { color: #404040; font-size: 7pt; margin-top: 1px; }
   .com.obs { font-size: 6.5pt; line-height: 1.15; }
   .est { font-weight: bold; font-size: 7pt; text-align: center; }
+  .ecmon .tit2 { display: none; text-align: center; font-weight: bold; font-size: 11pt; margin: 2px 0 6px; }
+  .ecmon.aparte { page-break-before: always; break-before: page; }
+  .ecmon.aparte .tit2 { display: block; }
+  table.bit { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  table.bit th { background: #D9D9D9; border: 1px solid #000; font-size: 7pt; padding: 3px 2px; }
+  table.bit td { border: 1px solid #000; font-size: 8pt; padding: 1px 3px; text-align: center; height: 0.27in; }
+  table.bit thead { display: table-header-group; } table.bit tr { page-break-inside: avoid; }
+  table.bitcab { width: 100%; border-collapse: collapse; margin-bottom: 6px; }
+  table.bitcab td { border: 1px solid #000; font-size: 8pt; padding: 3px 5px; }
+  table.bitcab td.e { background: #F2F2F2; font-weight: bold; font-size: 7pt; width: 13%; }
+  .bitEC { page-break-after: always; break-after: page; } .bitEC:last-child { page-break-after: auto; break-after: auto; }
   `;
   return `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>${U.esc(titulo)}</title><style>${css}</style></head>
   <body><div class="membrete"><img src="${B.imgUrl("membrete")}"></div><div class="pie"><img src="${B.imgUrl("pie")}"></div>
@@ -80,7 +91,10 @@ B.rep.documento = function (titulo, cuerpo, horizontal) {
     for (i = 0; i < op.length; i++) op[i].style.display = "";
     for (i = 0; i < op.length && c.scrollHeight > disp; i++) op[i].style.display = "none";
     var h = c.scrollHeight;
-    if (h > disp && h <= disp * 1.25) c.style.zoom = (disp / h * 0.96).toFixed(3);
+    // si aun asi no cabe en una hoja, los espacios que siguen liberados (ultimo monitoreo) pasan a una segunda hoja
+    var m = c.querySelector(".ecmon");
+    if (m && h > disp * 1.25) { m.classList.add("aparte"); c.appendChild(m); h = c.scrollHeight - m.offsetHeight; }
+    if (h > disp && h <= disp * 1.25 && !(m && m.classList.contains("aparte"))) c.style.zoom = (disp / h * 0.96).toFixed(3);
   }
   if (document.readyState === "complete") ajustar(); else window.addEventListener("load", ajustar);
   </script></body></html>`;
@@ -95,7 +109,7 @@ B.rep.turno = function (f, t) {
   const d = B.dom.reporte(f, t), c = B.estado.config;
   let h = `<div class="titulo">NOTAS DEL TURNO <span class="rojo">${t} ${U.esc(B.t.nombre(t))}</span></div>
   <div class="sub"><span class="izq">${U.esc(B.t.periodo())} &nbsp;|&nbsp; Horario: ${U.esc(B.t.horario(t))}</span><span class="fecha">${U.larga(f)}</span></div>
-  <div class="resumen">RESUMEN: &nbsp;Esp. confinados liberados: ${d.ec.length} (acumulado: ${d.acum}) &nbsp;|&nbsp; Vigilancias C.I.: ${d.vig.length}
+  <div class="resumen">RESUMEN: &nbsp;Esp. confinados liberados: ${d.ec.length} (acumulado: ${d.acum})${d.ecMon.length ? ` &nbsp;|&nbsp; Siguen liberados: ${d.ecMon.length}${d.ecMon.some(x => !x.ok) ? " (sin monitoreo en el turno: " + d.ecMon.filter(x => !x.ok).length + ")" : ""}` : ""} &nbsp;|&nbsp; Vigilancias C.I.: ${d.vig.length}
    &nbsp;|&nbsp; Realizadas: ${d.nReal} &nbsp;|&nbsp; En proceso: ${d.nProc} &nbsp;|&nbsp; Pendientes: ${d.nPend} &nbsp;|&nbsp; Personal: ${d.nPers}</div>`;
   let algo = false;
   if (d.vig.length) {
@@ -119,6 +133,19 @@ B.rep.turno = function (f, t) {
       d.ec.map(e => `<tr class="${B.dom.ecFaltan(e).length ? "falta" : ""}"><td class="c b">${U.esc(B.dom.ecNum(e))}</td><td class="c">${U.esc(e.esp)}${faltan(e)}</td>` +
         ["o2", "hr", "temp", "lel", "co", "h2s"].map(k => `<td class="c ${B.dom.rango(k, e[k]) ? "fuera" : ""}">${U.esc(e[k])}</td>`).join("") +
         `<td class="c">${U.fh(e.lib)}</td><td class="c">${U.esc(e.pers)}${e.obs ? `<div class="com obs">${U.esc(e.obs)}</div>` : ""}</td></tr>`).join("") + `</table>`;
+  }
+  if (d.ecMon.length) {
+    // espacios de turnos anteriores que siguen liberados: valores de su ULTIMO monitoreo; se resalta el que no tuvo monitoreo en el turno
+    algo = true;
+    h += `<div class="ecmon"><div class="tit2">ESPACIOS CONFINADOS QUE SIGUEN LIBERADOS · ÚLTIMO MONITOREO &nbsp; <span class="rojo">${t} ${U.corta(f)}</span></div>
+      <table class="sec">${d.ecMon.length > 10 ? pct([5, 20.1, 6.6, 6.6, 6.6, 6.6, 6.6, 6.6, 13, 22.3]) : pct([14.4, 4.3, 17.2, 5.6, 5.6, 5.6, 5.6, 5.6, 5.6, 11.1, 19.4])}
+      ${d.ecMon.length > 10 ? `<tr><th colspan="10" style="font-size:8pt">ESPACIOS CONFINADOS QUE SIGUEN LIBERADOS (ÚLTIMO MONITOREO)</th></tr><tr>`   /* tabla larga: sin la celda lateral, para que pueda continuar en otra hoja */
+        : `<tr><td class="lbl" rowspan="${d.ecMon.length + 1}">ESPACIOS<br>CONFINADOS<br>QUE SIGUEN<br>LIBERADOS<br><span style="font-weight:normal;font-size:7pt">(último monitoreo)</span></td>`}
+      <th>#</th><th>ESPACIO CONFINADO</th><th>O2<br>(%)</th><th>HR<br>(%)</th><th>TEMP<br>(°C)</th><th>LEL<br>(%)</th><th>CO<br>(ppm)</th><th>H2S<br>(ppm)</th>
+      <th>ÚLTIMO MONITOREO</th><th>PERSONAL TSI / OBSERVACIONES</th></tr>` +
+      d.ecMon.map(({ e, u, ok, elev }) => `<tr class="${ok ? "" : "falta"}"><td class="c b">${U.esc(B.dom.ecNum(e))}</td><td class="c">${U.esc(e.esp)}${elev ? `<div class="b">ELEV. ${U.esc(elev)}</div>` : ""}${ok ? "" : `<div class="faltan">SIN MONITOREO EN EL TURNO</div>`}</td>` +
+        ["o2", "hr", "temp", "lel", "co", "h2s"].map(k => `<td class="c ${B.dom.rango(k, u[k]) ? "fuera" : ""}">${U.esc(u[k])}</td>`).join("") +
+        `<td class="c">${U.fh(u.fh)}${u.lib ? `<div class="com obs">liberación</div>` : ""}</td><td class="c">${U.esc(u.pers)}${u.obs && !u.lib ? `<div class="com obs">${U.esc(u.obs)}</div>` : ""}</td></tr>`).join("") + `</table></div>`;
   }
   if (d.ultEc.length) {
     // completa hasta 5 con los ultimos liberados en turnos anteriores (en orden de #); los mas antiguos ("opc")
@@ -150,6 +177,30 @@ B.rep.turno = function (f, t) {
   if (d.notas) { algo = true; h += `<table class="sec">${pct([14.4, 85.6])}<tr><td class="lbl">NOTAS<br>ADICIONALES</td><td>${lineas(d.notas.split("\n").filter(x => x.trim()))}</td></tr></table>`; }
   h += `<table class="sec firmas">${pct([50, 50])}<tr><th>ELABORÓ</th><th>REVISÓ</th></tr><tr><td style="height:24px">${firma(d.elab)}</td><td>${firma(d.rev)}</td></tr></table>`;
   return { html: B.rep.documento("Bitácora " + t + " " + U.corta(f), h), nombre: `BITACORA ${c.proyecto} ${t} ${U.corta(f).replace(/\//g, ".")}`, carpeta: "", tipo: "turno", f, t, algo };
+};
+
+/* ---------------------------------------------------------------- bitacora de monitoreo por espacio confinado (para llenar a mano) */
+B.rep.ecBitacora = function (lista, vacia) {
+  const c = B.estado.config, D = B.dom, k = v => U.esc(v ?? "");
+  const una = e => {
+    const of = B.ecLista.buscar(e.esp), mons = vacia ? D.ecMons(e).filter(m => m.lib) : D.ecMons(e), blancos = Math.max(6, 23 - mons.length), pe = D.ecPorElev(e);
+    return `<div class="bitEC"><div class="titulo">BITÁCORA DE MONITOREO DE ESPACIO CONFINADO</div>
+      <table class="bitcab"><tr><td class="e">EC #</td><td style="width:12%;font-size:12pt" class="b c">${k(D.ecNum(e))}</td><td class="e">ESPACIO CONFINADO</td><td class="b" style="font-size:10pt">${k(e.esp)}</td></tr>
+        <tr><td class="e">EDIFICIO</td><td colspan="1">${k(e.edif || (of && of.edif))}</td><td class="e">NIVEL / ELEVACIÓN</td><td>${k(e.elev || (of && of.nivel))}${e.equipo ? " &nbsp;·&nbsp; Equipo: " + k(e.equipo) : ""}</td></tr>
+        <tr><td class="e">LIBERADO</td><td>${e.lib ? U.fh(e.lib) : U.corta(e.fecha) + " " + k(e.turno)}</td><td class="e">MUESTREO REQUERIDO</td><td>${k(of ? of.reqTxt : "Oxígeno, Combustibilidad, Temperatura, humedad, CO, H2S")}</td></tr>
+        <tr><td class="e">LIBERÓ</td><td>${k(e.pers || e.capt)}</td><td class="e">RANGOS DE REFERENCIA</td><td>O2 ${k(c.o2Min)}–${k(c.o2Max)} % &nbsp;·&nbsp; LEL ≤ ${k(c.lelMax)} % &nbsp;·&nbsp; CO ≤ ${k(c.coMax)} ppm &nbsp;·&nbsp; H2S ≤ ${k(c.h2sMax)} ppm</td></tr></table>
+      <table class="bit"><colgroup><col style="width:11%"><col style="width:8%">${pe ? '<col style="width:9%">' : ""}<col style="width:7%"><col style="width:7%"><col style="width:7%"><col style="width:7%"><col style="width:7%"><col style="width:7%"><col style="width:11%"><col></colgroup>
+        <thead><tr><th>FECHA</th><th>HORA<br>(24 h)</th>${pe ? "<th>ELEVACIÓN</th>" : ""}<th>O2<br>(%)</th><th>HR<br>(%)</th><th>TEMP<br>(°C)</th><th>LEL<br>(%)</th><th>CO<br>(ppm)</th><th>H2S<br>(ppm)</th><th>INICIALES</th><th>OBSERVACIONES</th></tr></thead><tbody>` +
+      mons.map(m => `<tr><td>${U.corta(m.fh)}</td><td>${U.hora(m.fh)}</td>${pe ? `<td class="b">${k(m.elev)}</td>` : ""}` + ["o2", "hr", "temp", "lel", "co", "h2s"].map(x => `<td class="${D.rango(x, m[x]) ? "fuera" : ""}">${k(m[x])}</td>`).join("") +
+        `<td>${k(m.pers)}</td><td class="izq" style="font-size:7pt">${m.lib ? "LIBERACIÓN" + (m.obs ? " · " + k(m.obs) : "") : k(m.obs)}</td></tr>`).join("") +
+      Array.from({ length: blancos }, () => `<tr>${"<td></td>".repeat(pe ? 11 : 10)}</tr>`).join("") + `</tbody></table>
+      <div class="nota">${pe ? "POZO SECO: es un solo espacio confinado; anota la ELEVACIÓN de cada monitoreo (un registro por elevación). " : ""}Monitorear al menos UNA VEZ POR TURNO mientras el espacio siga liberado (lo ideal: cada 8 horas). Anota fecha, hora en formato de 24 h, lecturas e iniciales, y transcríbelo a la bitácora electrónica al terminar el turno.
+        Si una lectura queda fuera de rango, suspende el ingreso y avisa al supervisor de Seguridad Industrial.${e.cierre ? " &nbsp; ESPACIO CERRADO: " + U.fh(e.cierre) + " (" + k(e.cerro) + ")." : ""}</div></div>`;
+  };
+  const uno = lista.length === 1 ? lista[0] : null;
+  return { html: B.rep.documento("Bitácora de monitoreo EC", lista.map(una).join("")),
+    nombre: uno ? `BITACORA MONITOREO EC ${D.ecNum(uno)} ${String(uno.esp).replace(/[\\/:*?"<>|]/g, "-").slice(0, 50)}` : `BITACORAS MONITOREO EC (${lista.length}) ${U.corta(U.iso(new Date())).replace(/\//g, ".")}`,
+    carpeta: "ESPACIOS CONFINADOS", tipo: "concentrado" };
 };
 
 /* ---------------------------------------------------------------- historial */

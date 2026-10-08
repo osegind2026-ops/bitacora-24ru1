@@ -111,7 +111,8 @@ B.inter = {
     const d = op.datos || {}, f = d.fecha ? U.cortaDM(d.fecha) + (d.turno ? " " + d.turno : "") + " · " : "";
     const que = { "actividades.guardarTurno": () => "Actividades: " + (d.items || []).map(i => i.txt).filter(Boolean).join(" | ").slice(0, 140), "actividades.seguimiento": () => "Seguimiento de pendiente" + (d.comentario ? ": " + d.comentario : ""),
       "actividades.tomar": () => "Tomar actividad por asignar", "actividades.asignar": () => "Asignar: " + (d.txt || ""), "actividades.comentario": () => "Comentario: " + (d.texto || "(eliminado)"),
-      "ec.crear": () => "Espacio confinado: " + (d.items || []).map(i => i.esp).join(", "), "ec.sumarme": () => "Agregarme a espacio confinado", "vig.crear": () => "Vigilancia: " + (d.desc || ""), "vig.retirar": () => "Retiro de vigilancia",
+      "ec.crear": () => "Espacio confinado: " + (d.items || []).map(i => i.esp).join(", "), "ec.sumarme": () => "Agregarme a espacio confinado", "ec.monitoreo": () => "Monitoreo de EC #" + d.num + ": " + (d.items || []).map(i => String(i.fh || "").replace("T", " ")).join(", "),
+      "ec.monEditar": () => "Corrección de monitoreo de EC #" + d.num, "ec.cerrar": () => "Cierre de espacio(s) confinado(s) " + (d.nums || []).join(", "), "ec.reabrir": () => "Reabrir EC #" + d.num, "vig.crear": () => "Vigilancia: " + (d.desc || ""), "vig.retirar": () => "Retiro de vigilancia",
       "he.guardar": () => "Horas extra " + (d.de ? d.de + " a " + d.a : (d.he === "" ? "(quitar)" : d.he + " h")), "he.justificar": () => "Justificación de horas extra", "perfil.guardar": () => "Datos del oficio",
       "turnos.guardar": () => "Datos del turno", "hojas.guardar": () => "Hoja de asignación" }[op.col + "." + op.accion];
     return f + (que ? que() : op.col + "." + op.accion);

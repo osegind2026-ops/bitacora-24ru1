@@ -325,6 +325,43 @@ B.dom = {
   // # de espacio confinado como se muestra: los de pre-recarga llevan su marca (PR 121)
   ecNum(e) { return (e.pre ? e.pre + " " : "") + e.num; },
   ecDelTurno(f, t) { return B.estado.ec.filter(e => e.fecha === f && e.turno === t).sort((a, b) => a.num - b.num); },
+  /* ---- Monitoreo de espacios confinados mientras siguen liberados (al menos uno por turno).
+     El primer "monitoreo" de un espacio es su liberacion; los siguientes estan en e.mon con su fecha y hora real. */
+  LECT: [["o2", "O2"], ["hr", "HR"], ["temp", "TEMP"], ["lel", "LEL"], ["co", "CO"], ["h2s", "H2S"]],
+  ecLibFH(e) { return String(e.lib || "").length >= 16 ? e.lib : (e.fecha ? B.t.inicio(e.fecha, e.turno || "T2") : ""); },
+  ecMons(e) {
+    const l = [{ id: 0, lib: true, fh: this.ecLibFH(e), elev: this.ecPorElev(e) ? String(e.elev || "").trim() : "", o2: e.o2, hr: e.hr, temp: e.temp, lel: e.lel, co: e.co, h2s: e.h2s, pers: e.pers || e.capt || "", obs: e.obs || "" }];
+    for (const m of e.mon || []) l.push(m);
+    return l.sort((a, b) => String(a.fh).localeCompare(String(b.fh)) || (a.lib ? -1 : 1));
+  },
+  // El POZO SECO es un solo espacio confinado, pero se monitorea y se registra por ELEVACION
+  ecPorElev(e) { return !!(B.ecLista && B.ecLista.esPozo(e.esp)); },
+  ecElevs(e) {
+    if (!this.ecPorElev(e)) return [];
+    const m = new Map(); for (const x of this.ecMons(e)) { const v = String(x.elev || "").trim(); if (!m.has(U.norm(v))) m.set(U.norm(v), v); }
+    const l = [...m.values()].sort((a, b) => (parseFloat(a) || 0) - (parseFloat(b) || 0) || a.localeCompare(b));
+    return l.length > 1 ? l.filter(Boolean).concat(l.includes("") && this.ecMons(e).some(x => !x.lib && !String(x.elev || "").trim()) ? [""] : []) : l;
+  },
+  ecUltimoMon(e, hasta) { const l = this.ecMons(e).filter(m => !hasta || m.fh <= hasta); return l.length ? l[l.length - 1] : null; },
+  ecMonEnTurno(e, f, t) { const a = B.t.inicio(f, t), b = B.t.fin(f, t); return this.ecMons(e).some(m => m.fh >= a && m.fh <= b); },
+  ecAbiertoEn(e, fh) { return !e.cierre || e.cierre > fh; },
+  ecAbiertos() { return B.estado.ec.filter(e => !e.cierre).sort((a, b) => a.num - b.num); },
+  // espacios que siguen liberados al cierre del turno (f, t), liberados en ese turno o antes, con su ultimo monitoreo hasta entonces
+  ecSeguimiento(f, t, soloAnteriores) {
+    const K = B.t.clave(f, t), fin = B.t.fin(f, t);
+    return B.estado.ec.filter(e => e.fecha && (soloAnteriores ? B.t.clave(e.fecha, e.turno) < K : B.t.clave(e.fecha, e.turno) <= K) && this.ecAbiertoEn(e, fin))
+      .sort((a, b) => a.num - b.num).map(e => {
+        // pozo seco: un renglon por elevacion, cada una con su ultimo monitoreo y su aviso del turno
+        const ini = B.t.inicio(f, t), els = this.ecElevs(e).map(el => {
+          const l = this.ecMons(e).filter(m => U.norm(m.elev || "") === U.norm(el) && m.fh <= fin);
+          return l.length ? { elev: el, u: l[l.length - 1], ok: l.some(m => m.fh >= ini) } : null; }).filter(Boolean);
+        return { e, u: this.ecUltimoMon(e, fin), ok: els.length > 1 ? els.every(x => x.ok) : this.ecMonEnTurno(e, f, t), elevs: els.length > 1 || (els.length === 1 && els[0].elev) ? els : [] };
+      });
+  },
+  // lo mismo, en renglones para los reportes (el pozo seco se abre en un renglon por elevacion)
+  ecFilasMon(f, t, soloAnteriores) {
+    return this.ecSeguimiento(f, t, soloAnteriores).flatMap(x => x.elevs.length ? x.elevs.map(v => ({ e: x.e, u: v.u, ok: v.ok, elev: v.elev })) : [{ e: x.e, u: x.u, ok: x.ok, elev: "" }]);
+  },
 
   /* Datos completos para el reporte del turno */
   reporte(f, t) {
@@ -376,11 +413,13 @@ B.dom = {
     // liberados en turnos anteriores, en orden de # de liberacion, para tener a la vista los mas recientes.
     const ec = this.ecDelTurno(f, t);
     const acum = B.estado.ec.filter(e => !e.pre && e.fecha && B.t.clave(e.fecha, e.turno) <= K).length;
-    const ultEc = ec.length >= 5 ? [] : B.estado.ec.filter(e => e.fecha && B.t.clave(e.fecha, e.turno) < K)
+    // Espacios de turnos anteriores que SIGUEN LIBERADOS: salen con su ultimo monitoreo (y sustituyen a "ultimos liberados")
+    const ecMon = this.ecFilasMon(f, t, true);
+    const ultEc = ecMon.length || ec.length >= 5 ? [] : B.estado.ec.filter(e => e.fecha && B.t.clave(e.fecha, e.turno) < K)
       .sort((a, b) => b.num - a.num).slice(0, 5 - ec.length).sort((a, b) => a.num - b.num);
     const n = e => lista.filter(x => e.includes(x.est)).length;
     return {
-      f, t, vig: this.vigActivas(f, t), ec, acum, ultEc, ultOpc: Math.max(0, Math.min(ultEc.length, ec.length + ultEc.length - 3)), acts: lista, grupos,
+      f, t, vig: this.vigActivas(f, t), ec, acum, ecMon, ultEc, ultOpc: Math.max(0, Math.min(ultEc.length, ec.length + ultEc.length - 3)), acts: lista, grupos,
       dif: td.dif || "", notas: td.notas || "", elab: td.elab || "", rev: td.rev || "",
       nReal: n(["Realizada", "Concluida"]), nProc: n(["En proceso"]), nPend: n(["Pendiente", "Por asignar"]), nPers: grupos.reduce((s, g) => s + g.length, 0)
     };

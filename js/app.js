@@ -7,7 +7,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "1.9", servidorViejo: false,
+  info: {}, VERSION: "2.0", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -167,7 +167,7 @@ B.app = {
     this.trabajo = guardado || B.t.actual();
     const sup = B.dom.esSup(), u = B.usuario;
     const enlaces = [
-      ["MI TURNO", [["inicio", "Inicio", "inicio"], ["actividades", "Mis actividades", "lista"], ["horasextra", sup ? "Horas extra (captura)" : "Mis horas extra", "calendario"], ["espacios", "Espacios confinados", "escudo"],
+      ["MI TURNO", [["inicio", "Inicio", "inicio"], ["actividades", "Mis actividades", "lista"], ["horasextra", sup ? "Horas extra (captura)" : "Mis horas extra", "calendario"], ["espacios", "Espacios confinados", "escudo"], ["monitoreo", "Monitoreo de E.C.", "reloj"],
         ["vigilancias", "Vigilancias C.I.", "fuego"], ["pendientes", sup ? "Pendientes (todos)" : "Mis pendientes", "reloj"], ["historial", sup ? "Historial por persona" : "Mi historial", "historial"], ["oficio", sup ? "Oficios de tiempo extra" : "Mi oficio de tiempo extra", "doc"]]],
       ["CONSULTA", [["concentrados", "Concentrados", "doc"]].concat(sup ? [["registros", "Registros del personal", "usuarios"]] : [["hoja", "Hoja de asignación", "pdf"]])
         .concat([["celular", B.modoMovil ? "Enviar / recibir" : "Celulares", "subir"]])]
@@ -181,8 +181,8 @@ B.app = {
         <aside class="lateral" data-tour="menu">
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
-            `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? "Supervisor" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "1.9")}</div>
+            `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
+          <div class="lateral-pie">${sup ? "Supervisor" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "2.0")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
@@ -271,6 +271,9 @@ B.app = {
   contadores() {
     const n = B.dom.pendientesGrupos(B.dom.esSup() ? null : B.usuario.ini).length, c = document.getElementById("cntPend");
     if (c) { c.textContent = n; c.classList.toggle("oculto", !n); }
+    // espacios que siguen liberados y aun no tienen monitoreo en el turno de trabajo
+    const cm = document.getElementById("cntMon");
+    if (cm) { const nm = B.dom.ecFilasMon(this.trabajo.f, this.trabajo.t).filter(x => !x.ok).length; cm.textContent = nm; cm.classList.toggle("oculto", !nm); }
     if (B.modoMovil) this.estadoMovil();
   },
   // Celular: cuantas capturas faltan por enviar a la PC y que tan viejo es el paquete de datos (barra, menu y pantalla de inicio)

@@ -233,6 +233,14 @@ table.tabla { width: 100%; border-collapse: collapse; font-size: 13px; }
 .renglon:focus-within { border-color: var(--guinda-2); box-shadow: 0 0 0 4px rgba(159, 34, 65, .07); }
 .renglon .num { width: 26px; height: 26px; border-radius: 8px; background: #F2EEEA; display: grid; place-items: center; font-weight: 700; font-size: 12px; color: var(--texto-2); margin-top: 6px; }
 .renglon textarea { border: 0; outline: none; resize: none; min-height: 38px; padding: 8px 4px; width: 100%; line-height: 1.45; background: transparent; }
+.mon-fila { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr) auto; gap: 0 10px; align-items: end; border: 1px solid var(--borde); border-radius: 12px; padding: 10px 10px 0; margin-bottom: 10px; background: #fff; }
+.mon-fila .lecturas { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0 8px; background: #FAF8F6; border-radius: 10px; padding: 8px 8px 0; margin-bottom: 10px; }
+.mon-fila .obs { grid-column: 1 / -1; }
+.mon-fila .quitar { margin-bottom: 16px; }
+.mon-val { display: inline-flex; gap: 4px; align-items: baseline; background: #F4F1EE; border-radius: 7px; padding: 2px 7px; font-size: 12px; font-variant-numeric: tabular-nums; }
+.mon-val b { font-size: 10px; color: var(--texto-3); font-weight: 700; }
+.mon-val.fuera { background: var(--rojo-claro); color: var(--rojo); font-weight: 700; }
+@media (max-width: 640px) { .mon-fila { grid-template-columns: 1fr 1fr; position: relative; } .mon-fila .lecturas { grid-template-columns: repeat(3, minmax(0, 1fr)); } .mon-fila .quitar { position: absolute; top: 4px; right: 4px; margin: 0; } }
 .ec-ult { grid-column: 1 / -1; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 12px; color: var(--texto-2); background: #FFF8E6; border: 1px solid #EAD9A8; border-radius: 8px; padding: 6px 10px; margin-top: 6px; line-height: 1.4; }
 .ec-ult:empty { display: none; }
 .ec-ult span { flex: 1; min-width: 200px; }

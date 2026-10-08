@@ -180,7 +180,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "1.9", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "2.0", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = JSON.parse(sessionStorage.getItem("b_local_sesion") || "null");
@@ -642,6 +642,62 @@ B.local = {
         const L = (await this.leer("hojas") || []).filter(x => !(x.fecha === d.fecha && x.turno === d.turno));
         L.push({ ...d.hoja, fecha: d.fecha, turno: d.turno, mod: ahora() + " " + s.ini });
         await this.escribir("hojas", L); return { ok: true };
+      }
+      case "ec.monitoreo": case "ec.monEditar": {
+        const L = await this.leer("ec") || [], e = L.find(x => +x.num === +d.num);
+        if (!e) throw new Error("Registro no encontrado.");
+        const mon = Array.isArray(e.mon) ? e.mon : [], esFH = x => /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(String(x || ""));
+        const mal = fh => !esFH(fh) ? "Fecha u hora del monitoreo no válida."
+          : e.cierre && fh > e.cierre ? "El espacio se cerró el " + e.cierre.replace("T", " ") + ": no admite monitoreos posteriores."
+          : B.dom.ecLibFH(e) && fh < B.dom.ecLibFH(e) ? "El monitoreo (" + fh.replace("T", " ") + ") no puede ser anterior a la liberación del espacio (" + B.dom.ecLibFH(e).replace("T", " ") + ")."
+          : fh > U.isoFH(new Date(Date.now() + 15 * 60000)) ? "La fecha y hora del monitoreo (" + fh.replace("T", " ") + ") no puede ser futura." : null;
+        const CAM = ["o2", "hr", "temp", "lel", "co", "h2s", "obs"];
+        if (acc === "monitoreo") {
+          let n = 0, id = mon.reduce((m, x) => Math.max(m, +x.id || 0), 0); const repetidos = [];
+          for (const it of d.items || []) {
+            const fh = String(it.fh || ""), m = mal(fh); if (m) throw new Error(m);
+            const el = String(it.elev ?? "").trim();
+            if (mon.some(x => x.fh === fh && (x.elev || "") === el)) { repetidos.push(fh); continue; }
+            const r = { id: ++id, fh, ...(el ? { elev: el } : {}) }; for (const k of CAM) r[k] = String(it[k] ?? "").trim();
+            r.pers = U.ini(it.pers) || s.ini; r.capt = s.ini; r.reg = ahora(); mon.push(r); n++;
+          }
+          if (!n && !repetidos.length) throw new Error("Captura al menos un monitoreo.");
+          if (n) { e.mon = mon.sort((a, b) => a.fh.localeCompare(b.fh)); await this.escribir("ec", L); }
+          return { ok: true, n, repetidos };
+        }
+        const m = mon.find(x => +x.id === +d.id && (!d.fhOrig || x.fh === d.fhOrig)) || (d.fhOrig ? mon.find(x => x.fh === d.fhOrig) : null);
+        if (!m) throw new Error("Ese monitoreo ya no existe. Actualiza la página.");
+        if (!sup && U.ini(m.capt) !== s.ini && !String(m.pers || "").toUpperCase().split(/[\/,; ]+/).includes(s.ini)) throw new Error("Solo quien capturó el monitoreo o un supervisor puede modificarlo.");
+        if (d.borrar === true) mon.splice(mon.indexOf(m), 1);
+        else {
+          const fh = String(d.fh || ""), x = mal(fh); if (x) throw new Error(x);
+          const el = "elev" in d ? String(d.elev ?? "").trim() : (m.elev || "");
+          if (mon.some(y => y !== m && y.fh === fh && (y.elev || "") === el)) throw new Error("Ya hay otro monitoreo con esa misma fecha y hora.");
+          m.fh = fh; m.elev = el; for (const k of CAM) if (k in d) m[k] = String(d[k] ?? "").trim();
+          if (U.ini(d.pers)) m.pers = U.ini(d.pers); m.mod = ahora() + " " + s.ini;
+        }
+        e.mon = mon.sort((a, b) => a.fh.localeCompare(b.fh)); await this.escribir("ec", L); return { ok: true };
+      }
+      case "ec.cerrar": {
+        if (!sup) throw new Error("Solo un supervisor puede cerrar un espacio confinado.");
+        if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(String(d.cierre || ""))) throw new Error("Fecha u hora de cierre no válida.");
+        const L = await this.leer("ec") || []; let n = 0;
+        for (const o of d.nums || []) {
+          const e = L.find(x => +x.num === +o); if (!e) continue;
+          if (String(e.lib || "").length >= 16 && d.cierre < e.lib) throw new Error("El cierre del EC #" + o + " no puede ser anterior a su liberación (" + e.lib.replace("T", " ") + ").");
+          const um = (e.mon || []).map(x => x.fh).sort().pop();
+          if (um && d.cierre < um) throw new Error("El EC #" + o + " tiene un monitoreo posterior a esa hora (" + um.replace("T", " ") + ").");
+          e.cierre = d.cierre; e.cerro = s.ini; e.mod = ahora() + " " + s.ini; n++;
+        }
+        if (!n) throw new Error("Elige al menos un espacio.");
+        await this.escribir("ec", L); return { ok: true, n };
+      }
+      case "ec.reabrir": {
+        if (!sup) throw new Error("Solo un supervisor puede reabrir un espacio confinado.");
+        const L = await this.leer("ec") || [], e = L.find(x => +x.num === +d.num);
+        if (!e) throw new Error("Registro no encontrado.");
+        e.cierre = ""; e.cerro = ""; e.mod = ahora() + " " + s.ini;
+        await this.escribir("ec", L); return { ok: true };
       }
       case "ec.sumarme": {
         const L = await this.leer("ec") || [], e = L.find(x => +x.num === +d.num);
