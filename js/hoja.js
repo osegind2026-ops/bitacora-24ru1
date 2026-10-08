@@ -147,7 +147,7 @@ B.hoja = {
 
 /* ===================================================================== VISTA (supervisor captura; tecnicos consultan) */
 V.hoja = {
-  titulo: "Hoja de asignación de actividades",
+  titulo: "Hoja de asignación de actividades", sup: true,          // solo supervisores
   borr: {},                      // borradores por turno (se conservan al cambiar de sección)
   // Tecnicos: solo consulta (vista previa, imprimir y PDF) de la hoja que guardo el supervisor
   consulta(c) {

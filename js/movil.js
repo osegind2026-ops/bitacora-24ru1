@@ -223,7 +223,7 @@ B.inter = {
 
 /* ===================================================================== VISTA: Celulares / Enviar y recibir */
 V.celular = {
-  titulo: "Celulares",
+  titulo: "Celulares", sup: true,          // por ahora, solo supervisores
   sub() { return B.modoMovil ? "Enviar mis capturas a la PC y recibir los datos del turno" : "Intercambio de información con la versión para celular (por WhatsApp o correo)"; },
   leerArchivo(file) { return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result)); r.onerror = () => rej(new Error("No se pudo leer el archivo.")); r.readAsText(file); }); },
   fallasHtml(fallas) {

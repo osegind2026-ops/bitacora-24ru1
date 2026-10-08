@@ -413,9 +413,9 @@ B.dom = {
     // liberados en turnos anteriores, en orden de # de liberacion, para tener a la vista los mas recientes.
     const ec = this.ecDelTurno(f, t);
     const acum = B.estado.ec.filter(e => !e.pre && e.fecha && B.t.clave(e.fecha, e.turno) <= K).length;
-    // Todos los espacios que SIGUEN LIBERADOS al cierre del turno, con su ultimo monitoreo: van en una SEGUNDA HOJA del reporte.
-    // La primera hoja conserva el modelo de siempre: liberados en el turno + ultimos liberados.
-    const ecMon = this.ecFilasMon(f, t, false);
+    // Espacios de turnos anteriores que SIGUEN LIBERADOS al cierre del turno, con su ultimo monitoreo. No entran los de
+    // pre-recarga (PR) ni los ya cerrados. Van en la misma hoja si caben; si son muchos, pasan a una segunda hoja.
+    const ecMon = this.ecFilasMon(f, t, true).filter(x => !x.e.pre);
     const ultEc = ec.length >= 5 ? [] : B.estado.ec.filter(e => e.fecha && B.t.clave(e.fecha, e.turno) < K)
       .sort((a, b) => b.num - a.num).slice(0, 5 - ec.length).sort((a, b) => a.num - b.num);
     const n = e => lista.filter(x => e.includes(x.est)).length;

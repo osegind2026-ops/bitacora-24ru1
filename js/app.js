@@ -7,7 +7,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "2.1", servidorViejo: false,
+  info: {}, VERSION: "2.2", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -158,6 +158,11 @@ B.app = {
   /* ---------------------------------------------------------------- shell */
   entrar(recienLogin) {
     document.querySelector(".cargando")?.remove();
+    // la version para celular esta reservada, por ahora, a los supervisores (config.celTecnicos = true la abre a los tecnicos)
+    if (B.modoMovil && !B.dom.esSup() && !(B.estado.config || {}).celTecnicos) {
+      B.token = null; B.usuario = null; B.local.sesion = null; sessionStorage.removeItem("b_local_sesion"); sessionStorage.removeItem("b_token");
+      return this.pantallaLogin("La versión para celular está reservada, por ahora, a los supervisores. Captura en la bitácora de la PC.");
+    }
     if (B.vistas.actividades) B.vistas.actividades.ini = null;
     if (B.vistas.historial) B.vistas.historial.persona = null;
     if (B.vistas.pendientes) B.vistas.pendientes.filtro = "";
@@ -169,8 +174,7 @@ B.app = {
     const enlaces = [
       ["MI TURNO", [["inicio", "Inicio", "inicio"], ["actividades", "Mis actividades", "lista"], ["horasextra", sup ? "Horas extra (captura)" : "Mis horas extra", "calendario"], ["espacios", "Espacios confinados", "escudo"], ["monitoreo", "Monitoreo de E.C.", "reloj"],
         ["vigilancias", "Vigilancias C.I.", "fuego"], ["pendientes", sup ? "Pendientes (todos)" : "Mis pendientes", "reloj"], ["historial", sup ? "Historial por persona" : "Mi historial", "historial"], ["oficio", sup ? "Oficios de tiempo extra" : "Mi oficio de tiempo extra", "doc"]]],
-      ["CONSULTA", [["concentrados", "Concentrados", "doc"]].concat(sup ? [["registros", "Registros del personal", "usuarios"]] : [["hoja", "Hoja de asignación", "pdf"]])
-        .concat([["celular", B.modoMovil ? "Enviar / recibir" : "Celulares", "subir"]])]
+      ["CONSULTA", [["concentrados", "Concentrados", "doc"]].concat(sup ? [["registros", "Registros del personal", "usuarios"], ["celular", B.modoMovil ? "Enviar / recibir" : "Celulares", "subir"]] : [])]
     ];
     if (sup) {
       enlaces.push(["SUPERVISIÓN", [["turno", "Datos del turno", "usuarios"], ["reporte", "Reporte del turno", "pdf"], ["hoja", "Hoja de asignación", "doc"], ["asistencia", "Asistencia y horas extra", "calendario"]]]);
@@ -182,7 +186,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? "Supervisor" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "2.1")}</div>
+          <div class="lateral-pie">${sup ? "Supervisor" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "2.2")}</div>
         </aside>
         <div class="principal">
           <header class="barra">

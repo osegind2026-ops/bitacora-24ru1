@@ -22,9 +22,9 @@ V.monitoreo = {
       <div class="tarjeta" data-tour="mon-resumen">${cab("reloj", faltan.length ? "r" : "v", `Espacios que siguen liberados (${seg.length})`,
         seg.length ? (faltan.length ? `<b style="color:var(--rojo)">${faltan.length} sin monitoreo</b> en ${B.t.corto(f, t)} · ${seg.length - faltan.length} ya monitoreados en el turno.` : `Todos tienen monitoreo en ${B.t.corto(f, t)}.`)
           : "No hay espacios confinados abiertos a esta fecha.",
-        `${seg.length ? `<button class="btn sec" id="mnBitTodas" title="Hojas en blanco para anotar a mano en campo">${B.ico("imprimir")} Bitácoras para llenar (${seg.length})</button>` : ""}
+        `${sup && seg.length ? `<button class="btn sec" id="mnBitTodas" title="Hojas en blanco para anotar a mano en campo">${B.ico("imprimir")} Bitácoras para llenar (${seg.length})</button>` : ""}
          ${sup && seg.length ? `<button class="btn sec" id="mnCerrarVarios">${B.ico("ok")} Cerrar varios…</button>` : ""}`)}
-        <div class="aviso a">${B.ico("info")}<div>En campo anota cada monitoreo <b>a mano</b> en la bitácora impresa del espacio. Al terminar el turno transcríbelos con <b>Capturar monitoreos</b>, cada uno con su fecha y hora real.
+        <div class="aviso a">${B.ico("info")}<div>En campo anota cada monitoreo <b>a mano</b> en la bitácora impresa del espacio${sup ? "" : " (te la entrega el supervisor)"}. Al terminar el turno transcríbelos con <b>Capturar monitoreos</b>, cada uno con su fecha y hora real.
           El espacio sigue abierto hasta que un <b>supervisor</b> registra su cierre.</div></div>
         <div class="lista" data-tour="mon-lista">${seg.length ? seg.map(({ e, u, ok, elevs }) => `
           <div class="item" data-num="${e.num}" style="flex-wrap:wrap;align-items:flex-start">
@@ -38,7 +38,7 @@ V.monitoreo = {
             <div style="display:flex;gap:6px;flex-wrap:wrap;width:100%;margin-top:8px">
               <button class="btn chico verde" data-a="cap">${B.ico("mas")} Capturar monitoreos</button>
               <button class="btn chico sec" data-a="his">${B.ico("historial")} Historial (${D.ecMons(e).length})</button>
-              <button class="btn chico sec" data-a="bit">${B.ico("imprimir")} Bitácora</button>
+              ${sup ? `<button class="btn chico sec" data-a="bit">${B.ico("imprimir")} Bitácora</button>` : ""}
               ${sup ? `<button class="btn chico fantasma" data-a="cer">${B.ico("ok")} Cerrar espacio</button>` : ""}
             </div>
           </div>`).join("") : ui.vacio("Sin espacios confinados abiertos.", "escudo")}</div>
@@ -46,7 +46,7 @@ V.monitoreo = {
       ${cerrados.length ? `<div class="tarjeta">${cab("ok", "g", "Espacios cerrados recientemente", "Ya no requieren monitoreo. Su historial se conserva.")}
         <div class="lista">${cerrados.map(e => `<div class="item" data-num="${e.num}" style="flex-wrap:wrap"><div class="cuerpo" style="min-width:220px"><div class="tit" style="font-weight:600">EC #${U.esc(D.ecNum(e))} · ${U.esc(e.esp)}</div>
           <div class="meta"><span>liberado ${e.lib ? U.fh(e.lib) : U.corta(e.fecha)}</span><span>cerrado ${U.fh(e.cierre)} por ${U.esc(e.cerro || "")}</span><span>${(e.mon || []).length} monitoreo(s)</span></div></div>
-          <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn chico sec" data-a="his">${B.ico("historial")} Historial</button><button class="btn chico sec" data-a="bitc">${B.ico("imprimir")} Bitácora</button>
+          <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn chico sec" data-a="his">${B.ico("historial")} Historial</button>${sup ? `<button class="btn chico sec" data-a="bitc">${B.ico("imprimir")} Bitácora</button>` : ""}
           ${sup ? `<button class="btn chico fantasma" data-a="rea">Reabrir</button>` : ""}</div></div>`).join("")}</div></div>` : ""}`;
     const ec = n => B.estado.ec.find(x => +x.num === +n);
     c.querySelectorAll(".item[data-num] [data-a]").forEach(b => b.onclick = async () => {

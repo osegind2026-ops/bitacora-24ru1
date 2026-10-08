@@ -88,10 +88,17 @@ B.rep.documento = function (titulo, cuerpo, horizontal) {
     c.style.zoom = "";
     // renglones opcionales (4o y 5o de "ultimos espacios confinados"): se quitan si el reporte no cabe en una hoja
     var op = c.querySelectorAll("tr.opc"), i;
-    for (i = 0; i < op.length; i++) op[i].style.display = "";
-    for (i = 0; i < op.length && c.scrollHeight > disp; i++) op[i].style.display = "none";
-    var h = c.scrollHeight;
-    if (h > disp && h <= disp * 1.25) c.style.zoom = (disp / h * 0.96).toFixed(3);
+    var lim = disp * 0.97;      // pequeno margen: evita que el ultimo cuadro (firmas) brinque solo a otra hoja
+    function medir() {
+      for (i = 0; i < op.length; i++) op[i].style.display = "";
+      for (i = 0; i < op.length && c.scrollHeight > lim; i++) op[i].style.display = "none";
+      return c.scrollHeight;
+    }
+    var h = medir();
+    // monitoreo de los espacios que siguen liberados: si ya son muchos y el reporte no cabe en la hoja, pasa completo a una segunda hoja
+    var m = c.querySelector(".ecmon");
+    if (m && h > disp * 1.12) { m.classList.add("aparte"); c.parentNode.appendChild(m); h = medir(); }
+    if (h > lim && h <= disp * 1.25) c.style.zoom = (disp / h * 0.95).toFixed(3);
   }
   if (document.readyState === "complete") ajustar(); else window.addEventListener("load", ajustar);
   </script></body></html>`;
@@ -131,19 +138,6 @@ B.rep.turno = function (f, t) {
         ["o2", "hr", "temp", "lel", "co", "h2s"].map(k => `<td class="c ${B.dom.rango(k, e[k]) ? "fuera" : ""}">${U.esc(e[k])}</td>`).join("") +
         `<td class="c">${U.fh(e.lib)}</td><td class="c">${U.esc(e.pers)}${e.obs ? `<div class="com obs">${U.esc(e.obs)}</div>` : ""}</td></tr>`).join("") + `</table>`;
   }
-  if (d.ecMon.length) {
-    // espacios de turnos anteriores que siguen liberados: valores de su ULTIMO monitoreo; se resalta el que no tuvo monitoreo en el turno
-    algo = true;
-    hMon = `<div class="ecmon aparte"><div class="tit2">ESPACIOS CONFINADOS QUE SIGUEN LIBERADOS · ÚLTIMO MONITOREO &nbsp; <span class="rojo">${t} ${U.corta(f)}</span></div>
-      <table class="sec">${d.ecMon.length > 10 ? pct([5, 20.1, 6.6, 6.6, 6.6, 6.6, 6.6, 6.6, 13, 22.3]) : pct([14.4, 4.3, 17.2, 5.6, 5.6, 5.6, 5.6, 5.6, 5.6, 11.1, 19.4])}
-      ${d.ecMon.length > 10 ? `<tr><th colspan="10" style="font-size:8pt">ESPACIOS CONFINADOS QUE SIGUEN LIBERADOS (ÚLTIMO MONITOREO)</th></tr><tr>`   /* tabla larga: sin la celda lateral, para que pueda continuar en otra hoja */
-        : `<tr><td class="lbl" rowspan="${d.ecMon.length + 1}">ESPACIOS<br>CONFINADOS<br>QUE SIGUEN<br>LIBERADOS<br><span style="font-weight:normal;font-size:7pt">(último monitoreo)</span></td>`}
-      <th>#</th><th>ESPACIO CONFINADO</th><th>O2<br>(%)</th><th>HR<br>(%)</th><th>TEMP<br>(°C)</th><th>LEL<br>(%)</th><th>CO<br>(ppm)</th><th>H2S<br>(ppm)</th>
-      <th>ÚLTIMO MONITOREO</th><th>PERSONAL TSI / OBSERVACIONES</th></tr>` +
-      d.ecMon.map(({ e, u, ok, elev }) => `<tr class="${ok ? "" : "falta"}"><td class="c b">${U.esc(B.dom.ecNum(e))}</td><td class="c">${U.esc(e.esp)}${elev ? `<div class="b">ELEV. ${U.esc(elev)}</div>` : ""}${ok ? "" : `<div class="faltan">SIN MONITOREO EN EL TURNO</div>`}</td>` +
-        ["o2", "hr", "temp", "lel", "co", "h2s"].map(k => `<td class="c ${B.dom.rango(k, u[k]) ? "fuera" : ""}">${U.esc(u[k])}</td>`).join("") +
-        `<td class="c">${U.fh(u.fh)}${u.lib ? `<div class="com obs">liberación</div>` : ""}</td><td class="c">${U.esc(u.pers)}${u.obs && !u.lib ? `<div class="com obs">${U.esc(u.obs)}</div>` : ""}</td></tr>`).join("") + `</table></div>`;
-  }
   if (d.ultEc.length) {
     // completa hasta 5 con los ultimos liberados en turnos anteriores (en orden de #); los mas antiguos ("opc")
     // se quitan solos si el reporte no cabe en una hoja carta, dejando minimo 3 espacios a la vista
@@ -152,6 +146,19 @@ B.rep.turno = function (f, t) {
       <th>#</th><th>ESPACIO CONFINADO / UBICACIÓN</th><th>DÍA QUE SE LIBERÓ / HORA</th><th>LIBERÓ (PERSONAL TSI)</th></tr>` +
       d.ultEc.map((e, i) => `<tr class="${i < d.ultOpc ? "opc " : ""}${B.dom.ecFaltan(e).length ? "falta" : ""}"><td class="c b">${U.esc(B.dom.ecNum(e))}</td><td>${U.esc(e.esp)}${faltan(e)}</td>
         <td class="c">${e.lib ? U.fh(e.lib) : U.corta(e.fecha) + " " + e.turno}</td><td class="c">${U.esc(e.pers || e.capt || "")}</td></tr>`).join("") + `</table>`;
+  }
+  if (d.ecMon.length) {
+    // espacios de turnos anteriores que siguen liberados: valores de su ULTIMO monitoreo; se resalta el que no tuvo monitoreo en el turno
+    algo = true;
+    h += `<div class="ecmon"><div class="tit2">ESPACIOS CONFINADOS QUE SIGUEN LIBERADOS · ÚLTIMO MONITOREO &nbsp; <span class="rojo">${t} ${U.corta(f)}</span></div>
+      <table class="sec">${d.ecMon.length > 10 ? pct([5, 20.1, 6.6, 6.6, 6.6, 6.6, 6.6, 6.6, 13, 22.3]) : pct([14.4, 4.3, 17.2, 5.6, 5.6, 5.6, 5.6, 5.6, 5.6, 11.1, 19.4])}
+      ${d.ecMon.length > 10 ? `<tr><th colspan="10" style="font-size:8pt">ESPACIOS CONFINADOS QUE SIGUEN LIBERADOS (ÚLTIMO MONITOREO)</th></tr><tr>`   /* tabla larga: sin la celda lateral, para que pueda continuar en otra hoja */
+        : `<tr><td class="lbl" rowspan="${d.ecMon.length + 1}">ESPACIOS<br>CONFINADOS<br>QUE SIGUEN<br>LIBERADOS<br><span style="font-weight:normal;font-size:7pt">(último monitoreo)</span></td>`}
+      <th>#</th><th>ESPACIO CONFINADO</th><th>O2<br>(%)</th><th>HR<br>(%)</th><th>TEMP<br>(°C)</th><th>LEL<br>(%)</th><th>CO<br>(ppm)</th><th>H2S<br>(ppm)</th>
+      <th>ÚLTIMO MONITOREO</th><th>PERSONAL TSI / OBSERVACIONES</th></tr>` +
+      d.ecMon.map(({ e, u, ok, elev }) => `<tr class="${ok ? "" : "falta"}"><td class="c b">${U.esc(B.dom.ecNum(e))}</td><td class="c">${U.esc(e.esp)}${elev ? `<div class="b">ELEV. ${U.esc(elev)}</div>` : ""}${ok ? "" : `<div class="faltan">SIN MONITOREO EN EL TURNO</div>`}</td>` +
+        ["o2", "hr", "temp", "lel", "co", "h2s"].map(k => `<td class="c ${B.dom.rango(k, u[k]) ? "fuera" : ""}">${U.esc(u[k])}</td>`).join("") +
+        `<td class="c">${U.fh(u.fh)}${u.lib ? `<div class="com obs">liberación</div>` : ""}</td><td class="c">${U.esc(u.pers)}${u.obs && !u.lib ? `<div class="com obs">${U.esc(u.obs)}</div>` : ""}</td></tr>`).join("") + `</table></div>`;
   }
   if (d.acts.length) {
     algo = true;
