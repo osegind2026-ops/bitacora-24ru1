@@ -241,6 +241,9 @@ table.tabla { width: 100%; border-collapse: collapse; font-size: 13px; }
 .mon-val b { font-size: 10px; color: var(--texto-3); font-weight: 700; }
 .mon-val.fuera { background: var(--rojo-claro); color: var(--rojo); font-weight: 700; }
 @media (max-width: 640px) { .mon-fila { grid-template-columns: 1fr 1fr; position: relative; } .mon-fila .lecturas { grid-template-columns: repeat(3, minmax(0, 1fr)); } .mon-fila .quitar { position: absolute; top: 4px; right: 4px; margin: 0; } }
+.ec-fila.ec-noLib { border-color: #E3A8A1; background: #FFF8F7; }
+.ec-res .seg button.on[data-v="NO liberado"] { color: var(--rojo); }
+.ec-nl { display: flex; gap: 8px; align-items: flex-start; margin-top: 6px; font-size: 12px; line-height: 1.45; color: #7a2018; background: var(--rojo-claro); border-radius: 8px; padding: 6px 10px; }
 .ec-ult { grid-column: 1 / -1; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 12px; color: var(--texto-2); background: #FFF8E6; border: 1px solid #EAD9A8; border-radius: 8px; padding: 6px 10px; margin-top: 6px; line-height: 1.4; }
 .ec-ult:empty { display: none; }
 .ec-ult span { flex: 1; min-width: 200px; }
