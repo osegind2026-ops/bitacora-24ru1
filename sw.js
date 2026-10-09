@@ -1,6 +1,6 @@
-// Bitacora 24RU1 para celular (version 2.4). La aplicacion se sirve desde la copia guardada en el telefono.
-const CACHE = "b24-2.4-202610090523";
-const ESENCIAL = ["./", "css/app.css?v=202610090523", "js/bitacora.js?v=202610090523", "fonts/montserrat-latin-400-normal.woff2", "fonts/montserrat-latin-500-normal.woff2", "fonts/montserrat-latin-600-normal.woff2", "fonts/montserrat-latin-700-normal.woff2", "img/bitacora.ico", "img/icono-192.png", "img/membrete.png", "manifest.webmanifest"];
+// Bitacora 24RU1 para celular (version 2.5). La aplicacion se sirve desde la copia guardada en el telefono.
+const CACHE = "b24-2.5-202610090612";
+const ESENCIAL = ["./", "css/app.css?v=202610090612", "js/bitacora.js?v=202610090612", "fonts/montserrat-latin-400-normal.woff2", "fonts/montserrat-latin-500-normal.woff2", "fonts/montserrat-latin-600-normal.woff2", "fonts/montserrat-latin-700-normal.woff2", "img/bitacora.ico", "img/icono-192.png", "img/membrete.png", "manifest.webmanifest"];
 const RESTO = ["ayuda/Guia_Rapida_Tecnicos.pdf", "img/hojaCfe.png", "img/hojaEscudo.png", "img/hojaPlanta.png", "img/ico1.png", "img/ico2.png", "img/ico3.png", "img/icono-512.png", "img/icono-adaptable-512.png", "img/icono-apple-180.png", "img/ofDer.png", "img/ofIzq.png", "img/ofPie.png", "img/pie.png"];
 self.addEventListener("install", e => e.waitUntil(caches.open(CACHE).then(c => c.addAll(ESENCIAL)).then(() => self.skipWaiting())));
 self.addEventListener("activate", e => e.waitUntil(
