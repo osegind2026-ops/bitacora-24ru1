@@ -753,7 +753,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "2.5", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "2.6", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -909,13 +909,14 @@ B.local = {
       for (const k of ["o2", "hr", "temp", "lel", "co", "h2s", "obs"]) e[k] = String(src[k] ?? "").trim();
       if (String(src.elev || "").trim()) e.elev = String(src.elev).trim();
       e.pers = U.ini(pers) || s.ini; e.lib = fh; e.fecha = tt.f; e.turno = tt.t;
-      e.nlNum = e.num; delete e.noLib; e.num = sigEc(L.filter(x => x !== e), false, inicio);
+      const antes = +e.numLib || 0, disp = antes > 0 && antes <= 900000 && !L.some(x => x !== e && +x.num === antes);
+      e.nlNum = e.num; delete e.noLib; e.num = disp ? antes : sigEc(L.filter(x => x !== e), false, inicio); delete e.numLib;
       e.liberoPor = auto ? "AUTO" : s.ini; e.mod = ahora() + " " + s.ini;
       return null;
     };
     // consecutivo de espacios confinados: liberados por un lado; NO LIBERADOS con folios 900001... (se muestran NL-n)
     const sigEc = (L, nl, inicio) => nl ? Math.max(900000, ...L.map(x => +(x.noLib ? x.num : x.nlNum) || 0)) + 1
-      : Math.max(L.filter(x => !x.noLib && +x.num <= 900000).reduce((m, x) => Math.max(m, +x.num || 0), 0) + 1, inicio || 0);
+      : Math.max(L.map(x => +(x.noLib ? x.numLib : x.num) || 0).filter(n => n <= 900000).reduce((m, n) => Math.max(m, n), 0) + 1, inicio || 0);
     const key = col + "." + acc;
     // una actividad asignada a varias personas es UNA sola: sus registros comparten "grupo"
     const grupoDe = (L, a) => a.grupo ? L.filter(x => x.grupo === a.grupo) : [a];
@@ -1168,6 +1169,19 @@ B.local = {
         }
         await this.escribir("he", L); return { ok: true, n: (d.items || []).length };
       }
+      case "ec.estatus": {
+        if (!sup) throw new Error("Solo un supervisor puede cambiar el estatus de un espacio confinado.");
+        const L = await this.leer("ec") || [], e = L.find(x => +x.num === +d.num);
+        if (!e) throw new Error("Registro no encontrado.");
+        const nl = d.noLib === true, inicio = +((await this.leer("config")) || {}).ecInicio || 0;
+        if (nl !== !!e.noLib) {
+          if (nl) { const folio = sigEc(L, true, inicio); e.numLib = e.num; e.noLib = true; e.num = folio; }
+          else { const prev = +e.numLib || 0, libre = prev > 0 && prev <= 900000 && !L.some(x => x !== e && +x.num === prev);
+            e.nlNum = e.num; delete e.noLib; e.num = libre ? prev : sigEc(L.filter(x => x !== e), false, inicio); delete e.numLib; }
+          e.mod = ahora() + " " + s.ini; await this.escribir("ec", L);
+        }
+        return { ok: true, num: e.num };
+      }
       case "ec.liberar": {
         if (!sup) throw new Error("Solo un supervisor puede liberar manualmente. El espacio se libera solo al capturar una prueba con todos sus parámetros satisfactorios.");
         const L = await this.leer("ec") || [], e = L.find(x => +x.num === +d.num);
@@ -1216,7 +1230,7 @@ B.local = {
         soloSup();
         const n = col, L = await this.leer(n) || [], x = L.find(y => +y.num === +d.num);
         if (!x) throw new Error("Registro no encontrado.");
-        const campos = n === "ec" ? ["esp", "o2", "hr", "temp", "lel", "co", "h2s", "lib", "pers", "obs", "fecha", "turno", "edif", "elev", "equipo", "cuarto", "ilum", "ruido", "otros", "epp", "tLig", "tMod", "tPes", "tDesc"] : ["desc", "inicio", "inop", "ubic", "comp", "retiro", "obs", "fecha", "turno"];
+        const campos = n === "ec" ? ["esp", "o2", "hr", "temp", "lel", "co", "h2s", "lib", "pers", "obs", "fecha", "turno", "cierre", "edif", "elev", "equipo", "cuarto", "ilum", "ruido", "otros", "epp", "tLig", "tMod", "tPes", "tDesc"] : ["desc", "inicio", "inop", "ubic", "comp", "retiro", "obs", "fecha", "turno"];
         for (const k of campos) if (k in d) x[k] = d[k];
         if (n === "ec" && "pre" in d) x.pre = String(d.pre || "").toUpperCase();
         if (n === "ec" && d.numNuevo && String(d.numNuevo) !== String(x.num)) {
@@ -2664,19 +2678,42 @@ V.concentrados = {
   },
   async editar(col, num) {
     const x = (col === "ec" ? B.estado.ec : B.estado.vig).find(y => y.num === num);
-    const campos = col === "ec" ? [["esp", "Espacio"], ["o2", "O2 %"], ["hr", "HR %"], ["temp", "Temp °C"], ["lel", "LEL %"], ["co", "CO ppm"], ["h2s", "H2S ppm"], ["lib", "Liberado (AAAA-MM-DDTHH:MM)"], ["pers", "Personal TSI"], ["obs", "Observaciones"],
+    const campos = col === "ec" ? [["esp", "Espacio"], ["o2", "O2 %"], ["hr", "HR %"], ["temp", "Temp °C"], ["lel", "LEL %"], ["co", "CO ppm"], ["h2s", "H2S ppm"], ["lib", "Liberación o 1ª prueba (AAAA-MM-DDTHH:MM)"], ["fecha", "Fecha del reporte (AAAA-MM-DD)"], ["turno", "Turno del reporte (T1 o T2)"], ["cierre", "Cierre (AAAA-MM-DDTHH:MM; vacío = sigue liberado)"], ["pers", "Personal TSI"], ["obs", "Observaciones"],
         ["edif", "Edificio"], ["elev", "Elevación"], ["equipo", "Equipo"], ["cuarto", "Cuarto"], ["ilum", "Iluminación"], ["ruido", "Ruido (dB)"], ["otros", "Otros"], ["epp", "Equipo de protección"],
         ["tLig", "Estancia trabajo ligero"], ["tMod", "Estancia trabajo moderado"], ["tPes", "Estancia trabajo pesado"], ["tDesc", "Descanso"]]
       : [["desc", "Descripción"], ["inicio", "Inicio (AAAA-MM-DDTHH:MM)"], ["inop", "# INOP"], ["ubic", "Ubicación"], ["comp", "Componente"], ["retiro", "Retiro (AAAA-MM-DDTHH:MM, vacío = activa)"], ["obs", "Observaciones"]];
-    const extra = col === "ec" ? `<div class="grid2" style="background:var(--dorado-claro);border-radius:10px;padding:10px 12px 0;margin-bottom:12px">
-        <div class="campo"><label># de espacio confinado</label><input class="inp tnum" data-k="numNuevo" type="number" min="1" step="1" value="${x.num}"></div>
+    const extra = col === "ec" ? `<div class="campo"><label>Estatus del espacio</label>${ui.seg("ecEst", ["Liberado", "NO liberado"], x.noLib ? "NO liberado" : "Liberado")}
+          <span class="ayuda">Corrige aquí un espacio que se marcó mal. <b>NO liberado</b>: deja de contar y de salir en el reporte de liberados (queda en Monitoreo de E.C.). <b>Liberado</b>: toma las lecturas y la hora de este registro.</span></div>
+      <div class="grid2" style="background:var(--dorado-claro);border-radius:10px;padding:10px 12px 0;margin-bottom:12px${x.noLib ? ";display:none" : ""}">
+        <div class="campo"><label># de espacio confinado</label><input class="inp tnum" ${x.noLib ? "" : 'data-k="numNuevo"'} type="number" min="1" step="1" value="${x.num}"></div>
         <div class="campo"><label>Marca (PR = pre-recarga; vacío = recarga)</label><input class="inp" data-k="pre" value="${U.esc(x.pre || "")}" maxlength="4" style="text-transform:uppercase" placeholder="vacío"></div></div>
         <p class="muted peque" style="margin:-4px 0 12px">Si cambias el #, no puede repetirse con el de otro espacio. El siguiente registro nuevo toma el número más alto + 1.</p>` : "";
     const r = await ui.modal({
       titulo: (col === "ec" ? "Corregir EC #" + B.dom.ecNum(x) : "Corregir VIG #" + num), icono: "editar",
       html: `${extra}<div class="grid2">${campos.map(([k, e]) => `<div class="campo"><label>${e}</label><input class="inp" data-k="${k}" value="${U.esc(x[k] ?? "")}"></div>`).join("")}</div>`, ancho: true,
-      botones: [{ t: "Cancelar", c: "sec", v: null }, { t: "Guardar", v: v => { const o = { num }; v.querySelectorAll("[data-k]").forEach(i => o[i.dataset.k] = i.value.trim()); return o; } }]
+      alAbrir: v => ui.activarSeg(v),
+      botones: [{ t: "Cancelar", c: "sec", v: null }, { t: "Guardar", v: v => { const o = { num }; v.querySelectorAll("[data-k]").forEach(i => o[i.dataset.k] = i.value.trim());
+        const sg = v.querySelector('[data-seg="ecEst"]'); if (sg) o._nl = ui.segValor(sg) === "NO liberado"; return o; } }]
     });
+    if (r && col === "ec") {
+      // validaciones para que el reporte no quede con datos imposibles
+      const FH = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
+      if (r.lib && !FH.test(r.lib)) { ui.toast("La liberación debe escribirse como AAAA-MM-DDTHH:MM (ej. 2026-10-05T14:30).", "error", 7000); return; }
+      if (r.cierre && !FH.test(r.cierre)) { ui.toast("El cierre debe escribirse como AAAA-MM-DDTHH:MM, o dejarse vacío.", "error", 7000); return; }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(r.fecha)) { ui.toast("La fecha del reporte debe escribirse como AAAA-MM-DD.", "error", 7000); return; }
+      r.turno = String(r.turno || "").toUpperCase(); if (r.turno !== "T1" && r.turno !== "T2") { ui.toast("El turno del reporte debe ser T1 o T2.", "error"); return; }
+      if (r.lib && r.cierre && r.cierre < r.lib) { ui.toast("El cierre no puede ser anterior a la liberación.", "error"); return; }
+      if (r.lib) { const tt = B.t.de(r.lib); if ((tt.f !== r.fecha || tt.t !== r.turno) && !(await ui.confirmar(`Por su hora (${U.fh(r.lib)}) esta liberación corresponde al turno <b>${B.t.corto(tt.f, tt.t)}</b>, pero el registro quedará en <b>${B.t.corto(r.fecha, r.turno)}</b>. Saldrá en el reporte de ese turno.`, "Fecha y turno del reporte", "Guardar así"))) return; }
+      const cambiaEst = "_nl" in r && r._nl !== !!x.noLib, aNL = r._nl; delete r._nl;
+      if (cambiaEst && !(await ui.confirmar(aNL ? `El <b>EC #${U.esc(B.dom.ecNum(x))}</b> pasará a <b>NO LIBERADO</b>: deja de contar y de salir en los reportes de liberados. Su número queda reservado por si se vuelve a liberar.`
+        : `El registro pasará a <b>LIBERADO</b> con las lecturas y la hora que tiene, y recibirá su número de espacio confinado.`, "Cambiar estatus del espacio", "Cambiar estatus", true))) return;
+      if (r.numNuevo && +r.numNuevo !== num && B.estado.ec.some(y => y.num === +r.numNuevo)) { ui.toast("El # " + U.esc(r.numNuevo) + " ya lo tiene otro espacio confinado. Elige otro número.", "error", 7000); return; }
+      await ejecutar(async () => {
+        await B.api.op("ec", "actualizar", r);
+        if (cambiaEst) await B.api.op("ec", "estatus", { num: r.numNuevo && !x.noLib ? +r.numNuevo : num, noLib: aNL });
+      }, cambiaEst ? "Registro corregido y estatus cambiado a " + (aNL ? "NO LIBERADO." : "LIBERADO.") : "Registro corregido.");
+      return;
+    }
     if (r && col === "ec" && r.numNuevo && +r.numNuevo !== num && B.estado.ec.some(y => y.num === +r.numNuevo)) { ui.toast("El # " + U.esc(r.numNuevo) + " ya lo tiene otro espacio confinado. Elige otro número.", "error", 7000); return; }
     if (r) await ejecutar(() => B.api.op(col, "actualizar", r), "Registro corregido.");
   }
@@ -2725,7 +2762,7 @@ V.monitoreo = {
               <button class="btn chico verde" data-a="cap">${B.ico("mas")} Capturar monitoreos</button>
               <button class="btn chico sec" data-a="his">${B.ico("historial")} Historial (${D.ecMons(e).length})</button>
               ${sup ? `<button class="btn chico sec" data-a="bit">${B.ico("imprimir")} Bitácora</button>` : ""}
-              ${sup ? `<button class="btn chico fantasma" data-a="cer">${B.ico("ok")} Cerrar espacio</button>` : ""}
+              ${sup ? `<button class="btn chico fantasma" data-a="cer">${B.ico("ok")} Cerrar espacio</button><button class="btn chico fantasma" data-a="edi" title="Corregir lecturas, hora, número, fecha del reporte o estatus">${B.ico("editar")} Editar registro</button>` : ""}
             </div>
           </div>`).join("") : ui.vacio("Sin espacios confinados abiertos.", "escudo")}</div>
       </div>
@@ -2738,13 +2775,13 @@ V.monitoreo = {
           <span class="badge r" style="margin-top:2px">NO LIBERADO</span>
           <div style="display:flex;gap:6px;flex-wrap:wrap;width:100%;margin-top:8px">
             <button class="btn chico verde" data-a="cap">${B.ico("mas")} Capturar otra prueba</button>
-            ${sup ? `<button class="btn chico sec" data-a="lib" title="Solo supervisores">${B.ico("ok")} Liberar manualmente</button>` : ""}
+            ${sup ? `<button class="btn chico sec" data-a="lib" title="Solo supervisores: con las lecturas de una prueba nueva">${B.ico("ok")} Liberar manualmente</button><button class="btn chico fantasma" data-a="edi" title="Corregir lecturas u hora, o cambiar el estatus si se marcó mal">${B.ico("editar")} Editar registro</button>` : ""}
             <button class="btn chico sec" data-a="his">${B.ico("historial")} Historial (${D.ecMons(e).length})</button></div></div>`; }).join("")}</div></div>` : ""}
       ${cerrados.length ? `<div class="tarjeta">${cab("ok", "g", "Espacios cerrados recientemente", "Ya no requieren monitoreo. Su historial se conserva.")}
         <div class="lista">${cerrados.map(e => `<div class="item" data-num="${e.num}" style="flex-wrap:wrap"><div class="cuerpo" style="min-width:220px"><div class="tit" style="font-weight:600">EC #${U.esc(D.ecNum(e))} · ${U.esc(e.esp)}</div>
           <div class="meta"><span>liberado ${e.lib ? U.fh(e.lib) : U.corta(e.fecha)}</span><span>cerrado ${U.fh(e.cierre)} por ${U.esc(e.cerro || "")}</span><span>${(e.mon || []).length} monitoreo(s)</span></div></div>
           <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn chico sec" data-a="his">${B.ico("historial")} Historial</button>${sup ? `<button class="btn chico sec" data-a="bitc">${B.ico("imprimir")} Bitácora</button>` : ""}
-          ${sup ? `<button class="btn chico fantasma" data-a="rea">Reabrir</button>` : ""}</div></div>`).join("")}</div></div>` : ""}`;
+          ${sup ? `<button class="btn chico fantasma" data-a="rea">Reabrir</button><button class="btn chico fantasma" data-a="edi">${B.ico("editar")} Editar registro</button>` : ""}</div></div>`).join("")}</div></div>` : ""}`;
     const ec = n => B.estado.ec.find(x => +x.num === +n);
     c.querySelectorAll(".item[data-num] [data-a]").forEach(b => b.onclick = async () => {
       const e = ec(b.closest("[data-num]").dataset.num); if (!e) return;
@@ -2755,6 +2792,7 @@ V.monitoreo = {
       if (a === "bit") return this.imprimir([e], b);
       if (a === "bitc") return B.rep.pdf(B.rep.ecBitacora([e]), b);
       if (a === "cer") return this.cerrar([e]);
+      if (a === "edi") return V.concentrados.editar("ec", e.num);
       if (a === "rea") { if (await ui.confirmar(`¿Reabrir el <b>EC #${U.esc(D.ecNum(e))} · ${U.esc(e.esp)}</b>? Volverá a requerir un monitoreo por turno.`, "Reabrir espacio", "Reabrir")) await ejecutar(() => B.api.op("ec", "reabrir", { num: e.num }), "Espacio reabierto."); }
     });
     const bt = c.querySelector("#mnBitTodas"); if (bt) bt.onclick = () => this.imprimir(seg.map(x => x.e), bt);
@@ -2851,6 +2889,7 @@ V.monitoreo = {
       const e = buscar(); if (!e) return ui.vacio("El registro ya no existe.");
       const l = D.ecMons(e).slice().reverse();
       return `<p style="margin:0 0 2px"><b>EC #${U.esc(D.ecNum(e))} · ${U.esc(e.esp)}</b></p>
+        ${sup ? `<p class="muted peque" style="margin:0 0 6px">Como supervisor puedes corregir o eliminar cualquier monitoreo de esta lista. El renglón de la liberación (lecturas, hora, número) se corrige con <b>Editar registro</b>.</p>` : ""}
         <p class="muted peque" style="margin:0 0 10px">${e.noLib ? "NO LIBERADO" : e.cierre ? "Cerrado " + U.fh(e.cierre) + " por " + U.esc(e.cerro || "") : "Sigue liberado"} · ${l.length} registro(s), del más reciente al más antiguo</p>
         <div class="lista">${l.map(m => { const puede = !m.lib && (sup || U.ini(m.capt) === yoI || D.tokensIni(m.pers).includes(yoI));
           return `<div class="item" style="flex-wrap:wrap;align-items:flex-start" data-id="${m.id}" data-fh="${U.esc(m.fh)}"><div class="cuerpo" style="min-width:220px;flex:1">
@@ -4356,7 +4395,7 @@ B.inter = {
     const que = { "actividades.guardarTurno": () => "Actividades: " + (d.items || []).map(i => i.txt).filter(Boolean).join(" | ").slice(0, 140), "actividades.seguimiento": () => "Seguimiento de pendiente" + (d.comentario ? ": " + d.comentario : ""),
       "actividades.tomar": () => "Tomar actividad por asignar", "actividades.asignar": () => "Asignar: " + (d.txt || ""), "actividades.comentario": () => "Comentario: " + (d.texto || "(eliminado)"),
       "ec.crear": () => "Espacio confinado: " + (d.items || []).map(i => i.esp).join(", "), "ec.sumarme": () => "Agregarme a espacio confinado", "ec.monitoreo": () => "Monitoreo de EC #" + d.num + ": " + (d.items || []).map(i => String(i.fh || "").replace("T", " ")).join(", "),
-      "ec.monEditar": () => "Corrección de monitoreo de EC #" + d.num, "ec.liberar": () => "Liberación de espacio que estaba NO LIBERADO", "ec.cerrar": () => "Cierre de espacio(s) confinado(s) " + (d.nums || []).join(", "), "ec.reabrir": () => "Reabrir EC #" + d.num, "vig.crear": () => "Vigilancia: " + (d.desc || ""), "vig.retirar": () => "Retiro de vigilancia",
+      "ec.monEditar": () => "Corrección de monitoreo de EC #" + d.num, "ec.liberar": () => "Liberación de espacio que estaba NO LIBERADO", "ec.estatus": () => "Cambio de estatus de espacio confinado a " + (d.noLib ? "NO LIBERADO" : "LIBERADO"), "ec.cerrar": () => "Cierre de espacio(s) confinado(s) " + (d.nums || []).join(", "), "ec.reabrir": () => "Reabrir EC #" + d.num, "vig.crear": () => "Vigilancia: " + (d.desc || ""), "vig.retirar": () => "Retiro de vigilancia",
       "he.guardar": () => "Horas extra " + (d.de ? d.de + " a " + d.a : (d.he === "" ? "(quitar)" : d.he + " h")), "he.justificar": () => "Justificación de horas extra", "perfil.guardar": () => "Datos del oficio",
       "turnos.guardar": () => "Datos del turno", "hojas.guardar": () => "Hoja de asignación" }[op.col + "." + op.accion];
     return f + (que ? que() : op.col + "." + op.accion);
@@ -4715,7 +4754,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "2.5", servidorViejo: false,
+  info: {}, VERSION: "2.6", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -4896,7 +4935,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? "Supervisor" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "2.5")}</div>
+          <div class="lateral-pie">${sup ? "Supervisor" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "2.6")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
