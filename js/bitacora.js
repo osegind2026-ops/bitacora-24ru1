@@ -754,7 +754,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "3.1", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "3.2", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -4714,6 +4714,28 @@ V.hoja = {
     botones: [{ t: "Cerrar", c: "sec", v: null }].concat(navigator.share ? [{ t: "Compartir", c: "dorado", antes: async v => { try { await navigator.share({ text: v.querySelector("#msTxt").value }); } catch (e) { } return false; } }] : [])
       .concat([{ t: "Copiar mensaje", c: "verde", antes: async v => { await copiar(v.querySelector("#msTxt").value); return false; } }])
   });
+  /* Resalta en el texto de una tarjeta lo que el supervisor debe mirar: la desviacion o el riesgo (rojo), el EPP (ambar),
+     el equipo, lugar o procedimiento (azul) y la correccion o retroalimentacion (verde). */
+  const LT = "a-záéíóúüñ0-9", PAL = `[${LT}]+`;
+  const CLAVES = new RegExp(`(^|[^${LT}])(?:` + [
+    // riesgo o desviacion
+    `(no (?:se )?(?:utiliz|us|port|ten[ií]a|cont|cumpl|respet|aplic|coloc|verific|delimit)${PAL}?|sin (?:el |la |los |las |su |sus |usar |portar |utilizar )?${PAL}|falta de ${PAL}(?: ${PAL})?|omit${PAL}|incumpl${PAL}|desapeg${PAL}|descuid${PAL}|mala pr[aá]ctica|malas pr[aá]cticas|acto inseguro|actos inseguros|condici[oó]n insegura|condiciones inseguras|l[ií]nea de fuego|ca[ií]das?|golpe${PAL}?|atrapamiento|descarga el[eé]ctrica|lesi[oó]n(?:es)?|accidentes?|incidentes?|incapacitante|energizad[oa]s?|carga suspendida|bajo la carga|mal estado|riesgos?|peligros?)`,
+    // equipo de proteccion personal
+    `(guantes?(?: de (?:carnaza|hule|nitrilo|cuero|seguridad)| diel[eé]ctricos?| anticorte)?|lentes(?: de seguridad)?|gafas|casco|barbiquejo|tapones(?: auditivos)?|protecci[oó]n (?:auditiva|respiratoria|facial|personal)|arn[eé]s|l[ií]nea de vida|careta|respirador(?:es)?|mascarilla|calzado(?: de seguridad)?|botas|ropa de trabajo|camisola|faja|EPP)`,
+    // equipo, lugar o procedimiento
+    `(\\d-[A-Z0-9]{1,6}(?:-[A-Z0-9]{1,6}){1,3}|(?:MSIE|PAG|MO|MP|CP|VO|PT|OT|AB)-? ?\\d[A-Z0-9-]*|nivel(?:es)? -?\\d+(?:\\.\\d+)?|-?\\d{1,2}\\.\\d{2}|andamios?|escaleras?|extensi[oó]n(?:es)?|cilindros?|turbina|reactor|obra de toma|purificaci[oó]n|generadores? di[eé]sel|taller(?:es)?|[aá]reas? externas?)`,
+    // correccion
+    `(se (?:le |les )?(?:corrig|retroaliment|indic|solicit|detuv|suspend|coment|mencion|aconsej|explic|orient|pidi|platic|levant)${PAL}?|corrig${PAL}|retroaliment${PAL}|de inmediato|inmediatamente|tarjeta de observaci[oó]n)`
+  ].join("|") + `)(?![${LT}])`, "gi");
+  const CLASE = ["", "", "kr", "ke", "kl", "kc"];
+  const clave = txt => {
+    txt = String(txt || ""); let out = "", ult = 0;
+    txt.replace(CLAVES, (m, pre, r, e, l, c, pos) => {
+      const g = r != null ? 2 : e != null ? 3 : l != null ? 4 : 5, pal = m.slice(pre.length);
+      out += esc(txt.slice(ult, pos + pre.length)) + `<mark class="${CLASE[g]}">${esc(pal)}</mark>`; ult = pos + m.length; return m;
+    });
+    return (out + esc(txt.slice(ult))).replace(/\n/g, "<br>");
+  };
   const EST = { C: ["v", "Confirmada"], P: ["d", "Por confirmar"], R: ["r", "No válida"] };
   const MARCA = { A: ["r", "ACTO INSEGURO"], C: ["a", "CONDICIÓN INSEGURA"], D: ["n", "DESCARTADA"] };
   const turnoTxt = (f, t) => `${t === "T1" ? "Noche" : "Día"} ${U.cortaDM(f)}`;
@@ -4728,7 +4750,7 @@ V.hoja = {
       TJ.cargar().then(() => { if (n === this._n && B.app.ruta === "tarjetas") this.pinta(); })
         .catch(e => { c.innerHTML = `<div class="aviso r">${B.ico("alerta")}<div>${esc(e.message)}</div></div>`; });
     },
-    async recarga() { await TJ.cargar(); if (B.dom.esSup()) { try { await B.api.recargar(); B.app.contadores(); } catch (e) { } } this.pinta(); },
+    async recarga() { await TJ.cargar(); if (B.dom.esSup()) { try { await B.api.recargar(); B.app.contadores(); } catch (e) { } } return this.pinta(); },
     /* En el celular la seccion abre RESUMIDA (marcador, confirmar, mensajes y un resumen de la semana).
        La vista COMPLETA (cargar Excel, marcar tarjetas, armar la E+1) se activa en el propio equipo para trabajar en remoto;
        en tableta o iPad viene activada. La eleccion se recuerda en ese equipo. */
@@ -4737,8 +4759,10 @@ V.hoja = {
       try { const v = localStorage.getItem("b_tj_completa"); if (v != null) return v === "1"; } catch (e) { }
       return window.innerWidth >= 700;
     },
+    // Vuelve a dibujar la seccion SIN mover la pagina: guarda la posicion, mantiene el alto mientras llega el contenido y la restaura.
     pinta() {
-      const c = this.c, D = TJ.datos, sup = B.dom.esSup(), comp = this.completa();
+      const c = this.c, D = TJ.datos, sup = B.dom.esSup(), comp = this.completa(), y0 = window.scrollY;
+      c.style.minHeight = c.offsetHeight + "px";
       const tabs = [["marcador", "Marcador"], ["mias", "Mis tarjetas"]].concat(!D.editor ? [] : comp ? [["tend", "Tarjetas y tendencias"], ["e1", "Presentación E+1"]] : [["res", "Resumen"]]).concat(sup ? [["ajustes", "Ajustes"]] : D.editor && comp ? [["ajustes", "Semanas cargadas"]] : []);
       if (!tabs.some(x => x[0] === this.tab)) this.tab = this.tab === "tend" || this.tab === "e1" ? "res" : this.tab === "res" ? "tend" : "marcador";
       c.innerHTML = `${B.modoMovil && D.editor ? `<div class="tj-modo"><span>${comp ? "<b>Vista completa</b>: trabajo remoto con todas las funciones." : "<b>Vista resumida</b> para celular."}</span><a href="#" id="tjModo">${comp ? "Cambiar a la vista resumida" : "Usar la vista completa (trabajo remoto)"}</a></div>` : ""}
@@ -4746,7 +4770,8 @@ V.hoja = {
       const mo = c.querySelector("#tjModo"); if (mo) mo.onclick = e => { e.preventDefault(); try { localStorage.setItem("b_tj_completa", comp ? "0" : "1"); } catch (x) { } this.pinta(); };
       c.querySelectorAll(".pestanas button").forEach(b => b.onclick = () => { this.tab = b.dataset.t; this.pinta(); });
       const cu = c.querySelector("#tjCuerpo");
-      Promise.resolve(this["t_" + this.tab](cu)).catch(e => { console.error(e); cu.innerHTML = `<div class="aviso r">${B.ico("alerta")}<div>${esc(e.message)}</div></div>`; });
+      return Promise.resolve(this["t_" + this.tab](cu)).catch(e => { console.error(e); cu.innerHTML = `<div class="aviso r">${B.ico("alerta")}<div>${esc(e.message)}</div></div>`; })
+        .then(() => { c.style.minHeight = ""; window.scrollTo(0, y0); });
     },
 
     /* ------------------------------------------------------------ MARCADOR */
@@ -4857,7 +4882,7 @@ V.hoja = {
           ${porRev.length > 15 ? `<p class="muted peque" style="margin:8px 0 0">Se muestran 15 de ${porRev.length}. Para verlas todas y filtrar usa la vista completa.</p>` : ""}</div>`;
       c.querySelector("#tjSem").onchange = e => { this.sem = e.target.value; this.pinta(); };
       c.querySelector("#tjMsg").onclick = () => modalMsg("Mensaje de seguridad de la semana", "Propuesta armada con las tendencias de la semana. Ajústala antes de compartirla.", TJ.mensajeSeguridad(sem, L));
-      c.querySelectorAll(".tj-item[data-id]").forEach(el => el.onclick = () => this.detalle(L.find(x => x.id === el.dataset.id), sug.get(el.dataset.id), () => { const y = window.scrollY; this.pinta(); setTimeout(() => window.scrollTo(0, y), 60); }));
+      c.querySelectorAll(".tj-item[data-id]").forEach(el => el.onclick = () => this.detalle(L.find(x => x.id === el.dataset.id), sug.get(el.dataset.id), () => this.pinta()));
     },
 
     /* ------------------------------------------------------------ TARJETAS Y TENDENCIAS (supervisores y quien elabora la E+1) */
@@ -4901,16 +4926,17 @@ V.hoja = {
       const rpes = new Set(B.estado.personal.map(p => U.ini(p.rpe)));
       const top = (titulo, lista, nota) => `<div class="tj-top"><h4>${titulo}</h4>${nota ? `<p class="muted peque" style="margin:-4px 0 6px">${nota}</p>` : ""}${barras(lista.slice(0, 6), () => "", 0)}</div>`;
       const ver = { todas: () => true, sug: x => !M[x.id] && sug.get(x.id).nivel > 0, marc: x => M[x.id] && M[x.id].m !== "D", desc: x => M[x.id] && M[x.id].m === "D", sin: x => !M[x.id], baja: x => sug.get(x.id).tipo && sug.get(x.id).nivel === 0, si: x => TJ.esSI(x), fecha: x => !!sug.get(x.id).fecha };
-      const nFecha = L.filter(x => sug.get(x.id).fecha && sug.get(x.id).fecha.grave).length;
       const q = U.norm(F.q).split(" ").filter(Boolean);
-      const vis = L.filter(x => (F.fu === "Todas" || (x.fu || "").includes(F.fu === "SEGIND" ? "SI" : "AE")) && ver[F.ver](x)
+      const enSI = x => (x.fu || "").includes("SI"), enAE = x => (x.fu || "").includes("AE");
+      const porArch = { "Todas": () => true, "SEGIND": enSI, "Alta energía": enAE, "En los dos": x => enSI(x) && enAE(x), "Solo SEGIND": x => enSI(x) && !enAE(x), "Solo alta energía": x => enAE(x) && !enSI(x) };
+      const vis = L.filter(x => (porArch[F.fu] || porArch.Todas)(x) && ver[F.ver](x)
         && (!q.length || q.every(k => U.norm([x.id, x.nom, x.rpe, x.depto, x.area, x.obsDepto, x.subg, x.edif, x.niv, x.std, x.epp, x.energia, x.doc, x.qp, x.t2, x.t3, x.t5, x.next, x.cat].join(" ")).includes(k))))
         .sort((a, b) => (sug.get(b.id).nivel - sug.get(a.id).nivel) || (+a.id - +b.id));
       const nA = L.filter(x => M[x.id] && M[x.id].m === "A").length, nC = L.filter(x => M[x.id] && M[x.id].m === "C").length;
       c.innerHTML = `
         <div class="tarjeta">${cab("grafica", "g", "Semana de captura", `${L.length} tarjetas distintas · ${D.semanas[sem].si} en el archivo de Seguridad Industrial · ${D.semanas[sem].ae} con peligros de alta energía`, this.selSemana(semanas) + this.botonExcel())}
           <div class="tj-kpis"><div><b>${nSI}</b><span>hechas por Seguridad Industrial</span></div><div><b>${lugarSI >= 0 ? (lugarSI + 1) + ".º" : "—"}</b><span>lugar de ${porDep.length} departamentos</span></div>
-            <div><b>${deb.length}</b><span>con debilidad en S.I.</span></div><div><b>${L.filter(x => x.ae === "Si").length}</b><span>con alta energía</span></div><div><b style="color:var(--rojo)">${nA}</b><span>actos marcados</span></div><div><b style="color:var(--azul)">${nC}</b><span>condiciones marcadas</span></div>${nFecha ? `<div class="tj-kfecha" id="tjKFecha" title="Ver cuáles"><b>⚠ ${nFecha}</b><span>con fecha dudosa</span></div>` : ""}</div></div>
+            <div><b>${deb.length}</b><span>con debilidad en S.I.</span></div><div><b>${L.filter(x => x.ae === "Si").length}</b><span>con alta energía</span></div><div><b style="color:var(--rojo)">${nA}</b><span>actos marcados</span></div><div><b style="color:var(--azul)">${nC}</b><span>condiciones marcadas</span></div></div></div>
         <div class="cuadricula">
           <div class="tarjeta c6">${cab("usuarios", "a", "Tarjetas por área", "Subgerencia o área de quien hizo la tarjeta. Resaltada: donde está Seguridad Industrial.")}<div class="tj-bars">${barras(porArea, k => U.norm(k).includes("SEGURIDAD NUCLEAR") ? "si2" : "", L.length)}</div></div>
           <div class="tarjeta c6">${cab("usuarios", "v", "Tarjetas por departamento", "Departamento de quien hizo la tarjeta. Resaltado: Seguridad Industrial.")}<div class="tj-bars">${barras(porDep, k => U.norm(k).includes("SEGURIDAD INDUSTRIAL") ? "si" : "", L.length)}</div></div>
@@ -4928,7 +4954,7 @@ V.hoja = {
         <div class="tarjeta" id="tjLista">${cab("lista", "g", "Tarjetas de la semana", "En color las que podrían ir a la E+1: revísalas y confírmalas o descártalas. Solo las que tú marques cuentan en la presentación.")}
           <div class="fila" style="align-items:flex-end;margin-bottom:12px">
             <div class="campo" style="flex:2 1 260px;margin:0"><label>Buscar</label><input class="inp" id="tjQ" value="${esc(F.q)}" placeholder="Guantes, Turbina, nombre, departamento, #Id…"></div>
-            <div class="campo" style="flex:0 0 auto;margin:0"><label>Archivo</label>${B.ui.seg("fu", ["Todas", "SEGIND", "Alta energía"], F.fu)}</div>
+            <div class="campo" style="flex:1 1 230px;margin:0"><label>Archivo de Excel</label><select class="inp" id="tjFu">${Object.keys(porArch).map(k => `<option value="${k}" ${F.fu === k ? "selected" : ""}>${k === "Todas" ? "Los dos archivos (todas)" : k === "SEGIND" ? "Archivo SEGIND" : k === "Alta energía" ? "Archivo ALTA ENERGÍA" : k === "En los dos" ? "Las que vienen en los dos" : k === "Solo SEGIND" ? "Solo en SEGIND" : "Solo en ALTA ENERGÍA"} (${L.filter(porArch[k]).length})</option>`).join("")}</select></div>
             <div class="campo" style="flex:1 1 200px;margin:0"><label>Mostrar</label><select class="inp" id="tjVer">${[["todas", "Todas"], ["sug", "Sugeridas sin revisar"], ["marc", "Marcadas para la E+1"], ["desc", "Descartadas"], ["sin", "Sin revisar"], ["baja", "De calidad dudosa"], ["fecha", "Con la fecha dudosa"], ["si", "Hechas por Seguridad Industrial"]].map(([k, t]) => `<option value="${k}" ${F.ver === k ? "selected" : ""}>${t}</option>`).join("")}</select></div>
           </div>
           <div class="tabla-cont"><table class="tabla tj-tabla"><thead><tr><th>#</th><th>Cuándo</th><th>Quién la hizo</th><th>A quién / dónde</th><th>Estándar</th><th>Qué pasó</th><th>E+1</th></tr></thead><tbody>
@@ -4944,14 +4970,14 @@ V.hoja = {
             }).join("") || `<tr><td colspan="7">${B.ui.vacio("Ninguna tarjeta con ese filtro.")}</td></tr>`}</tbody></table></div>
           <p class="muted peque" style="margin:10px 0 0">${Math.min(vis.length, F.n)} de ${vis.length} tarjetas${vis.length > F.n ? ` · <a href="#" id="tjMas">mostrar más</a>` : ""}</p></div>`;
       this.activarExcel(c);
-      const repinta = foco => { const y = window.scrollY; this.pinta(); window.scrollTo(0, y); if (foco) setTimeout(() => { const i = document.getElementById("tjQ"); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }, 0); };
+      const repinta = foco => this.pinta().then(() => { if (foco) { const i = document.getElementById("tjQ"); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } } });
       c.querySelector("#tjSem").onchange = e => { this.sem = e.target.value; F.n = 80; this.pinta(); };
       c.querySelector("#tjQ").oninput = U.debounce(e => { F.q = e.target.value; F.n = 80; repinta(true); }, 350);
       c.querySelector("#tjVer").onchange = e => { F.ver = e.target.value; F.n = 80; repinta(); };
-      B.ui.activarSeg(c.querySelector("#tjLista"), (s, v) => { F.fu = v; F.n = 80; repinta(); });
-      const kf = c.querySelector("#tjKFecha"); if (kf) kf.onclick = () => { F.ver = "fecha"; F.q = ""; F.n = 80; this.pinta(); setTimeout(() => document.getElementById("tjLista").scrollIntoView({ behavior: "smooth" }), 30); };
+      c.querySelector("#tjFu").onchange = e => { F.fu = e.target.value; F.n = 80; repinta(); };
+      const irLista = () => { const l = document.getElementById("tjLista"); if (l) l.scrollIntoView({ behavior: "smooth" }); };
       const mas = c.querySelector("#tjMas"); if (mas) mas.onclick = e => { e.preventDefault(); F.n += 150; repinta(); };
-      c.querySelectorAll(".tj-tops .tj-b").forEach(b => b.onclick = () => { F.q = b.dataset.q; F.ver = "todas"; F.n = 80; this.pinta(); setTimeout(() => document.getElementById("tjLista").scrollIntoView({ behavior: "smooth" }), 30); });
+      c.querySelectorAll(".tj-tops .tj-b").forEach(b => b.onclick = () => { F.q = b.dataset.q; F.ver = "todas"; F.n = 80; this.pinta().then(irLista); });
       c.querySelectorAll(".tj-tabla tr[data-id]").forEach(tr => tr.onclick = () => this.detalle(L.find(x => x.id === tr.dataset.id), sug.get(tr.dataset.id), repinta));
       c.querySelector("#tjMsg").onclick = () => modalMsg("Mensaje de seguridad de la semana", "Propuesta armada con las tendencias de la semana. Ajústala a tu estilo antes de compartirla.", TJ.mensajeSeguridad(sem, L));
     },
@@ -4960,7 +4986,7 @@ V.hoja = {
     async detalle(x, s, alCambiar) {
       if (!x) return;
       const m = (TJ.datos.marcas || {})[x.id], puede = !!alCambiar && TJ.datos.editor;
-      const dato = (et, v) => v ? `<div class="tj-d"><span>${et}</span><div>${U.br(v)}</div></div>` : "";
+      const dato = (et, v, res) => v ? `<div class="tj-d"><span>${et}</span><div>${res ? clave(v) : U.br(v)}</div></div>` : "";
       const res = v => v ? ` <span class="badge ${v === "Debilidad" ? "r" : "v"}">${esc(v)}</span>` : "";
       const otros = [["Enfoque operativo / riesgo", x.t1, x.t1r], ["Cultura de seguridad", x.t2, x.t2r], ["Desempeño humano", x.t3, x.t3r], ["Seguridad radiológica", x.t5, x.t5r], ["Proficiency", x.t6, x.t6r]].filter(o => o[1])
         .map(o => `<div class="tj-d"><span>${o[0]}</span><div>${esc(o[1])}${res(o[2])}</div></div>`).join("")
@@ -4975,11 +5001,12 @@ V.hoja = {
           ${s && s.tipo ? `<div class="aviso ${s.nivel ? "d" : "a"}" style="margin-bottom:12px">${B.ico("info")}<div>${s.nivel ? `<b>Podría ser ${s.tipo === "A" ? "un acto inseguro" : "una condición insegura"}</b>${s.motivos.length ? ": " + esc(s.motivos.join("; ")) : ""}.` : `<b>Revisa su calidad antes de usarla:</b> ${esc(s.dudas.join("; ") || "sin observaciones")}.`} Tú decides si va a la E+1.</div></div>` : ""}
           <div class="tj-ficha">
             ${dato("Quién la hizo", `${x.rpe} ${x.nom}\n${[x.area, x.depto].filter(Boolean).join(" · ")}`)}${dato("A quién observó", [x.obsDepto, x.contrato, x.cat].filter(Boolean).join(" · "))}
-            ${dato("Dónde", TJ.lugar(x))}${dato("Actividad", x.doc)}
+            ${dato("Dónde", TJ.lugar(x))}${dato("Actividad", x.doc, true)}
             <div class="tj-d"><span>Estándar de Seguridad Industrial</span><div>${esc(x.std || "—")}${x.epp ? " · " + esc(x.epp) : ""}${res(x.si)}</div></div>
             ${dato("Peligros de alta energía", x.ae ? x.ae + (x.energia ? " · " + x.energia : "") : "")}
           </div>
-          <div class="tj-ficha una">${dato("¿Qué pasó?", x.qp)}${dato("¿Por qué pasó?", x.pq)}${dato("¿Qué puede pasar?", x.qpp)}${dato("Retroalimentación", x.retro === "Si" ? x.retroTxt || "Sí" : x.retro ? "No se dio. " + (x.noRetro || "") : "")}${dato("Comentarios adicionales", x.com)}${dato("Momento de enseñanza-aprendizaje", x.mea)}</div>
+          <p class="tj-leyenda">Resaltado: <mark class="kr">riesgo o desviación</mark> <mark class="ke">EPP</mark> <mark class="kl">equipo, lugar o procedimiento</mark> <mark class="kc">corrección</mark></p>
+          <div class="tj-ficha una">${dato("¿Qué pasó?", x.qp, true)}${dato("¿Por qué pasó?", x.pq, true)}${dato("¿Qué puede pasar?", x.qpp, true)}${dato("Retroalimentación", x.retro === "Si" ? x.retroTxt || "Sí" : x.retro ? "No se dio. " + (x.noRetro || "") : "", true)}${dato("Comentarios adicionales", x.com, true)}${dato("Momento de enseñanza-aprendizaje", x.mea, true)}</div>
           ${otros ? `<details class="tj-otros"><summary>Otros datos de la tarjeta</summary><div class="tj-ficha">${otros}</div></details>` : ""}
           ${puede ? `<div class="campo" style="margin:14px 0 0"><label>Nota para la presentación (opcional)</label><input class="inp" id="dNota" value="${esc(m ? m.nota || "" : "")}" placeholder="Ej. se corrigió en sitio con el supervisor del área"></div>` : ""}`,
         botones: puede ? [{ t: "Cerrar", c: "sec", v: null }].concat(m ? [{ t: "Quitar marca", c: "sec", v: v => ({ m: "", nota: "" }) }] : [])
@@ -5374,7 +5401,7 @@ V.hoja = {
       c.querySelectorAll("[data-k]").forEach(i => i.oninput = () => { const p = i.dataset.k.split("."); if (p.length === 2) S[p[0]][p[1]] = i.value.trim(); else S[p[0]] = i.type === "textarea" ? i.value : i.value.trim(); tot(); prevLento(); });
       c.querySelectorAll("[data-h]").forEach(i => i.oninput = () => { const k = i.dataset.h, f = (this.histEd[k] || h[k]).slice(); f[+i.dataset.i] = num(i.value); this.histEd[k] = f; prevLento(); });
       c.querySelector("#e1Sem").onchange = e => { P.sem = e.target.value; this.S = null; P.pinta(); };
-      const ir = c.querySelector("#e1Ir"); if (ir) ir.onclick = e => { e.preventDefault(); P.tab = "tend"; P.fil.ver = "sug"; P.pinta(); };
+      const ir = c.querySelector("#e1Ir"); if (ir) ir.onclick = e => { e.preventDefault(); P.tab = "tend"; P.fil.ver = "sug"; P.pinta().then(() => { const l = document.getElementById("tjLista"); if (l) l.scrollIntoView({ behavior: "smooth" }); }); };
       c.querySelectorAll("[data-ver]").forEach(a => a.onclick = e => { e.preventDefault(); P.detalle(L.find(x => x.id === a.dataset.ver), null, () => P.pinta()); });
       c.querySelector("#e1Prop").onclick = () => { for (const k of ["tx1", "tx2", "tx3"]) if (!S[k]) { S[k] = prop[k]; c.querySelector(`[data-k="${k}"]`).value = prop[k]; } prev(); };
       const valida = () => {
@@ -5947,7 +5974,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "3.1", servidorViejo: false,
+  info: {}, VERSION: "3.2", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -6130,7 +6157,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "3.1")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "3.2")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
