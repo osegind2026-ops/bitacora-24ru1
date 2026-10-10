@@ -1,7 +1,7 @@
-// Bitacora 24RU1 para celular (version 2.6). La aplicacion se sirve desde la copia guardada en el telefono.
-const CACHE = "b24-2.6-202610090932";
-const ESENCIAL = ["./", "css/app.css?v=202610090932", "js/bitacora.js?v=202610090932", "fonts/montserrat-latin-400-normal.woff2", "fonts/montserrat-latin-500-normal.woff2", "fonts/montserrat-latin-600-normal.woff2", "fonts/montserrat-latin-700-normal.woff2", "img/bitacora.ico", "img/icono-192.png", "img/membrete.png", "manifest.webmanifest"];
-const RESTO = ["ayuda/Guia_Rapida_Tecnicos.pdf", "img/hojaCfe.png", "img/hojaEscudo.png", "img/hojaPlanta.png", "img/ico1.png", "img/ico2.png", "img/ico3.png", "img/icono-512.png", "img/icono-adaptable-512.png", "img/icono-apple-180.png", "img/ofDer.png", "img/ofIzq.png", "img/ofPie.png", "img/pie.png"];
+// Bitacora 24RU1 para celular (version 2.9). La aplicacion se sirve desde la copia guardada en el telefono.
+const CACHE = "b24-2.9-202610101006";
+const ESENCIAL = ["./", "css/app.css?v=202610101006", "js/bitacora.js?v=202610101006", "fonts/montserrat-latin-400-normal.woff2", "fonts/montserrat-latin-500-normal.woff2", "fonts/montserrat-latin-600-normal.woff2", "fonts/montserrat-latin-700-normal.woff2", "img/bitacora.ico", "img/icono-192.png", "img/membrete.png", "manifest.webmanifest"];
+const RESTO = ["ayuda/Guia_Rapida_Tecnicos.pdf", "img/e1_interior.jpg", "img/e1_portada.jpg", "img/hojaCfe.png", "img/hojaEscudo.png", "img/hojaPlanta.png", "img/ico1.png", "img/ico2.png", "img/ico3.png", "img/icono-512.png", "img/icono-adaptable-512.png", "img/icono-apple-180.png", "img/ofDer.png", "img/ofIzq.png", "img/ofPie.png", "img/pie.png"];
 self.addEventListener("install", e => e.waitUntil(caches.open(CACHE).then(c => c.addAll(ESENCIAL)).then(() => self.skipWaiting())));
 self.addEventListener("activate", e => e.waitUntil(
   caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim())

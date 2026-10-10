@@ -753,7 +753,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "2.6", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "2.9", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -765,11 +765,135 @@ B.local = {
       case "estado": return this.estado(s);
       case "clave": if (B.modoMovil) throw new Error("La contraseña se cambia en la bitácora de la PC; el celular la recibe con el siguiente paquete de datos."); return this.bloquear(() => this.cambiarClave(s, b));
       case "op": return this.bloquear(() => this.opComo(s, sup, b));
-      case "respaldo": if (!sup) throw new Error("Solo supervisores."); if (B.modoMovil) throw new Error("Los respaldos se hacen en la bitácora de la PC."); { const db = await this.cargar(); db._generado = U.ahoraISO(); return db; }
+      case "respaldo": if (!sup) throw new Error("Solo supervisores."); if (B.modoMovil) throw new Error("Los respaldos se hacen en la bitácora de la PC."); { const db = await this.cargar(); db._generado = U.ahoraISO(); db.tarjetas = await this.tarjLeer(); db.tarjetasSem = {}; for (const k of Object.keys(db.tarjetas.semanas)) db.tarjetasSem[k] = (await this.leer("tarjetas_" + k)) || []; return db; }
       case "restaurar": if (!sup) throw new Error("Solo supervisores."); if (B.modoMovil) throw new Error("Solo disponible en la bitácora de la PC."); return this.bloquear(() => this.restaurar(b.db));
       case "pdf": throw new Error("En el modo sin servidor usa Imprimir y elige 'Guardar como PDF'.");
+      case "tarjetas": return ["ver", "semana", "mias"].includes(b.accion) ? this.tarjetas(s, sup, b) : this.bloquear(() => this.tarjetas(s, sup, b));
     }
     throw new Error("Ruta no válida");
+  },
+
+  /* ---------------------------------------------------------- tarjetas Lideres en Campo (misma logica que Servidor.cs)
+     En el celular los datos llegan en el paquete de la PC; lo que se hace aqui se anota en pendientes y viaja a la PC. */
+  async tarjLeer() {
+    const T = (await this.leer("tarjetas")) || {};
+    for (const k of ["marcas", "sem", "hist", "cfg", "semanas"]) if (!T[k] || typeof T[k] !== "object") T[k] = {};
+    T.decl = Array.isArray(T.decl) ? T.decl : [];
+    for (const d of T.decl) if (!d.uid) d.uid = "d" + d.id;
+    return T;
+  },
+  async tarjetas(s, sup, b) {
+    const como = U.ini(b.como);
+    if (como && como !== s.ini) {
+      if (!sup) throw new Error("Solo un supervisor puede importar capturas de otra persona.");
+      const p = (await this.leer("personal") || []).find(x => U.ini(x.ini) === como);
+      if (!p) throw new Error("Iniciales no encontradas en el personal: " + como);
+      s = { rpe: U.ini(p.rpe), ini: como, rol: this.rolDe(p), nombre: p.nombre }; sup = s.rol === "supervisor";
+    }
+    const T = await this.tarjLeer(), eds = (T.cfg.editores || []).map(U.ini), ed = sup || eds.includes(s.ini), sem = String(b.sem || ""), acc = b.accion;
+    const esSem = k => /^\d{4}-\d{2}$/.test(k), soloEd = () => { if (!ed) throw new Error("Esta parte es solo para los supervisores y para quien elabora la E+1."); };
+    const soloSup = () => { if (!sup) throw new Error("Solo supervisores."); }, semOk = () => { if (!esSem(sem)) throw new Error("Semana no válida."); };
+    const ahora = () => U.ahoraISO() + ":00", leerSem = async k => (await this.leer("tarjetas_" + k)) || [];
+    const fin = async r => {
+      await this.escribir("tarjetas", T);
+      if (B.modoMovil && !b._replay) {      // viaja a la PC con "Enviar mis capturas"
+        const P = (await this.leer("pendientes")) || [], datos = JSON.parse(JSON.stringify(b)); delete datos.accion; delete datos.como;
+        P.push({ uid: B.inter.uid(), t: U.ahoraISO(), ini: s.ini, col: "tarjetas", accion: acc, datos, refs: {} });
+        await this.escribir("pendientes", P);
+      }
+      return Object.assign({ ok: true }, r);
+    };
+    switch (acc) {
+      case "ver": {
+        const r = { ok: true, editor: ed, editores: eds, cfg: T.cfg };
+        if (ed) Object.assign(r, { decl: T.decl, marcas: T.marcas, sem: T.sem, hist: T.hist, semanas: T.semanas });
+        else r.decl = T.decl.filter(x => U.ini(x.ini) === s.ini || x.est === "C").map(x => U.ini(x.ini) === s.ini ? x : { ini: x.ini, f: x.f, t: x.t, est: "C" });
+        return r;
+      }
+      case "semana": soloEd(); semOk(); return { ok: true, tarjetas: await leerSem(sem) };
+      case "mias": {
+        const m = [];
+        for (const k of Object.keys(T.semanas).filter(esSem).sort()) m.push(...(await leerSem(k)).filter(x => U.ini(x.rpe) === s.rpe));
+        return { ok: true, tarjetas: m };
+      }
+      case "importar": {
+        soloEd(); semOk();
+        const L = await leerSem(sem), idx = new Map(L.map(c => [String(c.id), c])); let nuevas = 0, act = 0;
+        for (const c of b.tarjetas || []) {
+          if (!c || !c.id) continue;
+          const e = idx.get(String(c.id));
+          if (!e) { c.fu = c.fu || ""; L.push(c); idx.set(String(c.id), c); nuevas++; continue; }
+          const fu = String(e.fu || "").split(",").filter(Boolean);
+          for (const f1 of String(c.fu || "").split(",")) if (f1 && !fu.includes(f1)) fu.push(f1);
+          for (const k in c) { if (k === "fu" || c[k] == null) continue; if (c[k] && typeof c[k] === "object" && e[k] && typeof e[k] === "object") Object.assign(e[k], c[k]); else if (typeof c[k] === "object" || String(c[k]) !== "") e[k] = c[k]; }
+          e.fu = fu.join(","); act++;
+        }
+        await this.escribir("tarjetas_" + sem, L);
+        const plant = new Set((await this.leer("personal") || []).map(p => U.ini(p.rpe))), rpes = {};
+        for (const c of L) { const r1 = U.ini(c.rpe); if (plant.has(r1)) rpes[r1] = (rpes[r1] || 0) + 1; }
+        T.semanas[sem] = { n: L.length, si: L.filter(x => String(x.fu || "").includes("SI")).length, ae: L.filter(x => String(x.fu || "").includes("AE")).length, fh: ahora(), por: s.ini, rpes };
+        return fin({ nuevas, actualizadas: act, total: L.length });
+      }
+      case "semBorrar": {
+        soloSup(); semOk();
+        await this.escribir("tarjetas_" + sem, []); delete T.semanas[sem];
+        for (const k of Object.keys(T.marcas)) if ((T.marcas[k] || {}).sem === sem) delete T.marcas[k];
+        return fin();
+      }
+      case "declarar": {
+        const ini = U.ini(sup && b.ini ? b.ini : s.ini), f = String(b.f || ""), t = b.t; let nota = String(b.nota || "").trim().slice(0, 300);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(f) || isNaN(U.fecha(f)) || (t !== "T1" && t !== "T2")) throw new Error("Fecha o turno no válidos.");
+        if (!(await this.leer("personal") || []).some(p => U.ini(p.ini) === ini)) throw new Error("Persona no encontrada: " + ini);
+        if (!sup) {
+          if (Math.abs(U.dia(U.iso(new Date())) - U.dia(f)) > 7) throw new Error("Solo puedes registrar tarjetas de los últimos 7 días. Pide al supervisor que agregue las anteriores.");
+          if (T.decl.filter(x => U.ini(x.ini) === ini && x.f === f && x.t === t && x.est !== "R").length >= 5) throw new Error("Ya registraste 5 tarjetas en ese turno. Si hiciste más, avisa al supervisor.");
+        }
+        let uid = String(b.uid || "").slice(0, 40);
+        if (uid && T.decl.some(x => x.uid === uid)) return { ok: true, repetida: true };
+        if (!uid) uid = b.uid = B.inter ? B.inter.uid() : this.aleatorio(9);
+        const id = T.decl.reduce((m, x) => Math.max(m, +x.id || 0), 0) + 1, conf = sup && b.est !== "P";
+        const d = { id, uid, ini, f, t, nota, est: conf ? "C" : "P", reg: ahora(), por: s.ini };
+        if (conf) { d.conf = s.ini; d.fconf = ahora(); }
+        T.decl.push(d);
+        return fin({ id });
+      }
+      case "declEstado": {
+        if (!sup) throw new Error("Solo el supervisor confirma las tarjetas.");
+        if (!["C", "R", "P"].includes(b.est)) throw new Error("Estado no válido.");
+        const ids = new Set((b.ids || []).map(Number)), uids = new Set(b.uids || []); let n = 0;
+        for (const d of T.decl) if (ids.has(+d.id) || uids.has(d.uid)) { d.est = b.est; d.conf = s.ini; d.fconf = ahora(); d.motivo = String(b.motivo || ""); n++; }
+        return n ? fin({ n }) : { ok: true, n };
+      }
+      case "declBorrar": {
+        const d = b.uid ? T.decl.find(x => x.uid === b.uid) : T.decl.find(x => +x.id === +b.id);
+        if (!d) return { ok: true };
+        if (!sup && !(U.ini(d.ini) === s.ini && d.est === "P")) throw new Error("Solo puedes borrar tus tarjetas que el supervisor aún no confirma.");
+        T.decl = T.decl.filter(x => x !== d);
+        return fin();
+      }
+      case "marcar": {
+        soloEd();
+        const id = String(b.id || ""), m = String(b.m || "");
+        if (!id) throw new Error("Falta la tarjeta.");
+        if (!m) delete T.marcas[id];
+        else if (["A", "C", "D"].includes(m)) T.marcas[id] = { m, nota: String(b.nota || ""), sem, por: s.ini, fh: ahora() };
+        else throw new Error("Marca no válida.");
+        return fin();
+      }
+      case "semGuardar": {
+        soloEd(); semOk();
+        T.sem[sem] = Object.assign({}, b.datos, { por: s.ini, fh: ahora() });
+        if (b.hist && typeof b.hist === "object") T.hist = b.hist;
+        return fin();
+      }
+      case "cfgGuardar": {
+        soloSup();
+        if (!b.cfg || typeof b.cfg !== "object") throw new Error("Faltan los ajustes.");
+        T.cfg = b.cfg;
+        return fin();
+      }
+    }
+    throw new Error("Operación no válida.");
   },
 
   /* Una operacion puede ejecutarse a nombre de otra persona ("como") al importar capturas de celular (solo supervisores).
@@ -804,7 +928,7 @@ B.local = {
       archivos.sort((a, b) => a[0].localeCompare(b[0]));
       for (const [, h] of archivos) {
         const c = JSON.parse(await (await h.getFile()).text());
-        if (!c.id || hechas.includes(c.id)) continue;
+        if (!c.id || hechas.includes(c.id) || !c.ec) continue;      // las cargas de tarjetas las aplica el servidor
         const L = db.ec, cat = db.catalogos || {}, tocados = [], inicio = +c.ecInicio || 0;
         for (const it of c.ec || []) {
           let e = L.find(x => x.fecha === it.fecha && U.norm(x.esp) === U.norm(it.esp));
@@ -857,7 +981,7 @@ B.local = {
     return {
       ok: true, usuario: this.infoUsuario(s, u), config: db.config, catalogos: db.catalogos, imgVer: (db.imagenes && db.imagenes.ver) || "", personal: db.personal, cambios: db.cambios,
       ec: db.ec, vig: db.vig, actividades: sup ? db.actividades : db.actividades.filter(a => mias(a) || !a.ini), he: sup ? db.he : db.he.filter(mias),
-      turnos: sup ? db.turnos : [], hojas: db.hojas || [],
+      turnos: sup ? db.turnos : [], hojas: db.hojas || [], tarjPend: sup ? (((await this.leer("tarjetas")) || {}).decl || []).filter(x => x.est === "P").length : undefined,
       equipo: sup ? undefined : db.actividades.filter(a => a.ini && !mias(a) && (a.est === "Pendiente" || a.est === "En proceso" || a.fecha >= U.sumar(U.iso(new Date()), -3))),
       sugerencias: [...sug.values()].sort((a, b) => (b.mia - a.mia) || (b.n - a.n)).slice(0, 1500),
       usuarios: sup ? db.usuarios.map(x => ({ rpe: x.rpe, rol: x.rol, cambiada: !!x.cambiada, ultimo: x.ultimo || "", ofCat: x.ofCat || "", ofTit: x.ofTit || "", ofDepto: x.ofDepto || "" })) : undefined,
@@ -881,6 +1005,7 @@ B.local = {
     await this.respaldoDiario("inicio");
     for (const n of this.LISTAS) if (Array.isArray(db[n])) await this.escribir(n, db[n]);
     for (const n of this.OBJETOS) if (db[n] && typeof db[n] === "object") await this.escribir(n, db[n]);
+    if (db.tarjetas && typeof db.tarjetas === "object") { await this.escribir("tarjetas", db.tarjetas); for (const k in db.tarjetasSem || {}) if (/^\d{4}-\d{2}$/.test(k)) await this.escribir("tarjetas_" + k, db.tarjetasSem[k]); }
     return { ok: true };
   },
 
@@ -1461,6 +1586,7 @@ const ICO = {
   historial: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 8v4l3 2"/>',
   reutilizar: '<path d="M4 12a8 8 0 0 1 14-5.3L20 9"/><path d="M20 4v5h-5M20 12a8 8 0 0 1-14 5.3L4 15"/><path d="M4 20v-5h5"/>',
   info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.01"/>',
+  trofeo: '<path d="M8 4h8v5a4 4 0 0 1-8 0V4z"/><path d="M8 6H5a3 3 0 0 0 3 4M16 6h3a3 3 0 0 1-3 4M12 13v4M8.5 20h7M10 17h4"/>',
   ojo: '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
   red: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><path d="M10 6.5h4a2.5 2.5 0 0 1 2.5 2.5V14M14 17.5h-4A2.5 2.5 0 0 1 7.5 15v-5"/>'
 };
@@ -4234,6 +4360,1014 @@ V.hoja = {
   }
 };
 ;
+/* ---- tarjetas.js ---- */
+/* =========================================================================
+   BITACORA 24RU1 - Tarjetas "Lideres en Campo"
+   - Marcador: cada tecnico registra la tarjeta que envio y el supervisor la confirma.
+   - Carga de los Excel de Desempeno Humano (SEGIND y ALTA ENERGIA), tendencias y comparativo.
+   - Marcado de tarjetas (acto / condicion insegura) para la presentacion E+1 (ver e1.js).
+   Los tecnicos solo ven el marcador y sus propias tarjetas.
+   ========================================================================= */
+"use strict";
+(function () {
+  /* ---------------------------------------------------------------- lectura de .xlsx (zip + xml), sin librerias */
+  const inflar = (function () {
+    const LB = [3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258],
+      LE = [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0],
+      DB = [1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577],
+      DE = [0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13],
+      ORD = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15];
+    const arbol = lens => {
+      const count = new Uint16Array(16), sym = new Uint16Array(lens.length), offs = new Uint16Array(16);
+      for (const l of lens) count[l]++;
+      count[0] = 0;
+      for (let i = 1; i < 16; i++) offs[i] = offs[i - 1] + count[i - 1];
+      for (let i = 0; i < lens.length; i++) if (lens[i]) sym[offs[lens[i]]++] = i;
+      return { count, sym };
+    };
+    let fl, fd;
+    return function (src) {
+      let p = 0, buf = 0, cnt = 0, out = new Uint8Array(Math.max(4096, src.length * 5)), n = 0;
+      const bits = k => { while (cnt < k) { buf |= src[p++] << cnt; cnt += 8; } const v = buf & ((1 << k) - 1); buf >>>= k; cnt -= k; return v; };
+      const dec = t => {
+        let code = 0, first = 0, index = 0;
+        for (let len = 1; len < 16; len++) {
+          code |= bits(1); const c = t.count[len];
+          if (code - c < first) return t.sym[index + (code - first)];
+          index += c; first += c; first <<= 1; code <<= 1;
+        }
+        throw new Error("El archivo está dañado.");
+      };
+      const pon = b => { if (n >= out.length) { const o = new Uint8Array(out.length * 2); o.set(out); out = o; } out[n++] = b; };
+      for (let fin = 0; !fin;) {
+        fin = bits(1); const tipo = bits(2);
+        if (tipo === 0) { buf = 0; cnt = 0; const len = src[p] | (src[p + 1] << 8); p += 4; for (let i = 0; i < len; i++) pon(src[p++]); continue; }
+        let tl, td;
+        if (tipo === 1) {
+          if (!fl) { const l = new Uint8Array(288); l.fill(8, 0, 144); l.fill(9, 144, 256); l.fill(7, 256, 280); l.fill(8, 280, 288); fl = arbol(l); fd = arbol(new Uint8Array(30).fill(5)); }
+          tl = fl; td = fd;
+        } else if (tipo === 2) {
+          const hl = bits(5) + 257, hd = bits(5) + 1, hc = bits(4) + 4, cl = new Uint8Array(19);
+          for (let i = 0; i < hc; i++) cl[ORD[i]] = bits(3);
+          const tc = arbol(cl), lens = new Uint8Array(hl + hd);
+          for (let i = 0; i < hl + hd;) {
+            const s = dec(tc);
+            if (s < 16) { lens[i++] = s; continue; }
+            let rep, v = 0;
+            if (s === 16) { v = lens[i - 1]; rep = 3 + bits(2); } else if (s === 17) rep = 3 + bits(3); else rep = 11 + bits(7);
+            while (rep--) lens[i++] = v;
+          }
+          tl = arbol(lens.subarray(0, hl)); td = arbol(lens.subarray(hl));
+        } else throw new Error("El archivo está dañado.");
+        for (; ;) {
+          let s = dec(tl);
+          if (s < 256) { pon(s); continue; }
+          if (s === 256) break;
+          s -= 257; const len = LB[s] + bits(LE[s]), ds = dec(td), dist = DB[ds] + bits(DE[ds]);
+          for (let i = 0; i < len; i++) pon(out[n - dist]);
+        }
+      }
+      return out.subarray(0, n);
+    };
+  })();
+
+  function zipLeer(u8) {
+    const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+    let e = u8.length - 22;
+    while (e >= 0 && dv.getUint32(e, true) !== 0x06054b50) e--;
+    if (e < 0) throw new Error("no es un archivo de Excel (.xlsx)");
+    const n = dv.getUint16(e + 10, true), m = new Map();
+    let p = dv.getUint32(e + 16, true);
+    for (let i = 0; i < n; i++) {
+      const met = dv.getUint16(p + 10, true), cs = dv.getUint32(p + 20, true), nl = dv.getUint16(p + 28, true), el = dv.getUint16(p + 30, true), cl = dv.getUint16(p + 32, true), off = dv.getUint32(p + 42, true);
+      const nom = new TextDecoder().decode(u8.subarray(p + 46, p + 46 + nl));
+      m.set(nom, () => { const ini = off + 30 + dv.getUint16(off + 26, true) + dv.getUint16(off + 28, true), d = u8.subarray(ini, ini + cs); return met === 0 ? d : inflar(d); });
+      p += 46 + nl + el + cl;
+    }
+    return m;
+  }
+
+  // Primera hoja del libro como matriz de celdas (texto o numero)
+  function xlsxFilas(buf) {
+    const z = zipLeer(new Uint8Array(buf)), xml = n => new DOMParser().parseFromString(new TextDecoder().decode(z.get(n)()), "application/xml");
+    const hoja = [...z.keys()].filter(k => /^xl\/worksheets\/[^/]+\.xml$/.test(k)).sort()[0];
+    if (!hoja) throw new Error("no tiene hojas");
+    const cad = z.has("xl/sharedStrings.xml") ? [...xml("xl/sharedStrings.xml").getElementsByTagName("si")].map(si =>
+      [...si.getElementsByTagName("t")].filter(t => t.parentNode.nodeName !== "rPh").map(t => t.textContent).join("")) : [];
+    const filas = [];
+    for (const r of xml(hoja).getElementsByTagName("row")) {
+      const f = [];
+      for (const c of r.getElementsByTagName("c")) {
+        const ref = c.getAttribute("r") || "", t = c.getAttribute("t");
+        let col = 0; for (const ch of ref.replace(/\d+/g, "")) col = col * 26 + ch.charCodeAt(0) - 64;
+        const v = c.getElementsByTagName("v")[0];
+        let val = null;
+        if (t === "inlineStr") val = [...c.getElementsByTagName("t")].map(x => x.textContent).join("");
+        else if (v) val = t === "s" ? cad[+v.textContent] : t === "str" || t === "b" || t === "e" ? v.textContent : +v.textContent;
+        if (val != null && val !== "") f[col - 1] = val;
+      }
+      if (f.length) filas.push(f);
+    }
+    return filas;
+  }
+
+  /* ---------------------------------------------------------------- de las columnas del Excel a una tarjeta */
+  const COLS = [["id", "ID"], ["subg", "SUBGCIA OBSERVADA"], ["semC", "SEMANA DE CAPTURA", "SEM DE CAPTURA"], ["fcap", "FECHA DE CAPTURA"], ["semO", "SEMANA DE LA OBS", "SEM DE LA OBS"], ["fobs", "FECHA DE LA OBS"],
+    ["autor", "RPE Y NOMBRE"], ["area", "A QUE AREA ESTAS"], ["depto", "A QUE DEPARTAMENTO PERTENECES"], ["obsDepto", "A QUE DEPARTAMENTO/OFICINA"], ["contrato", "CUAL ES EL TIPO DE CONTRATO"], ["cat", "CATEGORIA DEL TRABAJADOR"],
+    ["cond", "CONDICION OPERATIVA"], ["edif", "EDIFICIO"], ["uni", "UNIDAD"], ["niv", "NIVEL"], ["turno", "TURNO"], ["doc", "QUE VAS A DOCUMENTAR"], ["ae", "LA ACTIVIDAD QUE OBSERVASTE TENIA PELIGROS"], ["energia", "TIPO DE ENERGIA"],
+    ["t1", "T.1 "], ["t1r", "T.1.0"], ["t2", "T.2 "], ["t2r", "T.2.0"], ["t3", "T.3 "], ["t3r", "T.3.0"], ["std", "T.4 "], ["epp", "T.4.0"], ["si", "T.4.1"], ["t5", "T.5 "], ["t5r", "T.5.0"], ["t6", "T.6 "], ["t6r", "T.6.0"],
+    ["t7", "T.7 "], ["t7q", "T.7.0"], ["secc", "CONTINUAR CAPTURANDO"], ["enfoque", "OBSERVACION ENFOCADA EN", "SELECCIONA EL ENFOQUE"], ["qp", "QUE PASO"], ["pq", "POR QUE PASO"], ["qpp", "QUE PUEDE PASAR"],
+    ["retro", "DISTE RETROALIMENTACION"], ["retroTxt", "QUE RETROALIMENTACION"], ["noRetro", "POR QUE NO DISTE"], ["next", "SELECCIONA EL ATRIBUTO NEXT"], ["com", "COMENTARIOS ADICIONALES"], ["meaSi", "DESEAS DOCUMENTAR UN MOMENTO"], ["mea", "CUAL FUE TU MOMENTO"]];
+  const nEnc = h => U.norm(String(h ?? "").replace(/ /g, " ")).replace(/^[^A-Z0-9]+/, "");
+  const fechaXls = v => {
+    if (typeof v !== "number") return String(v ?? "").slice(0, 16).replace(" ", "T");
+    const d = new Date(Math.round((v - 25569) * 86400000));
+    return d.toISOString().slice(0, 16);
+  };
+
+  const TJ = B.tj = {
+    datos: null, cartas: {}, mias: null,
+    llamar(accion, extra) { return B.api.llamar("tarjetas", Object.assign({ accion }, extra || {})); },
+    async cargar() { this.datos = await this.llamar("ver"); return this.datos; },
+    async semana(sem) { if (!this.cartas[sem]) this.cartas[sem] = (await this.llamar("semana", { sem })).tarjetas; return this.cartas[sem]; },
+
+    /* ------------------------------------------------------------ semanas ISO (lunes a domingo) */
+    semDe(fecha) {
+      const d = U.fecha(fecha), x = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+      x.setUTCDate(x.getUTCDate() + 4 - (x.getUTCDay() || 7));
+      const a = x.getUTCFullYear();
+      return a + "-" + pad(Math.ceil(((x - Date.UTC(a, 0, 1)) / 864e5 + 1) / 7));
+    },
+    lunes(sem) {
+      const [a, s] = sem.split("-").map(Number), d = new Date(Date.UTC(a, 0, 4));
+      d.setUTCDate(d.getUTCDate() - (d.getUTCDay() || 7) + 1 + (s - 1) * 7);
+      return d.toISOString().slice(0, 10);
+    },
+    semSig(sem, n) { return this.semDe(U.sumar(this.lunes(sem), 7 * n)); },
+    semTxt(sem) { const [a, s] = sem.split("-"); return "Semana " + (+s) + " · " + U.cortaDM(this.lunes(sem)) + " al " + U.cortaDM(U.sumar(this.lunes(sem), 6)) + "/" + a; },
+
+    /* ------------------------------------------------------------ Excel -> tarjetas agrupadas por semana de captura */
+    leerExcel(buf, nombre) {
+      const filas = xlsxFilas(buf);
+      if (filas.length < 2) throw new Error("no tiene tarjetas");
+      const enc = filas[0].map(nEnc), usadas = new Set(), mapa = {};
+      for (const [campo, ...pref] of COLS) {
+        const i = enc.findIndex((h, j) => h && !usadas.has(j) && pref.some(p => h.startsWith(p)));
+        if (i >= 0) { mapa[campo] = i; usadas.add(i); }
+      }
+      if (mapa.id == null || mapa.autor == null || mapa.fcap == null) throw new Error("no tiene las columnas de las tarjetas Líderes en Campo (Id, Fecha de Captura, RPE y Nombre)");
+      // archivo de semanas anteriores sin la columna Edificio: los encabezados vienen recorridos un lugar
+      const t2 = enc.findIndex((h, j) => h === "TURNO" && j !== mapa.turno);
+      if (mapa.edif == null && t2 >= 0 && mapa.uni != null && mapa.niv != null) {
+        const a = [mapa.uni, mapa.niv, Math.min(mapa.turno, t2), Math.max(mapa.turno, t2)];
+        mapa.edif = a[0]; mapa.uni = a[1]; mapa.niv = a[2]; mapa.turno = a[3]; usadas.add(t2);
+      }
+      const fu = /SEGIND/i.test(nombre) ? "SI" : /ENERG/i.test(nombre) ? "AE" : mapa.subg != null ? "SI" : "AE";
+      const porSem = {};
+      for (const f of filas.slice(1)) {
+        const c = { fu }, x = {};
+        for (const k in mapa) { const v = f[mapa[k]]; if (v != null && String(v).trim() !== "") c[k] = /^f(cap|obs)$/.test(k) ? fechaXls(v) : String(v).replace(/ /g, " ").trim(); }
+        f.forEach((v, j) => { if (!usadas.has(j) && v != null && String(v).trim() !== "" && filas[0][j]) x[String(filas[0][j]).replace(/ /g, " ").trim()] = String(v).trim(); });
+        if (!c.id || !c.fcap) continue;
+        c.id = String(parseInt(c.id, 10) || c.id);
+        const m = /^\s*([A-Za-z0-9]{4,6})\s+(.+)$/.exec(c.autor || "");
+        c.rpe = m ? m[1].toUpperCase() : ""; c.nom = m ? m[2].trim() : (c.autor || "");
+        delete c.autor; delete c.meaSi;
+        if (c.fobs) c.fobs = c.fobs.slice(0, 10);
+        if (Object.keys(x).length) c.x = x;
+        // manda la "Semana de Captura" del archivo (una tarjeta del lunes temprano puede venir en la semana anterior)
+        let sem = this.semDe(c.fcap);
+        const sc = parseInt(c.semC, 10), si = +sem.slice(5);
+        if (sc >= 1 && sc <= 53 && sc !== si) sem = (+sem.slice(0, 4) + (sc - si > 26 ? -1 : si - sc > 26 ? 1 : 0)) + "-" + pad(sc);
+        c.sem = sem;
+        (porSem[sem] = porSem[sem] || []).push(c);
+      }
+      return { fu, porSem };
+    },
+
+    /* ------------------------------------------------------------ personal y marcador */
+    esSI(c) { return U.norm(c.depto).includes("SEGURIDAD INDUSTRIAL"); },
+    inicio() { return (this.datos.cfg.inicio || (B.estado.config.inicio || "2026-10-04")).slice(0, 10); },
+    tecnicos() { return B.dom.activos().filter(p => B.dom.catOrden(p.cat) !== 4).map(p => U.ini(p.ini)); },
+    turnoDe(ini, f) { const t = B.dom.turnoEfectivo(ini, f || B.app.trabajo.f); return t === "T1" || t === "T2" ? t : U.ini((B.dom.persona(ini) || {}).turno); },
+    // nombre corto para el marcador y el mensaje (configurable); si se repite el primer nombre, se agrega la inicial siguiente
+    apodo(ini) {
+      const ap = (this.datos.cfg.apodos || {})[ini]; if (ap) return ap;
+      const p = B.dom.persona(ini); if (!p) return ini;
+      const w = p.nombre.trim().split(/\s+/), rep = B.estado.personal.filter(q => U.norm(q.nombre.trim().split(/\s+/)[0]) === U.norm(w[0])).length > 1;
+      return w[0] + (rep && w[1] ? " " + w[1][0].toUpperCase() + "." : "");
+    },
+    cuenta() {
+      const ini0 = this.inicio(), m = new Map();
+      for (const d of this.datos.decl) {
+        if (d.f < ini0 || d.est === "R") continue;
+        const k = U.ini(d.ini), e = m.get(k) || { c: 0, p: 0 };
+        if (d.est === "C") e.c++; else e.p++;
+        m.set(k, e);
+      }
+      return m;
+    },
+    ranking(t, cta) {
+      const R = this.tecnicos().filter(i => this.turnoDe(i) === t).map(i => ({ ini: i, n: (cta.get(i) || {}).c || 0, p: (cta.get(i) || {}).p || 0 }));
+      const orden = new Map(B.dom.ordenados(R.map(r => r.ini)).map((i, k) => [i, k]));
+      R.sort((a, b) => b.n - a.n || orden.get(a.ini) - orden.get(b.ini));
+      let pos = 0, ant = null;
+      for (const r of R) { if (r.n !== ant) { pos++; ant = r.n; } r.pos = r.n > 0 ? pos : 0; }
+      return R;
+    },
+    enExcel(ini) {
+      const rpe = U.ini((B.dom.persona(ini) || {}).rpe), s0 = this.semDe(this.inicio());
+      return Object.entries(this.datos.semanas || {}).filter(([k]) => k >= s0).reduce((n, [, v]) => n + ((v.rpes || {})[rpe] || 0), 0);
+    },
+
+    /* ------------------------------------------------------------ mensaje para WhatsApp */
+    mensaje(f, t) {
+      const cfg = this.datos.cfg, noche = t === "T1", fm = noche ? U.sumar(f, -1) : f, [y, m, d] = fm.split("-");
+      const gente = this.tecnicos().filter(i => this.turnoDe(i, f) === t), hoy = new Map(), cta = this.cuenta();
+      for (const x of this.datos.decl) if (x.f === f && x.t === t && x.est === "C") hoy.set(U.ini(x.ini), (hoy.get(U.ini(x.ini)) || 0) + 1);
+      const orden = l => B.dom.ordenados(l), nom = i => this.apodo(i);
+      const hechas = orden([...hoy.keys()]).map(i => `- ${nom(i)} x${hoy.get(i)}`);
+      const faltan = orden(gente.filter(i => !hoy.has(i))).map(i => `- ${nom(i)}`);
+      const acum = [...new Set(gente.concat([...hoy.keys()]))].map(i => [i, (cta.get(i) || {}).c || 0]).filter(x => x[1] > 0).sort((a, b) => b[1] - a[1]);
+      const niveles = [...new Set(acum.map(x => x[1]))], med = ["🥇", "🥈", "🥉"];
+      let ac = "", ant = null;
+      for (const [i, n] of acum) { if (ant != null && n !== ant) ac += "\n"; ant = n; ac += `- ${nom(i)} x${n} ${med[niveles.indexOf(n)] || "🏆"}\n`; }
+      const cierre = cfg.cierre || TJ.CIERRE;
+      return `*TARJETAS REALIZADAS TURNO DE ${noche ? "NOCHE" : "DÍA"} ${d}.${m}.${y}*\n\n*REALIZADAS HOY:* ✅\n\n${hechas.join("\n") || "- (ninguna todavía)"}\n\n*PENDIENTE:* ❌\n\n${faltan.join("\n") || "- Nadie, ¡turno completo! 👏"}\n\n` +
+        `👨🏻‍🚒 *TARJETAS ACUMULADAS* 🎉:\n${ac || "- Aún sin tarjetas confirmadas\n"}\n${cierre}`;
+    },
+    CIERRE: "Vamos equipo, ustedes pueden, por favor no olviden generar sus tarjetas, iré llevando un acumulado para ver quién resulta el más rifado del team 😎👊🏻. Aún es poca la diferencia así que ánimo para todos, cualquiera puede ser el vencedor.\n\nGracias a todos por su colaboración. 🤝",
+
+    /* ------------------------------------------------------------ sugerencias para la E+1
+       Solo resalta candidatas; quien decide es el supervisor o quien elabora la presentacion. */
+    RIESGO: /ALTURA|IZAJE|ELECTRIC|CONFINAD|MAQUINA|CILINDRO|INFLAMABLE|EXCAVA/,
+    COSA: /LUMINARIA|LAMPARA|ILUMINACION|FUGA|DERRAME|BARANDAL|REJILLA|TAPA |ESCALERA|EXTINTOR|SENAL|OBSTRU|CHAROLA|TUBERIA|PISO |TECHO|PUERTA|CABLE|EXTENSION|ANDAMIO|MATERIAL|BASURA|ESCOMBRO|ACEITE|CHARCO|HUECO|REGISTRO|CONTENEDOR/,
+    GENTE: /TRABAJADOR|TECNICO|AYUDANTE|PERSONAL|COMPANER|OPERARIO|SOLDADOR|OFICIAL|SUPERVISOR|CHOFER|MANIOBRISTA|ELECTRICISTA|MECANICO|SE LE |SE LES |NO TENIA|NO PORTA|NO USA|NO UTILIZ|NO SE UTILIZ|PISANDO|SIN PORTAR|SIN USAR|SIN UTILIZAR/,
+    // Fecha de observacion que no cuadra con la captura: la tarjeta puede no ser valida para la presentacion de esa semana
+    fechaMal(c) {
+      const fc = (c.fcap || "").slice(0, 10), fo = c.fobs || "";
+      if (!fo) return { grave: true, msg: "no tiene fecha de observación" };
+      if (!fc) return null;
+      const dias = U.dia(fc) - U.dia(fo), so = parseInt(c.semO, 10), sf = +this.semDe(fo).slice(5);
+      if (dias < 0) return { grave: true, msg: `la fecha de observación (${U.corta(fo)}) es posterior al día en que se capturó (${U.corta(fc)})` };
+      if (dias > 7) return { grave: true, msg: `se observó el ${U.corta(fo)}, ${dias} días antes de capturarla (${U.corta(fc)})` };
+      if (so && Math.abs(so - sf) > 1 && Math.abs(so - sf) < 51) return { grave: true, msg: `dice semana ${so}, pero el ${U.corta(fo)} cae en la semana ${sf}` };
+      if (c.sem && this.semDe(fo) !== c.sem) return { grave: false, msg: `se observó el ${U.corta(fo)} (semana ${sf}) y se capturó en la semana ${+c.sem.slice(5)}` };
+      return null;
+    },
+    sugerir(c, L) {
+      const r = { tipo: null, nivel: 0, motivos: [], dudas: [], fecha: this.fechaMal(c) };
+      if (r.fecha && r.fecha.grave) r.dudas.push("fecha dudosa");
+      if (c.si !== "Debilidad") return r;
+      const qp = U.norm(c.qp), cat = U.norm(c.cat);
+      if ((c.qp || "").trim().length < 70) r.dudas.push("descripción muy corta");
+      if (c.retro !== "Si") r.dudas.push("sin retroalimentación");
+      if ((c.pq || "").trim().length < 15) r.dudas.push("no explica por qué pasó");
+      if (qp && qp === U.norm(c.doc)) r.dudas.push("repite el título de la actividad");
+      if (L && qp && L.some(o => o !== c && o.rpe === c.rpe && U.norm(o.qp) === qp)) r.dudas.push("mismo texto en otra tarjeta del autor");
+      // el EPP y el celular siempre son conducta de una persona; una condicion describe el area o el equipo
+      const cond = cat.includes("CONDICION") || (this.COSA.test(qp) && !this.GENTE.test(qp) && !/EPP|MOVIL/.test(U.norm(c.std)));
+      r.tipo = cond ? "C" : "A";
+      if (cat.includes("CONDICION")) r.motivos.push("capturada como condición insegura");
+      else if (cond) r.motivos.push("describe una condición del área, no a una persona");
+      if (c.ae === "Si") r.motivos.push("peligro de alta energía" + (c.energia ? " (" + c.energia.toLowerCase() + ")" : ""));
+      if (this.RIESGO.test(U.norm(c.std))) r.motivos.push("estándar de riesgo alto: " + c.std);
+      r.nivel = r.dudas.length ? 0 : (r.motivos.length ? 2 : 1);
+      return r;
+    },
+    contar(L, fn, max) {
+      const m = new Map();
+      for (const c of L) { const k = fn(c); if (k) m.set(k, (m.get(k) || 0) + 1); }
+      return [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, max || 99);
+    },
+    lugar(c) { return [c.edif, c.uni, c.niv ? "niv. " + c.niv : ""].filter(Boolean).join(" · "); },
+
+    CONSEJOS: [[/GUANTE/, "Usa el guante adecuado a la tarea (carnaza, dieléctrico, anticorte) y no te lo quites «solo un momento»."],
+      [/LENTE/, "Los lentes de seguridad se usan todo el tiempo en áreas de proceso, también al inspeccionar."],
+      [/TAPON|AUDITIV/, "Colócate los tapones auditivos antes de entrar a zonas de ruido."],
+      [/CASCO|BARBIQUEJO/, "Casco con barbiquejo ajustado, sobre todo en alturas y maniobras."],
+      [/ARNES|ALTURA/, "En alturas: 100 % anclado, arnés inspeccionado y andamio con tarjeta verde."],
+      [/IZAJE|MANIOBRA/, "En maniobras de izaje: área delimitada, nadie bajo la carga y un solo señalero."],
+      [/ELECTRIC/, "Riesgo eléctrico: verifica ausencia de tensión, desmetalízate y usa tu EPP dieléctrico."],
+      [/ORDEN|LIMPIEZA/, "Orden y limpieza: deja el área mejor de como la encontraste y retira material y herramienta al terminar."],
+      [/MOVIL|CELULAR/, "El celular solo en zona segura: detente, sal de la línea de fuego y entonces atiende."],
+      [/ROPA/, "Ropa de trabajo completa y abotonada; nada suelto cerca de equipo rotatorio."],
+      [/RESPIRATORIA/, "Protección respiratoria bien ajustada y con el filtro correcto para el contaminante."],
+      [/MAQUINA|HERRAMIENTA/, "Inspecciona tu herramienta antes de usarla y nunca retires las guardas."]],
+    mensajeSeguridad(sem, L) {
+      const deb = L.filter(c => c.si === "Debilidad"), lista = (a, n) => a.slice(0, n).map(x => `${x[0]} (${x[1]})`);
+      const stds = this.contar(deb, c => c.std, 3), epp = this.contar(deb.filter(c => c.epp), c => c.epp, 3), ener = this.contar(L.filter(c => c.ae === "Si"), c => c.energia, 3);
+      const hdh = this.contar(L.filter(c => c.t3r === "Debilidad"), c => c.t3, 1)[0], cul = this.contar(L.filter(c => c.t2r === "Debilidad"), c => c.t2, 1)[0], pr = this.contar(L.filter(c => c.t5r === "Debilidad"), c => c.t5, 1)[0];
+      const don = this.contar(deb, c => [c.edif, c.niv ? "nivel " + c.niv : ""].filter(Boolean).join(", "), 2);
+      const claves = U.norm([...stds, ...epp].map(x => x[0]).join(" ")), tips = this.CONSEJOS.filter(([re]) => re.test(claves)).slice(0, 4).map(x => "✅ " + x[1]);
+      let t = `*MENSAJE DE SEGURIDAD · SEMANA ${+sem.split("-")[1]}*\n\nEsta semana se levantaron ${L.length} tarjetas Líderes en Campo; ${deb.length} señalan una debilidad en Seguridad Industrial.\n\n*Lo que más se repitió:*\n`;
+      stds.forEach((s, i) => { t += `• ${s[0]} (${s[1]})` + (i === 0 && /EPP/i.test(s[0]) && epp.length ? " — sobre todo " + lista(epp, 3).join(", ") : "") + "\n"; });
+      if (ener.length) t += `\n*Peligros de alta energía más observados:* ${lista(ener, 3).join(", ")}.\n`;
+      if (don.length) t += `*Dónde:* ${lista(don, 2).join("; ")}.\n`;
+      if (hdh) t += `*Desempeño humano:* la herramienta con más debilidades fue «${hdh[0]}» (${hdh[1]}).\n`;
+      if (cul) t += `*Cultura de seguridad:* «${cul[0]}» (${cul[1]}).\n`;
+      if (pr) t += `*Protección radiológica:* «${pr[0]}» (${pr[1]}).\n`;
+      return t + `\n*Recuerda:*\n${tips.join("\n")}${tips.length ? "\n" : ""}✅ Aplica la regla de los 2 minutos antes de iniciar y detén el trabajo si algo no está bien.\n\n¡Cero accidentes! Ponte atento al riesgo. 🦺`;
+    }
+  };
+
+  /* ================================================================ vista */
+  const esc = s => U.esc(s);
+  const MED = ["#D4A017", "#9AA3AD", "#B87333"];
+  const medalla = pos => pos >= 1 && pos <= 3
+    ? `<svg class="tj-med" viewBox="0 0 32 40" aria-label="${pos}.º lugar"><path d="M9 1h6l3 12h-6zM23 1h-6l-3 12h6z" fill="${["#9F2241", "#1F4E79", "#1E6B4A"][pos - 1]}"/><circle cx="16" cy="25" r="13" fill="${MED[pos - 1]}"/><circle cx="16" cy="25" r="9.6" fill="none" stroke="#fff" stroke-opacity=".55" stroke-width="1.4"/><text x="16" y="30.5" text-anchor="middle" font-size="14" font-weight="700" fill="#fff" font-family="Arial">${pos}</text></svg>`
+    : `<span class="tj-pos">${pos ? pos + "º" : "–"}</span>`;
+  const copiar = async (txt, msg) => {
+    try { await navigator.clipboard.writeText(txt); }
+    catch (e) { const a = document.createElement("textarea"); a.value = txt; document.body.appendChild(a); a.select(); document.execCommand("copy"); a.remove(); }
+    B.ui.toast(msg || "Copiado. Pégalo en WhatsApp.", "ok");
+  };
+  // Mensaje listo para WhatsApp: se puede corregir, copiar y (en el celular) compartir directo
+  const modalMsg = (titulo, nota, texto) => B.ui.modal({
+    titulo, icono: "subir", ancho: true,
+    html: `<p class="muted peque" style="margin:0 0 8px">${nota}</p><textarea class="inp" id="msTxt" style="min-height:min(380px,48vh);font-family:inherit">${esc(texto)}</textarea>`,
+    botones: [{ t: "Cerrar", c: "sec", v: null }].concat(navigator.share ? [{ t: "Compartir", c: "dorado", antes: async v => { try { await navigator.share({ text: v.querySelector("#msTxt").value }); } catch (e) { } return false; } }] : [])
+      .concat([{ t: "Copiar mensaje", c: "verde", antes: async v => { await copiar(v.querySelector("#msTxt").value); return false; } }])
+  });
+  const EST = { C: ["v", "Confirmada"], P: ["d", "Por confirmar"], R: ["r", "No válida"] };
+  const MARCA = { A: ["r", "ACTO INSEGURO"], C: ["a", "CONDICIÓN INSEGURA"], D: ["n", "DESCARTADA"] };
+  const turnoTxt = (f, t) => `${t === "T1" ? "Noche" : "Día"} ${U.cortaDM(f)}`;
+
+  V.tarjetas = {
+    titulo: "Tarjetas Líderes en Campo", tab: "marcador", sem: null, fil: { q: "", fu: "Todas", ver: "todas", n: 80 }, _n: 0,
+    sub() { return "Marcador de la " + B.t.periodo() + " · reporta condiciones y actos inseguros"; },
+    render(c) {
+      this.c = c;
+      c.innerHTML = `<div class="vacio"><span class="giro" style="display:inline-block"></span></div>`;
+      const n = ++this._n;
+      TJ.cargar().then(() => { if (n === this._n && B.app.ruta === "tarjetas") this.pinta(); })
+        .catch(e => { c.innerHTML = `<div class="aviso r">${B.ico("alerta")}<div>${esc(e.message)}</div></div>`; });
+    },
+    async recarga() { await TJ.cargar(); if (B.dom.esSup()) { try { await B.api.recargar(); B.app.contadores(); } catch (e) { } } this.pinta(); },
+    /* En el celular la seccion abre RESUMIDA (marcador, confirmar, mensajes y un resumen de la semana).
+       La vista COMPLETA (cargar Excel, marcar tarjetas, armar la E+1) se activa en el propio equipo para trabajar en remoto;
+       en tableta o iPad viene activada. La eleccion se recuerda en ese equipo. */
+    completa() {
+      if (!B.modoMovil) return true;
+      try { const v = localStorage.getItem("b_tj_completa"); if (v != null) return v === "1"; } catch (e) { }
+      return window.innerWidth >= 700;
+    },
+    pinta() {
+      const c = this.c, D = TJ.datos, sup = B.dom.esSup(), comp = this.completa();
+      const tabs = [["marcador", "Marcador"], ["mias", "Mis tarjetas"]].concat(!D.editor ? [] : comp ? [["tend", "Tarjetas y tendencias"], ["e1", "Presentación E+1"]] : [["res", "Resumen"]]).concat(sup ? [["ajustes", "Ajustes"]] : []);
+      if (!tabs.some(x => x[0] === this.tab)) this.tab = this.tab === "tend" || this.tab === "e1" ? "res" : this.tab === "res" ? "tend" : "marcador";
+      c.innerHTML = `${B.modoMovil && D.editor ? `<div class="tj-modo"><span>${comp ? "<b>Vista completa</b>: trabajo remoto con todas las funciones." : "<b>Vista resumida</b> para celular."}</span><a href="#" id="tjModo">${comp ? "Cambiar a la vista resumida" : "Usar la vista completa (trabajo remoto)"}</a></div>` : ""}
+        <div class="pestanas">${tabs.map(([k, t]) => `<button data-t="${k}" class="${k === this.tab ? "on" : ""}">${t}</button>`).join("")}</div><div id="tjCuerpo"></div>`;
+      const mo = c.querySelector("#tjModo"); if (mo) mo.onclick = e => { e.preventDefault(); try { localStorage.setItem("b_tj_completa", comp ? "0" : "1"); } catch (x) { } this.pinta(); };
+      c.querySelectorAll(".pestanas button").forEach(b => b.onclick = () => { this.tab = b.dataset.t; this.pinta(); });
+      const cu = c.querySelector("#tjCuerpo");
+      Promise.resolve(this["t_" + this.tab](cu)).catch(e => { console.error(e); cu.innerHTML = `<div class="aviso r">${B.ico("alerta")}<div>${esc(e.message)}</div></div>`; });
+    },
+
+    /* ------------------------------------------------------------ MARCADOR */
+    t_marcador(c) {
+      const D = TJ.datos, sup = B.dom.esSup(), yo = U.ini(B.usuario.ini), { f, t } = B.app.trabajo, cta = TJ.cuenta(), mio = cta.get(yo) || { c: 0, p: 0 };
+      const max = Math.max(1, ...[...cta.values()].map(x => x.c));
+      const col = (tt, titulo) => {
+        const R = TJ.ranking(tt, cta);
+        return `<div class="tarjeta c6 tj-col ${tt === "T1" ? "noche" : "dia"}">${cab(tt === "T1" ? "reloj" : "inicio", tt === "T1" ? "a" : "d", titulo, R.filter(r => r.n).length + " de " + R.length + " con tarjetas · " + R.reduce((s, r) => s + r.n, 0) + " en total")}
+          <div class="tj-rank">${R.map(r => {
+            const p = B.dom.persona(r.ini);
+            return `<div class="tj-fila ${r.ini === yo ? "yo" : ""} ${r.pos && r.pos <= 3 ? "top" + r.pos : ""}">${medalla(r.pos)}
+              <div class="tj-nom"><b>${esc(p.nombre)}</b><small>${esc(B.dom.catCorta(p.cat))}${r.p && (sup || r.ini === yo) ? ` · <span style="color:#8a6526">${r.p} por confirmar</span>` : ""}${sup ? `<span class="tj-xl"> · en Excel: ${TJ.enExcel(r.ini)}</span>` : ""}</small></div>
+              <div class="tj-barra"><i style="width:${Math.round(r.n / max * 100)}%"></i></div><b class="tj-n">${r.n}</b>
+              ${sup ? `<span class="tj-pm"><button class="btn sec btn-icono" data-menos="${r.ini}" title="Quitar una tarjeta" ${r.n ? "" : "disabled"}>−</button><button class="btn sec btn-icono" data-mas="${r.ini}" title="Agregar una tarjeta confirmada en ${turnoTxt(f, t)}">+</button></span>` : ""}</div>`;
+          }).join("") || B.ui.vacio("Sin personal en este turno.")}</div></div>`;
+      };
+      const pend = D.decl.filter(d => d.est === "P").sort((a, b) => (a.f + a.t).localeCompare(b.f + b.t));
+      const posYo = ["T1", "T2"].map(tt => TJ.ranking(tt, cta).find(r => r.ini === yo)).find(Boolean);
+      c.innerHTML = `<div class="cuadricula">
+        <div class="tarjeta c12 tj-hero">
+          <div class="tj-hero-txt">${sup
+            ? `<h2>Marcador del equipo</h2><p>Los técnicos registran aquí cada tarjeta que envían y tú la <b>confirmas contra su captura</b> de Microsoft Forms. Solo las confirmadas cuentan. Con <b>+</b> y <b>−</b> ajustas a mano.</p>`
+            : `<h2>${mio.c ? `Llevas ${mio.c} tarjeta${mio.c === 1 ? "" : "s"}${posYo && posYo.pos ? ` · ${posYo.pos}.º lugar de tu turno` : ""}` : "Aún no tienes tarjetas confirmadas"}</h2>
+               <p>Al enviar tu tarjeta en Microsoft Forms, <b>regístrala aquí</b> y manda tu captura al supervisor. Cuenta en el marcador cuando el supervisor la confirma.${mio.p ? ` Tienes <b>${mio.p} por confirmar</b>.` : ""}</p>`}
+            <p class="muted peque" style="margin:6px 0 0">Acumulado desde el ${U.corta(TJ.inicio())} · solo técnicos de la plantilla (sin supervisores).</p></div>
+          <div class="tj-hero-btn">${sup ? `<button class="btn verde" id="tjWa">${B.ico("subir")} Mensaje para WhatsApp</button>` : ""}
+            ${sup ? "" : `<button class="btn" id="tjReg">${B.ico("mas")} Registrar mi tarjeta · ${turnoTxt(f, t)}</button>`}</div>
+        </div>
+        ${sup && pend.length ? `<div class="tarjeta c12">${cab("reloj", "d", "Por confirmar (" + pend.length + ")", "Revisa la captura que te mandó cada técnico antes de confirmar.", `<button class="btn chico verde" id="tjConfTodas">${B.ico("ok")} Confirmar todas</button>`)}
+          <div class="tj-pend">${pend.map(d => `<div><div class="tj-pend-t"><b>${esc(B.dom.nombre(d.ini))}</b><span>${turnoTxt(d.f, d.t)}${d.nota ? " · " + esc(d.nota) : ""}</span><small>registrada ${U.fh(d.reg)}</small></div>
+            <div class="tj-pend-b"><button class="btn chico verde" data-conf="${esc(d.uid)}">${B.ico("ok")} Confirmar</button><button class="btn chico peligro" data-rech="${esc(d.uid)}">No válida</button></div></div>`).join("")}</div></div>` : ""}
+        ${col("T2", "Turno de día")}${col("T1", "Turno de noche")}
+      </div>`;
+      const reg = c.querySelector("#tjReg"); if (reg) reg.onclick = () => this.registrar(yo);
+      const wa = c.querySelector("#tjWa"); if (wa) wa.onclick = () => this.whats();
+      const hacer = async (accion, datos) => { try { await TJ.llamar(accion, datos); await this.recarga(); } catch (e) { B.ui.error(e); } };
+      c.querySelectorAll("[data-conf]").forEach(b => b.onclick = () => hacer("declEstado", { uids: [b.dataset.conf], est: "C" }));
+      c.querySelectorAll("[data-rech]").forEach(b => b.onclick = async () => {
+        const m = await B.ui.modal({ titulo: "Tarjeta no válida", icono: "alerta", html: `<div class="campo"><label>Motivo (lo verá el técnico)</label><input class="inp" id="mMot" placeholder="Ej. captura repetida, no se envió el formulario…"></div>`,
+          botones: [{ t: "Cancelar", c: "sec", v: null }, { t: "Marcar como no válida", c: "peligro", v: v => v.querySelector("#mMot").value.trim() || "No válida" }] });
+        if (m) hacer("declEstado", { uids: [b.dataset.rech], est: "R", motivo: m });
+      });
+      const ct = c.querySelector("#tjConfTodas"); if (ct) ct.onclick = async () => { if (await B.ui.confirmar(`¿Confirmar las <b>${pend.length}</b> tarjetas registradas?`, "Confirmar todas", "Confirmar")) hacer("declEstado", { uids: pend.map(d => d.uid), est: "C" }); };
+      c.querySelectorAll("[data-mas]").forEach(b => b.onclick = () => hacer("declarar", { ini: b.dataset.mas, f, t, nota: "Agregada por el supervisor" }));
+      c.querySelectorAll("[data-menos]").forEach(b => b.onclick = async () => {
+        const ini = b.dataset.menos, L = D.decl.filter(d => U.ini(d.ini) === ini && d.est === "C" && d.f >= TJ.inicio()).sort((a, x) => (x.f === f && x.t === t) - (a.f === f && a.t === t) || x.id - a.id);
+        if (L[0] && await B.ui.confirmar(`Se quitará una tarjeta confirmada de <b>${esc(B.dom.nombre(ini))}</b> (${turnoTxt(L[0].f, L[0].t)}${L[0].nota ? ": " + esc(L[0].nota) : ""}).`, "Quitar tarjeta", "Quitar", true)) hacer("declBorrar", { uid: L[0].uid });
+      });
+    },
+    async registrar(ini) {
+      const { f, t } = B.app.trabajo, sup = B.dom.esSup();
+      const r = await B.ui.modal({
+        titulo: "Registrar tarjeta", icono: "mas",
+        html: `<p style="margin:0 0 12px;line-height:1.5">Turno: <b>${t} ${esc(B.t.nombre(t))} · ${U.corta(f)}</b> <span class="muted peque">(se cambia arriba a la derecha)</span></p>
+          <div class="campo"><label>¿De qué fue tu tarjeta? (opcional)</label><input class="inp" id="rNota" maxlength="200" placeholder="Ej. Falta de guantes en maniobra, Turbina 10.15"><span class="ayuda">Una tarjeta por registro. Si hiciste dos, regístrala dos veces.</span></div>
+          ${sup ? "" : `<div class="aviso d" style="margin:0">${B.ico("info")}<div>No olvides mandar al supervisor la captura de Microsoft Forms: con ella confirma tu tarjeta.</div></div>`}`,
+        botones: [{ t: "Cancelar", c: "sec", v: null }, { t: "Registrar", v: v => ({ nota: v.querySelector("#rNota").value.trim() }) }]
+      });
+      if (!r) return;
+      try { await TJ.llamar("declarar", { ini, f, t, nota: r.nota }); B.ui.toast(sup ? "Tarjeta registrada y confirmada." : "Tarjeta registrada. Contará cuando el supervisor la confirme.", "ok"); await this.recarga(); }
+      catch (e) { B.ui.error(e); }
+    },
+    async whats() {
+      const { f, t } = B.app.trabajo;
+      await modalMsg("Mensaje para WhatsApp", `Turno <b>${t} ${esc(B.t.nombre(t))} · ${U.corta(f)}</b>. Solo cuentan las tarjetas confirmadas. Puedes corregir el texto antes de copiarlo.`, TJ.mensaje(f, t));
+    },
+
+    /* ------------------------------------------------------------ MIS TARJETAS */
+    async t_mias(c) {
+      const yo = U.ini(B.usuario.ini), D = TJ.datos, mias = D.decl.filter(d => U.ini(d.ini) === yo).sort((a, b) => b.id - a.id);
+      c.innerHTML = `<div class="tarjeta">${cab("lista", "g", "Tarjetas que registré", "Lo que has declarado en la bitácora y si el supervisor ya lo confirmó.")}
+        ${mias.length ? `<div class="tabla-cont"><table class="tabla"><thead><tr><th>Turno</th><th>Tarjeta</th><th>Estado</th><th></th></tr></thead><tbody>${mias.map(d => `<tr><td>${turnoTxt(d.f, d.t)}</td><td>${esc(d.nota || "—")}</td>
+          <td><span class="badge ${EST[d.est][0]}">${EST[d.est][1]}</span>${d.est === "R" && d.motivo ? ` <span class="muted peque">${esc(d.motivo)}</span>` : ""}</td>
+          <td style="text-align:right">${d.est === "P" ? `<button class="btn fantasma btn-icono" data-borra="${esc(d.uid)}" title="Borrar">${B.ico("basura")}</button>` : ""}</td></tr>`).join("")}</tbody></table></div>` : B.ui.vacio("Todavía no registras tarjetas. Hazlo desde la pestaña Marcador.")}</div>
+        <div class="tarjeta">${cab("doc", "v", "Mis tarjetas en los reportes de Desempeño Humano", "Las que aparecen a tu nombre en los archivos semanales que carga el supervisor (solo las relacionadas con Seguridad Industrial o alta energía).")}<div id="tjMias"><div class="vacio"><span class="giro" style="display:inline-block"></span></div></div></div>`;
+      c.querySelectorAll("[data-borra]").forEach(b => b.onclick = async () => { try { await TJ.llamar("declBorrar", { uid: b.dataset.borra }); await this.recarga(); } catch (e) { B.ui.error(e); } });
+      if (!TJ.mias) TJ.mias = (await TJ.llamar("mias")).tarjetas;
+      const L = [...TJ.mias].sort((a, b) => (b.fcap || "").localeCompare(a.fcap || "")), cont = c.querySelector("#tjMias");
+      if (!cont) return;
+      cont.innerHTML = L.length ? L.map((x, i) => `<div class="tj-item" data-i="${i}"><div><b>#${esc(x.id)} · ${U.fh(x.fcap)}</b> <span class="badge n">${esc(x.std || "")}${x.epp ? " · " + esc(x.epp) : ""}</span><p>${esc(x.doc || "")}</p></div>${B.ico("ojo")}</div>`).join("") : B.ui.vacio("Aún no hay tarjetas tuyas en los archivos cargados.");
+      cont.querySelectorAll(".tj-item").forEach(el => el.onclick = () => this.detalle(L[+el.dataset.i], null));
+    },
+
+    /* ------------------------------------------------------------ RESUMEN DE LA SEMANA (vista resumida del celular) */
+    async t_res(c) {
+      const D = TJ.datos, semanas = Object.keys(D.semanas).sort();
+      if (!semanas.length) { c.innerHTML = `<div class="tarjeta">${B.ui.vacio("Las tarjetas de la semana llegan con el <b>paquete de datos</b> de la PC (después de que se cargan ahí los Excel). Para cargarlos desde este equipo usa la vista completa.", "doc")}</div>`; return; }
+      if (!semanas.includes(this.sem)) this.sem = semanas[semanas.length - 1];
+      const sem = this.sem, L = await TJ.semana(sem), M = D.marcas, deb = L.filter(x => x.si === "Debilidad"), sug = new Map(L.map(x => [x.id, TJ.sugerir(x, L)]));
+      const porDep = TJ.contar(L, x => x.depto), lugar = porDep.findIndex(x => U.norm(x[0]).includes("SEGURIDAD INDUSTRIAL")), nSI = L.filter(x => TJ.esSI(x)).length;
+      const marc = L.filter(x => M[x.id] && M[x.id].m !== "D"), porRev = L.filter(x => !M[x.id] && sug.get(x.id).nivel === 2);
+      const top = (t, l) => l.length ? `<div class="tj-top"><h4>${t}</h4>${l.slice(0, 4).map(([k, n]) => `<div class="tj-b"><span class="tj-bn">${esc(k)}</span><b>${n}</b></div>`).join("")}</div>` : "";
+      const item = x => { const m = M[x.id], s = sug.get(x.id); return `<div class="tj-item" data-id="${esc(x.id)}"><div><b>#${esc(x.id)}</b> ${m ? `<span class="badge ${MARCA[m.m][0]}">${MARCA[m.m][1]}</span>` : `<span class="tj-sug ${s.tipo}">¿${s.tipo === "A" ? "Acto" : "Condición"}?</span>`} <span class="badge n">${esc(x.std || "")}</span>${s.fecha && s.fecha.grave ? ` <span class="badge r">⚠ fecha</span>` : ""}<p>${esc((x.qp || x.doc || "").slice(0, 170))}</p></div>${B.ico("ojo")}</div>`; };
+      c.innerHTML = `<div class="tarjeta">${cab("grafica", "g", "Resumen de la semana", `${L.length} tarjetas · ${D.semanas[sem].si} de Seguridad Industrial · ${D.semanas[sem].ae} con alta energía`, this.selSemana(semanas))}
+          <div class="tj-kpis"><div><b>${nSI}</b><span>hechas por S.I.</span></div><div><b>${lugar >= 0 ? (lugar + 1) + ".º" : "—"}</b><span>lugar de ${porDep.length} deptos.</span></div><div><b>${deb.length}</b><span>con debilidad en S.I.</span></div>
+            <div><b style="color:var(--rojo)">${marc.filter(x => M[x.id].m === "A").length}</b><span>actos marcados</span></div><div><b style="color:var(--azul)">${marc.filter(x => M[x.id].m === "C").length}</b><span>condiciones marcadas</span></div></div>
+          <div class="tj-tops" style="margin-top:14px">${top("Estándar con debilidad", TJ.contar(deb, x => x.std))}${top("EPP con debilidad", TJ.contar(deb.filter(x => x.epp), x => x.epp))}${top("Alta energía", TJ.contar(L.filter(x => x.ae === "Si"), x => x.energia))}${top("Dónde", TJ.contar(deb, x => [x.edif, x.niv].filter(Boolean).join(" ")))}</div>
+          <button class="btn verde bloque" id="tjMsg" style="margin-top:14px">${B.ico("doc")} Mensaje de seguridad de la semana</button></div>
+        <div class="tarjeta">${cab("ok", "v", "Marcadas para la E+1 (" + marc.length + ")", "Toca una para verla o cambiar su marca.")}${marc.map(item).join("") || B.ui.vacio("Aún no hay tarjetas marcadas.")}</div>
+        <div class="tarjeta">${cab("alerta", "d", "Por revisar (" + porRev.length + ")", "Las que más probablemente son acto o condición insegura. Tú decides.")}${porRev.slice(0, 15).map(item).join("") || B.ui.vacio("Nada pendiente de revisar.")}
+          ${porRev.length > 15 ? `<p class="muted peque" style="margin:8px 0 0">Se muestran 15 de ${porRev.length}. Para verlas todas y filtrar usa la vista completa.</p>` : ""}</div>`;
+      c.querySelector("#tjSem").onchange = e => { this.sem = e.target.value; this.pinta(); };
+      c.querySelector("#tjMsg").onclick = () => modalMsg("Mensaje de seguridad de la semana", "Propuesta armada con las tendencias de la semana. Ajústala antes de compartirla.", TJ.mensajeSeguridad(sem, L));
+      c.querySelectorAll(".tj-item[data-id]").forEach(el => el.onclick = () => this.detalle(L.find(x => x.id === el.dataset.id), sug.get(el.dataset.id), () => { const y = window.scrollY; this.pinta(); setTimeout(() => window.scrollTo(0, y), 60); }));
+    },
+
+    /* ------------------------------------------------------------ TARJETAS Y TENDENCIAS (supervisores y quien elabora la E+1) */
+    selSemana(semanas) {
+      return `<select class="inp" id="tjSem" style="width:auto;min-width:230px">${semanas.map(s => `<option value="${s}" ${s === this.sem ? "selected" : ""}>${TJ.semTxt(s)} (${TJ.datos.semanas[s].n})</option>`).join("")}</select>`;
+    },
+    botonExcel() { return `<label class="btn" style="cursor:pointer">${B.ico("subir")} Cargar Excel…<input type="file" id="tjArch" accept=".xlsx" multiple hidden></label>`; },
+    activarExcel(c) {
+      const inp = c.querySelector("#tjArch"); if (!inp) return;
+      inp.onchange = async () => {
+        const res = [], err = [];
+        for (const f of inp.files) {
+          try {
+            const { fu, porSem } = TJ.leerExcel(await f.arrayBuffer(), f.name);
+            for (const sem of Object.keys(porSem).sort()) {
+              const r = await TJ.llamar("importar", { sem, tarjetas: porSem[sem] });
+              delete TJ.cartas[sem]; this.sem = sem;
+              res.push(`<b>${esc(f.name)}</b> (${fu === "SI" ? "Seguridad Industrial" : "alta energía"}) → semana ${+sem.split("-")[1]}: ${r.nuevas} nuevas, ${r.actualizadas} ya estaban`);
+            }
+          } catch (e) { err.push(`<b>${esc(f.name)}</b>: ${esc(e.message)}`); }
+        }
+        TJ.mias = null;
+        if (res.length) B.ui.toast(res.join("<br>"), "ok", 9000);
+        if (err.length) B.ui.toast("No se pudo leer:<br>" + err.join("<br>"), "error", 12000);
+        await this.recarga();
+      };
+    },
+    async t_tend(c) {
+      const D = TJ.datos, semanas = Object.keys(D.semanas).sort();
+      if (!semanas.length) {
+        c.innerHTML = `<div class="tarjeta">${cab("subir", "g", "Carga los Excel de la semana", "Los archivos «SEGIND E+1» y «ALTA ENERGÍA E+1» que manda Desempeño Humano. Puedes seleccionar los dos a la vez.", this.botonExcel())}
+          ${B.ui.vacio("Aún no hay tarjetas cargadas.", "doc")}</div>`;
+        return this.activarExcel(c);
+      }
+      if (!semanas.includes(this.sem)) this.sem = semanas[semanas.length - 1];
+      const sem = this.sem, L = await TJ.semana(sem), M = D.marcas, F = this.fil;
+      const deb = L.filter(x => x.si === "Debilidad"), sug = new Map(L.map(x => [x.id, TJ.sugerir(x, L)]));
+      const barras = (lista, resalta, tot) => { const mx = Math.max(1, ...lista.map(x => x[1])); return lista.map(([k, n], i) => `<div class="tj-b ${resalta(k)}" data-q="${esc(k)}"><span class="tj-bp">${i + 1}</span><span class="tj-bn">${esc(k)}</span><span class="tj-bb"><i style="width:${Math.round(n / mx * 100)}%"></i></span><b>${n}</b>${tot ? `<small>${Math.round(n / tot * 100)}%</small>` : ""}</div>`).join("") || `<p class="muted peque">Sin datos.</p>`; };
+      const porArea = TJ.contar(L, x => x.area), porDep = TJ.contar(L, x => x.depto), lugarSI = porDep.findIndex(x => U.norm(x[0]).includes("SEGURIDAD INDUSTRIAL"));
+      const nSI = L.filter(x => TJ.esSI(x)).length, autoresSI = TJ.contar(L.filter(x => TJ.esSI(x)), x => x.rpe + " " + x.nom);
+      const rpes = new Set(B.estado.personal.map(p => U.ini(p.rpe)));
+      const top = (titulo, lista, nota) => `<div class="tj-top"><h4>${titulo}</h4>${nota ? `<p class="muted peque" style="margin:-4px 0 6px">${nota}</p>` : ""}${barras(lista.slice(0, 6), () => "", 0)}</div>`;
+      const ver = { todas: () => true, sug: x => !M[x.id] && sug.get(x.id).nivel > 0, marc: x => M[x.id] && M[x.id].m !== "D", desc: x => M[x.id] && M[x.id].m === "D", sin: x => !M[x.id], baja: x => sug.get(x.id).tipo && sug.get(x.id).nivel === 0, si: x => TJ.esSI(x), fecha: x => !!sug.get(x.id).fecha };
+      const nFecha = L.filter(x => sug.get(x.id).fecha && sug.get(x.id).fecha.grave).length;
+      const q = U.norm(F.q).split(" ").filter(Boolean);
+      const vis = L.filter(x => (F.fu === "Todas" || (x.fu || "").includes(F.fu === "SEGIND" ? "SI" : "AE")) && ver[F.ver](x)
+        && (!q.length || q.every(k => U.norm([x.id, x.nom, x.rpe, x.depto, x.area, x.obsDepto, x.subg, x.edif, x.niv, x.std, x.epp, x.energia, x.doc, x.qp, x.t2, x.t3, x.t5, x.next, x.cat].join(" ")).includes(k))))
+        .sort((a, b) => (sug.get(b.id).nivel - sug.get(a.id).nivel) || (+a.id - +b.id));
+      const nA = L.filter(x => M[x.id] && M[x.id].m === "A").length, nC = L.filter(x => M[x.id] && M[x.id].m === "C").length;
+      c.innerHTML = `
+        <div class="tarjeta">${cab("grafica", "g", "Semana de captura", `${L.length} tarjetas distintas · ${D.semanas[sem].si} en el archivo de Seguridad Industrial · ${D.semanas[sem].ae} con peligros de alta energía`, this.selSemana(semanas) + this.botonExcel())}
+          <div class="tj-kpis"><div><b>${nSI}</b><span>hechas por Seguridad Industrial</span></div><div><b>${lugarSI >= 0 ? (lugarSI + 1) + ".º" : "—"}</b><span>lugar de ${porDep.length} departamentos</span></div>
+            <div><b>${deb.length}</b><span>con debilidad en S.I.</span></div><div><b>${L.filter(x => x.ae === "Si").length}</b><span>con alta energía</span></div><div><b style="color:var(--rojo)">${nA}</b><span>actos marcados</span></div><div><b style="color:var(--azul)">${nC}</b><span>condiciones marcadas</span></div>${nFecha ? `<div class="tj-kfecha" id="tjKFecha" title="Ver cuáles"><b>⚠ ${nFecha}</b><span>con fecha dudosa</span></div>` : ""}</div></div>
+        <div class="cuadricula">
+          <div class="tarjeta c6">${cab("usuarios", "a", "Tarjetas por área", "Subgerencia o área de quien hizo la tarjeta. Resaltada: donde está Seguridad Industrial.")}<div class="tj-bars">${barras(porArea, k => U.norm(k).includes("SEGURIDAD NUCLEAR") ? "si2" : "", L.length)}</div></div>
+          <div class="tarjeta c6">${cab("usuarios", "v", "Tarjetas por departamento", "Departamento de quien hizo la tarjeta. Resaltado: Seguridad Industrial.")}<div class="tj-bars">${barras(porDep, k => U.norm(k).includes("SEGURIDAD INDUSTRIAL") ? "si" : "", L.length)}</div></div>
+          <div class="tarjeta c12">${cab("usuario", "v", "Personal de Seguridad Industrial en estos archivos", "Sirve para cotejar con el marcador. Con ✔ los que están en la plantilla de la recarga.")}
+            <div class="tj-chips">${autoresSI.map(([k, n]) => `<span class="tj-chip ${rpes.has(k.split(" ")[0]) ? "pl" : ""}">${rpes.has(k.split(" ")[0]) ? "✔ " : ""}${esc(k)} <b>${n}</b></span>`).join("") || `<span class="muted peque">Nadie de Seguridad Industrial aparece en esta semana.</span>`}</div></div>
+          <div class="tarjeta c12">${cab("grafica", "d", "Tendencias de la semana", "Lo que más se repite. Toca un renglón para filtrar las tarjetas de abajo.", `<button class="btn chico verde" id="tjMsg">${B.ico("doc")} Proponer mensaje de seguridad</button>`)}
+            <div class="tj-tops">
+              ${top("Estándar de S.I. con debilidad", TJ.contar(deb, x => x.std))}${top("EPP con debilidad", TJ.contar(deb.filter(x => x.epp), x => x.epp))}
+              ${top("Peligros de alta energía", TJ.contar(L.filter(x => x.ae === "Si"), x => x.energia))}${top("Dónde (debilidades de S.I.)", TJ.contar(deb, x => [x.edif, x.niv].filter(Boolean).join(" ")))}
+              ${top("Área observada", TJ.contar(deb, x => x.subg || x.obsDepto))}${top("Desempeño humano", TJ.contar(L.filter(x => x.t3r === "Debilidad"), x => x.t3), "Herramienta con debilidad")}
+              ${top("Cultura de seguridad", TJ.contar(L.filter(x => x.t2r === "Debilidad"), x => x.t2), "Rasgo con debilidad")}${top("Protección radiológica", TJ.contar(L.filter(x => x.t5r === "Debilidad"), x => x.t5), "Estándar con debilidad")}
+              ${top("Atributo NExT menos evidente", TJ.contar(L, x => x.next))}
+            </div></div>
+        </div>
+        <div class="tarjeta" id="tjLista">${cab("lista", "g", "Tarjetas de la semana", "En color las que podrían ir a la E+1: revísalas y confírmalas o descártalas. Solo las que tú marques cuentan en la presentación.")}
+          <div class="fila" style="align-items:flex-end;margin-bottom:12px">
+            <div class="campo" style="flex:2 1 260px;margin:0"><label>Buscar</label><input class="inp" id="tjQ" value="${esc(F.q)}" placeholder="Guantes, Turbina, nombre, departamento, #Id…"></div>
+            <div class="campo" style="flex:0 0 auto;margin:0"><label>Archivo</label>${B.ui.seg("fu", ["Todas", "SEGIND", "Alta energía"], F.fu)}</div>
+            <div class="campo" style="flex:1 1 200px;margin:0"><label>Mostrar</label><select class="inp" id="tjVer">${[["todas", "Todas"], ["sug", "Sugeridas sin revisar"], ["marc", "Marcadas para la E+1"], ["desc", "Descartadas"], ["sin", "Sin revisar"], ["baja", "De calidad dudosa"], ["fecha", "Con la fecha dudosa"], ["si", "Hechas por Seguridad Industrial"]].map(([k, t]) => `<option value="${k}" ${F.ver === k ? "selected" : ""}>${t}</option>`).join("")}</select></div>
+          </div>
+          <div class="tabla-cont"><table class="tabla tj-tabla"><thead><tr><th>#</th><th>Cuándo</th><th>Quién la hizo</th><th>A quién / dónde</th><th>Estándar</th><th>Qué pasó</th><th>E+1</th></tr></thead><tbody>
+            ${vis.slice(0, F.n).map(x => {
+              const s = sug.get(x.id), m = M[x.id], fm = s.fecha;
+              return `<tr data-id="${esc(x.id)}" class="${m ? "tj-m" + m.m : s.nivel === 2 ? "tj-s" + s.tipo : s.nivel === 1 ? "tj-s1" : ""}"><td><b>${esc(x.id)}</b><br><span class="muted peque">${esc((x.fu || "").replace("SI", "S.I.").replace("AE", "A.E."))}</span></td>
+                <td style="white-space:nowrap" ${fm ? `title="${esc(fm.msg)}"` : ""}>${fm ? `<span class="${fm.grave ? "tj-fmal" : "tj-fduda"}">⚠ ${x.fobs ? U.cortaDM(x.fobs) : "sin fecha"}</span>` : U.cortaDM(x.fobs || x.fcap)}<br><span class="muted peque">${esc(x.turno || "")}${fm ? " · capt. " + U.cortaDM(x.fcap) : ""}</span></td>
+                <td><b class="${TJ.esSI(x) ? "tj-si" : ""}">${esc(x.nom)}</b><br><span class="muted peque">${esc(x.depto || "")}</span></td>
+                <td>${esc(x.obsDepto || "")} <span class="muted peque">${esc([x.contrato, x.cat].filter(Boolean).join(" · "))}</span><br><span class="muted peque">${esc(TJ.lugar(x))}</span></td>
+                <td>${esc(x.std || "")}${x.epp ? `<br><span class="muted peque">${esc(x.epp)}</span>` : ""}${x.ae === "Si" ? `<br><span class="badge d">⚡ ${esc(x.energia || "alta energía")}</span>` : ""}</td>
+                <td><div class="tj-qp">${esc(x.qp || x.doc || "")}</div></td>
+                <td>${m ? `<span class="badge ${MARCA[m.m][0]}">${MARCA[m.m][1]}</span>` : s.nivel ? `<span class="tj-sug ${s.tipo}">¿${s.tipo === "A" ? "Acto" : "Condición"}?</span>` : s.tipo ? `<span class="muted peque">${esc(s.dudas[0] || "")}</span>` : ""}</td></tr>`;
+            }).join("") || `<tr><td colspan="7">${B.ui.vacio("Ninguna tarjeta con ese filtro.")}</td></tr>`}</tbody></table></div>
+          <p class="muted peque" style="margin:10px 0 0">${Math.min(vis.length, F.n)} de ${vis.length} tarjetas${vis.length > F.n ? ` · <a href="#" id="tjMas">mostrar más</a>` : ""}</p></div>`;
+      this.activarExcel(c);
+      const repinta = foco => { const y = window.scrollY; this.pinta(); window.scrollTo(0, y); if (foco) setTimeout(() => { const i = document.getElementById("tjQ"); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }, 0); };
+      c.querySelector("#tjSem").onchange = e => { this.sem = e.target.value; F.n = 80; this.pinta(); };
+      c.querySelector("#tjQ").oninput = U.debounce(e => { F.q = e.target.value; F.n = 80; repinta(true); }, 350);
+      c.querySelector("#tjVer").onchange = e => { F.ver = e.target.value; F.n = 80; repinta(); };
+      B.ui.activarSeg(c.querySelector("#tjLista"), (s, v) => { F.fu = v; F.n = 80; repinta(); });
+      const kf = c.querySelector("#tjKFecha"); if (kf) kf.onclick = () => { F.ver = "fecha"; F.q = ""; F.n = 80; this.pinta(); setTimeout(() => document.getElementById("tjLista").scrollIntoView({ behavior: "smooth" }), 30); };
+      const mas = c.querySelector("#tjMas"); if (mas) mas.onclick = e => { e.preventDefault(); F.n += 150; repinta(); };
+      c.querySelectorAll(".tj-tops .tj-b").forEach(b => b.onclick = () => { F.q = b.dataset.q; F.ver = "todas"; F.n = 80; this.pinta(); setTimeout(() => document.getElementById("tjLista").scrollIntoView({ behavior: "smooth" }), 30); });
+      c.querySelectorAll(".tj-tabla tr[data-id]").forEach(tr => tr.onclick = () => this.detalle(L.find(x => x.id === tr.dataset.id), sug.get(tr.dataset.id), repinta));
+      c.querySelector("#tjMsg").onclick = () => modalMsg("Mensaje de seguridad de la semana", "Propuesta armada con las tendencias de la semana. Ajústala a tu estilo antes de compartirla.", TJ.mensajeSeguridad(sem, L));
+    },
+
+    // Ficha de una tarjeta: primero lo que sirve para decidir; lo demas, plegado al final
+    async detalle(x, s, alCambiar) {
+      if (!x) return;
+      const m = (TJ.datos.marcas || {})[x.id], puede = !!alCambiar && TJ.datos.editor;
+      const dato = (et, v) => v ? `<div class="tj-d"><span>${et}</span><div>${U.br(v)}</div></div>` : "";
+      const res = v => v ? ` <span class="badge ${v === "Debilidad" ? "r" : "v"}">${esc(v)}</span>` : "";
+      const otros = [["Enfoque operativo / riesgo", x.t1, x.t1r], ["Cultura de seguridad", x.t2, x.t2r], ["Desempeño humano", x.t3, x.t3r], ["Seguridad radiológica", x.t5, x.t5r], ["Proficiency", x.t6, x.t6r]].filter(o => o[1])
+        .map(o => `<div class="tj-d"><span>${o[0]}</span><div>${esc(o[1])}${res(o[2])}</div></div>`).join("")
+        + dato("Requiere entrenamiento", x.t7 === "Si" ? (x.t7q || "Sí") : "") + dato("Atributo NExT menos evidente", x.next) + dato("Sección capturada", [x.secc, x.enfoque].filter(Boolean).join(" · "))
+        + dato("Condición operativa", x.cond) + Object.entries(x.x || {}).map(([k, v]) => dato(esc(k), v)).join("");
+      const fm = TJ.fechaMal(x);
+      const r = await B.ui.modal({
+        titulo: `Tarjeta #${esc(x.id)}`, icono: "doc", ancho: true,
+        html: `${fm ? `<div class="aviso ${fm.grave ? "r" : "d"}" style="margin-bottom:12px">${B.ico("alerta")}<div><b>${fm.grave ? "Fecha dudosa" : "Revisa la fecha"}:</b> ${esc(fm.msg)}. ${puede ? (fm.grave ? "Puede no ser una tarjeta válida para la presentación de esta semana; si no lo es, <b>descártala</b>." : "Confirma que corresponde a la presentación de esta semana.") : ""}</div></div>` : ""}
+          <div class="tj-chips" style="margin-bottom:12px"><span class="tj-chip">Capturada ${U.fh(x.fcap)}</span><span class="tj-chip ${fm ? (fm.grave ? "mal" : "duda") : ""}">Observada ${x.fobs ? U.corta(x.fobs) : "sin fecha"} · ${esc(x.turno || "")}</span>${(x.fu || "").includes("SI") ? `<span class="tj-chip pl">Archivo S.I.</span>` : ""}${(x.fu || "").includes("AE") ? `<span class="tj-chip">Archivo alta energía</span>` : ""}
+            ${m ? `<span class="badge ${MARCA[m.m][0]}">${MARCA[m.m][1]} · ${esc(m.por)}</span>` : ""}</div>
+          ${s && s.tipo ? `<div class="aviso ${s.nivel ? "d" : "a"}" style="margin-bottom:12px">${B.ico("info")}<div>${s.nivel ? `<b>Podría ser ${s.tipo === "A" ? "un acto inseguro" : "una condición insegura"}</b>${s.motivos.length ? ": " + esc(s.motivos.join("; ")) : ""}.` : `<b>Revisa su calidad antes de usarla:</b> ${esc(s.dudas.join("; ") || "sin observaciones")}.`} Tú decides si va a la E+1.</div></div>` : ""}
+          <div class="tj-ficha">
+            ${dato("Quién la hizo", `${x.rpe} ${x.nom}\n${[x.area, x.depto].filter(Boolean).join(" · ")}`)}${dato("A quién observó", [x.obsDepto, x.contrato, x.cat].filter(Boolean).join(" · "))}
+            ${dato("Dónde", TJ.lugar(x))}${dato("Actividad", x.doc)}
+            <div class="tj-d"><span>Estándar de Seguridad Industrial</span><div>${esc(x.std || "—")}${x.epp ? " · " + esc(x.epp) : ""}${res(x.si)}</div></div>
+            ${dato("Peligros de alta energía", x.ae ? x.ae + (x.energia ? " · " + x.energia : "") : "")}
+          </div>
+          <div class="tj-ficha una">${dato("¿Qué pasó?", x.qp)}${dato("¿Por qué pasó?", x.pq)}${dato("¿Qué puede pasar?", x.qpp)}${dato("Retroalimentación", x.retro === "Si" ? x.retroTxt || "Sí" : x.retro ? "No se dio. " + (x.noRetro || "") : "")}${dato("Comentarios adicionales", x.com)}${dato("Momento de enseñanza-aprendizaje", x.mea)}</div>
+          ${otros ? `<details class="tj-otros"><summary>Otros datos de la tarjeta</summary><div class="tj-ficha">${otros}</div></details>` : ""}
+          ${puede ? `<div class="campo" style="margin:14px 0 0"><label>Nota para la presentación (opcional)</label><input class="inp" id="dNota" value="${esc(m ? m.nota || "" : "")}" placeholder="Ej. se corrigió en sitio con el supervisor del área"></div>` : ""}`,
+        botones: puede ? [{ t: "Cerrar", c: "sec", v: null }].concat(m ? [{ t: "Quitar marca", c: "sec", v: v => ({ m: "", nota: "" }) }] : [])
+          .concat([{ t: "Descartar", c: "sec", v: v => ({ m: "D", nota: v.querySelector("#dNota").value.trim() }) }, { t: "Condición insegura", c: "dorado", v: v => ({ m: "C", nota: v.querySelector("#dNota").value.trim() }) }, { t: "Acto inseguro", c: "", v: v => ({ m: "A", nota: v.querySelector("#dNota").value.trim() }) }])
+          : [{ t: "Cerrar", c: "sec", v: null }]
+      });
+      if (!r || !puede) return;
+      try {
+        await TJ.llamar("marcar", { id: x.id, m: r.m, nota: r.nota, sem: x.sem || this.sem });
+        if (r.m) TJ.datos.marcas[x.id] = { m: r.m, nota: r.nota, sem: x.sem || this.sem, por: U.ini(B.usuario.ini) }; else delete TJ.datos.marcas[x.id];
+        alCambiar();
+      } catch (e) { B.ui.error(e); }
+    },
+
+    /* ------------------------------------------------------------ PRESENTACION E+1 (en e1.js) */
+    t_e1(c) { return B.e1.vista(this, c); },
+
+    /* ------------------------------------------------------------ AJUSTES (supervisor) */
+    t_ajustes(c) {
+      const D = TJ.datos, cfg = D.cfg, tec = B.dom.ordenados(TJ.tecnicos());
+      c.innerHTML = `<div class="tarjeta">${cab("engrane", "g", "Marcador", "Desde cuándo se acumula y cómo se llama a cada quien en el mensaje de WhatsApp.")}
+          <div class="fila"><div class="campo" style="flex:0 0 200px"><label>El marcador cuenta desde</label><input class="inp" type="date" id="aIni" value="${esc(TJ.inicio())}"><span class="ayuda">Cámbialo para reiniciar el marcador.</span></div>
+            <div class="campo"><label>Quién elabora la E+1 (además de los supervisores)</label><input class="inp" id="aEd" value="${esc(D.editores.join(", "))}" placeholder="Iniciales separadas por coma"><span class="ayuda">Iniciales de la plantilla. Ven todas las tarjetas, las marcan y generan la presentación. También tienen <b>permiso para entrar a la versión de celular</b> (con el siguiente paquete de datos).</span></div></div>
+          <div class="campo"><label>Cierre del mensaje de WhatsApp</label><textarea class="inp" id="aCierre" style="min-height:110px">${esc(cfg.cierre || TJ.CIERRE)}</textarea></div>
+          <label style="font-size:12px;font-weight:600;color:var(--texto-2)">Nombre corto de cada técnico</label>
+          <div class="tj-apodos">${tec.map(i => `<label><span>${esc(B.dom.nombre(i))}</span><input class="inp" data-ap="${i}" value="${esc(TJ.apodo(i))}"></label>`).join("")}</div>
+          <div style="display:flex;justify-content:flex-end;margin-top:14px"><button class="btn verde" id="aGuardar">${B.ico("ok")} Guardar ajustes</button></div></div>
+        <div class="tarjeta">${cab("doc", "d", "Semanas cargadas", "Si cargaste un archivo equivocado, borra la semana y vuelve a cargarla. No afecta al marcador.")}
+          <div class="tabla-cont"><table class="tabla"><thead><tr><th>Semana</th><th>Tarjetas</th><th>S.I.</th><th>Alta energía</th><th>Última carga</th><th></th></tr></thead><tbody>${Object.keys(D.semanas).sort().reverse().map(s => { const v = D.semanas[s]; return `<tr><td><b>${TJ.semTxt(s)}</b></td><td>${v.n}</td><td>${v.si}</td><td>${v.ae}</td><td class="muted peque">${U.fh(v.fh)} · ${esc(v.por)}</td><td style="text-align:right"><button class="btn fantasma btn-icono" data-bsem="${s}" title="Borrar semana">${B.ico("basura")}</button></td></tr>`; }).join("") || `<tr><td colspan="6">${B.ui.vacio("Sin semanas cargadas.")}</td></tr>`}</tbody></table></div></div>`;
+      c.querySelector("#aGuardar").onclick = async () => {
+        const apodos = {}; c.querySelectorAll("[data-ap]").forEach(i => { const v = i.value.trim(); if (v) apodos[i.dataset.ap] = v; });
+        const editores = c.querySelector("#aEd").value.split(/[,;\s]+/).map(U.ini).filter(Boolean), malos = editores.filter(i => !B.dom.persona(i));
+        if (malos.length) return B.ui.toast("Iniciales que no están en la plantilla: <b>" + esc(malos.join(", ")) + "</b>", "error");
+        try { await TJ.llamar("cfgGuardar", { cfg: Object.assign({}, cfg, { inicio: c.querySelector("#aIni").value, cierre: c.querySelector("#aCierre").value.trim(), apodos, editores }) }); B.ui.toast("Ajustes guardados.", "ok"); await this.recarga(); }
+        catch (e) { B.ui.error(e); }
+      };
+      c.querySelectorAll("[data-bsem]").forEach(b => b.onclick = async () => {
+        const s = b.dataset.bsem;
+        if (!(await B.ui.confirmar(`Se borrarán las tarjetas cargadas de la <b>${TJ.semTxt(s)}</b> y sus marcas para la E+1.`, "Borrar semana", "Borrar", true))) return;
+        try { await TJ.llamar("semBorrar", { sem: s }); delete TJ.cartas[s]; TJ.mias = null; await this.recarga(); } catch (e) { B.ui.error(e); }
+      });
+    }
+  };
+})();
+;
+/* ---- e1.js ---- */
+/* =========================================================================
+   BITACORA 24RU1 - Presentacion semanal "E+1" de Seguridad Industrial
+   Con las tarjetas marcadas en "Tarjetas y tendencias" arma las 5 laminas
+   (portada, objetivo, tabla resumen y dos graficas) y las entrega en PDF o
+   en PowerPoint (.pptx) con tabla, textos y graficas editables.
+   Las laminas se describen una sola vez (laminas) y de ahi salen el HTML y el PPTX.
+   ========================================================================= */
+"use strict";
+(function () {
+  const TJ = B.tj, esc = s => U.esc(s);
+  const MES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+  const num = v => { const x = parseInt(v, 10); return isNaN(x) ? null : x; };
+  const AZUL = "4472C4", NARANJA = "ED7D31", GRIS = "A5A5A5";
+
+  const E1 = B.e1 = {
+    S: null, W: null, histEd: null,
+
+    fechaTxt(f) { const [y, m, d] = f.split("-"); return `${d} de ${MES[+m - 1]} de ${y}`; },
+    // datos de la semana tal como se guardan (lo que no se ha capturado toma su valor por omision)
+    base(W) {
+      const D = TJ.datos, g = D.sem[W] || {}, ant = Object.keys(D.sem).sort().reverse().map(k => D.sem[k]).find(x => x.g1) || {};
+      return {
+        fecha: g.fecha || U.sumar(TJ.lunes(W), 11), g1: g.g1 || ant.g1 || "2025-26", g2: g.g2 || ant.g2 || "2025-16",
+        pag: Object.assign({ t: "", a: "", c: "", i: "", n: "", x: "" }, g.pag), tlc: Object.assign({ t: "", a: "", c: "", i: "", n: "", x: "" }, g.tlc), sac: Object.assign({ a: "", c: "", i: "", n: "", x: "" }, g.sac),
+        tx1: g.tx1 || "", tx2: g.tx2 || "", tx3: g.tx3 || "", hist: g.hist || undefined
+      };
+    },
+    // numeros de la tabla resumen: las tarjetas Lideres en Campo salen de lo cargado y lo marcado, salvo que se escriba otro valor
+    calc(W, S, L) {
+      const M = TJ.datos.marcas, marc = t => L.filter(c => M[c.id] && M[c.id].m === t);
+      const auto = { t: L.filter(c => (c.fu || "").includes("SI")).length, a: marc("A").length, c: marc("C").length };
+      const v = (o, k) => num(o[k]) || 0;
+      const tlc = { t: num(S.tlc.t) ?? auto.t, a: num(S.tlc.a) ?? auto.a, c: num(S.tlc.c) ?? auto.c, i: v(S.tlc, "i"), n: v(S.tlc, "n"), x: v(S.tlc, "x") };
+      const pag = { t: v(S.pag, "t"), a: v(S.pag, "a"), c: v(S.pag, "c"), i: v(S.pag, "i"), n: v(S.pag, "n"), x: v(S.pag, "x") };
+      const sac = { t: "N/A", a: v(S.sac, "a"), c: v(S.sac, "c"), i: v(S.sac, "i"), n: v(S.sac, "n"), x: v(S.sac, "x") };
+      const s = k => pag[k] + tlc[k] + sac[k];
+      const tot = { t: pag.t + tlc.t, a: s("a"), c: s("c"), ev: s("i") + s("n") + s("x") };
+      return { auto, tlc, pag, sac, tot, fila: [tot.a, tot.t, tot.c, s("x"), s("i")], actos: marc("A"), conds: marc("C") };
+    },
+    hist(W, fila) { const h = Object.assign({}, B.E1_SEMILLA || {}, this.histEd || TJ.datos.hist || {}); if (W && fila) h[W] = fila; return h; },
+    serie(h, desde, W) { return Object.keys(h).filter(k => /^\d{4}-\d{2}$/.test(k) && k >= desde && k <= W).sort(); },
+
+    /* ------------------------------------------------------------ textos propuestos (se pueden corregir). **negritas** */
+    STD: [[/EPP/i, "Equipo de Protección Personal Básico"]],
+    textos(W, C, L) {
+      const [a, s] = W.split("-"), sem = `${+s} del ${a}`, deb = L.filter(c => c.si === "Debilidad" && (c.fu || "").includes("SI"));
+      const stds = TJ.contar(deb, c => c.std), epp = TJ.contar(deb.filter(c => c.epp), c => c.epp, 3).map(x => x[0].toLowerCase());
+      const nom = n => { const r = this.STD.find(x => x[0].test(n)); return r ? r[1] : n; };
+      const lista = l => l.length > 1 ? l.slice(0, -1).join(", ") + " y " + l[l.length - 1] : (l[0] || "");
+      const corta = t => { t = String(t || "").replace(/\s+/g, " ").trim(); return (t.length > 230 ? t.slice(0, 227).replace(/\s+\S*$/, "") + "…" : t).replace(/[.\s]+$/, ""); };
+      const top = stds[0] ? `El estándar que presentó mayores desviaciones fue el de ${nom(stds[0][0])}${/EPP/i.test(stds[0][0]) && epp.length ? ", principalmente por la falta de uso de " + lista(epp) : ""}.` : "";
+      const mov = stds.find(x => /M[OÓ]VIL/i.test(x[0])), refMov = mov ? ` Se requiere reforzar entre el personal la política de uso de dispositivos móviles con ${mov[1]} levantamiento${mov[1] === 1 ? "" : "s"} de tarjetas.` : "";
+      const nA = C.tot.a, nC = C.tot.c, pl = (n, u, p) => `${n} ${n === 1 ? u : p}`;
+      const marcadas = C.actos.concat(C.conds);
+      const detalle = !marcadas.length ? "" : marcadas.length <= 3 ? " " + marcadas.map((c, i) => `${i + 1}) ${corta(c.qp || c.doc)}.`).join(" ")
+        : " Los desapegos fueron al estándar de " + lista(TJ.contar(marcadas, c => c.std, 3).map(x => nom(x[0]))) + ".";
+      const desv = `${nA} **${nA === 1 ? "desviación" : "desviaciones"}** por actos inseguros` + (nC ? ` y ${nC} por condiciones inseguras` : "");
+      return {
+        tx1: `El desempeño del personal relacionado a Seguridad Industrial para la **Semana ${sem},** se resume de la siguiente manera**:** Se documentaron ${C.tot.t} **observaciones (TLC y PÁG-28-5)**, de las cuales se reportan: ${desv}${detalle ? ":" + detalle : "."} ${marcadas.length <= 3 ? top + " " : ""}Para estas desviaciones fueron corregidos los comportamientos de manera oportuna e inmediata por la supervisión de primera línea.`.replace(/\s+/g, " "),
+        tx2: `**Para la semana ${sem},** se resume de la siguiente manera**:** Se documentaron **${C.tot.t} observaciones**, se identificaron: ${pl(nA, "Acto Inseguro", "Actos Inseguros")}${nC ? " y " + pl(nC, "Condición Insegura", "Condiciones Inseguras") : ""} para los cuales fueron retroalimentados y corregidos los comportamientos de manera inmediata y oportuna.`,
+        tx3: `Durante la **Semana ${sem}, Se documentan ${nA}** __desviaciones__ por actos inseguros. ${top}${refMov} **Sin embargo se intensifican los recorridos dentro y fuera de los edificios de proceso, así como las campañas de difusión sobre la rueda de la energía y la línea de fuego, con el objetivo de fortalecer la percepción al riesgo y se refuerza la aplicación de la regla de los 2 minutos.**`.replace(/\s+/g, " ")
+      };
+    },
+
+    /* ------------------------------------------------------------ modelo de la presentacion */
+    modelo(W, S, L) {
+      const C = this.calc(W, S, L), h = this.hist(W, C.fila), [a, s] = W.split("-"), prop = this.textos(W, C, L);
+      const k1 = this.serie(h, S.g1, W).filter(k => h[k][1] != null), k2 = this.serie(h, S.g2, W), et = k => "SEM " + k.slice(5);
+      return {
+        W, sem: `${s}/${a}`, semN: +s, anio: a, fecha: this.fechaTxt(S.fecha), C,
+        tx1: S.tx1 || prop.tx1, tx2: S.tx2 || prop.tx2, tx3: S.tx3 || prop.tx3,
+        g1: { titulo: "Actos y Condiciones Inseguras en la CNLV", cats: k1.map(et), etq: true, series: [{ n: "ACTOS INSEGUROS", col: AZUL, v: k1.map(k => h[k][0] || 0) }, { n: "TOTAL DE OBSERVACIONES", col: NARANJA, v: k1.map(k => h[k][1] || 0) }, { n: "CONDICIONES INSEGURAS", col: GRIS, v: k1.map(k => h[k][2] || 0) }] },
+        g2: { titulo: "ACCIDENTES INCAPACITANTES E INCIDENTES EN LA CNLV", cats: k2.map(et), etq: false, series: [{ n: "ACCIDENTES INCAPACITANTES", col: AZUL, v: k2.map(k => h[k][3] || 0) }, { n: "INCIDENTES", col: NARANJA, v: k2.map(k => h[k][4] || 0) }] }
+      };
+    },
+
+    /* ------------------------------------------------------------ laminas (medidas en puntos; la lamina mide 960 x 540) */
+    runs(txt, base) {
+      const r = []; let b = false, u = false;
+      for (const p of String(txt || "").split(/(\*\*|__)/)) {
+        if (p === "**") b = !b; else if (p === "__") u = !u;
+        else if (p) r.push(Object.assign({}, base, { t: p }, b ? { b: 1 } : null, u ? { u: 1, b: 1 } : null));
+      }
+      return r;
+    },
+    _cx: null,
+    // tamano de letra con el que el texto cabe en la caja (el ancho se mide en negritas: queda holgado)
+    ajustar(txt, w, hMax, sz, min) {
+      const cx = this._cx || (this._cx = document.createElement("canvas").getContext("2d")), pal = String(txt || "").replace(/\*\*|__/g, "").split(/\s+/).filter(Boolean);
+      for (let s = sz; ; s -= 0.5) {
+        cx.font = `bold ${s}px Arial`;
+        const esp = cx.measureText(" ").width; let lin = 1, x = 0;
+        for (const p of pal) { const a = cx.measureText(p).width; if (x && x + esp + a > w) { lin++; x = a; } else x += (x ? esp : 0) + a; }
+        if (lin * s * 1.2 <= hMax || s <= min) return { sz: s, h: lin * s * 1.2 };
+      }
+    },
+    laminas(M) {
+      const T = (x, y, w, h, pars, o) => Object.assign({ k: "t", x, y, w, h, pars }, o || {});
+      const P = (al, runs) => ({ al, runs });
+      const R = (t, f, sz, o) => Object.assign({ t, f, sz }, o || {});
+      const cab = () => [T(46, 28.5, 320, 15, [P("l", [R("Oficina de Seguridad Industrial", "Calibri", 12, { b: 1, i: 1, col: "008C5D" })])]),
+        T(46, 43.5, 320, 13, [P("l", [R("Semana SEM " + M.sem, "Calibri", 10.6, { i: 1, col: "008C5D" })])]), T(46, 55.5, 320, 13, [P("l", [R("E+1", "Calibri", 10.6, { i: 1, col: "008C5D" })])])];
+      const caja = (x, y, w, hMax, txt, sz, min) => {
+        const a = this.ajustar(txt, w - 14, hMax - 8, sz, min);
+        return T(x, y, w, Math.min(hMax, a.h + 9), [P("j", this.runs(txt, { f: "Arial", sz: a.sz }))], { fill: "EDEDED", pad: [7, 4, 7, 4] });
+      };
+      const C = M.C, nb = { b: 1, u: 1 };
+      const enc = t => ({ t, fill: "D9D9D9", sz: 10 }), cel = (t, o) => Object.assign({ t: String(t), sz: 11 }, nb, o || {});
+      const tabla = {
+        k: "tb", x: 114.5, y: 135.5, cols: [91.5, 95, 92, 102, 139, 105, 106], filas: [37.5, 38.5, 33.5, 57.5, 33.5, 41],
+        celdas: [
+          [Object.assign(enc("FUENTE"), { rs: 2 }), Object.assign(enc("TARJETAS\nGENERADAS"), { rs: 2 }), Object.assign(enc("ACTOS\nINSEGUROS"), { rs: 2 }), Object.assign(enc("CONDICIONES\nINSEGURAS"), { rs: 2 }), Object.assign(enc("EVENTOS DE SEGURIDAD INDUSTRIAL"), { cs: 3 }), null, null],
+          [null, null, null, null, enc("INCIDENTE/ EVENTOS DE\nBAJO UMBRAL"), enc("ACCIDENTES NO\nINCAPACITANTES"), enc("ACCIDENTES\nINCAPACITANTES")],
+          [cel("PAG-28-5", { u: 0 }), cel(C.pag.t), cel(C.pag.a), cel(C.pag.c), cel(C.pag.i), cel(C.pag.n), cel(C.pag.x)],
+          [cel("TARJETAS\nLIDERES EN\nCAMPO", { u: 0 }), cel(C.tlc.t), cel(C.tlc.a), cel(C.tlc.c), cel(C.tlc.i), cel(C.tlc.n), cel(C.tlc.x)],
+          [cel("SACPAC", { u: 0 }), cel("N/A"), cel(C.sac.a), cel(C.sac.c), cel(C.sac.i), cel(C.sac.n), cel(C.sac.x)],
+          [cel("TOTAL", { u: 0 }), cel(C.tot.t), cel(C.tot.a), cel(C.tot.c), cel(C.tot.ev, { cs: 3 }), null, null]
+        ]
+      };
+      return [
+        { fondo: "portada", els: [T(0, 206, 960, 48, [P("c", [R("E+1 SEM " + M.sem, "Noto Sans", 32, { b: 1, col: "155B4E" })])]), T(0, 268, 960, 30, [P("c", [R(M.fecha, "Noto Sans", 20, { col: "6E152E" })])])] },
+        { fondo: "interior", els: cab().concat([
+          T(64, 123, 841, 170, [], { fill: "EDEDED" }), T(71, 127, 400, 42, [P("l", [R("Objetivo:", "Calibri Light", 34)])]),
+          T(68, 167, 834, 124, [P("j", [R("Presentar las ", "Arial", 22), R("Condiciones Inseguras/ Actos Inseguros", "Arial", 28, { b: 1 }), R(" identificados en la ", "Arial", 22), R("Semana " + M.sem, "Arial", 28, { b: 1 }),
+            R(", relacionados con Seguridad Industrial, para tomar acciones y ", "Arial", 22), R("prevenir accidentes o lesiones en el personal que labora en la CNLV.", "Arial", 22, { b: 1 })])]),
+          T(461, 326, 427, 129, [], { fill: "C5E0B4", borde: "008C5D" }), T(469, 326, 300, 28, [P("l", [R("Referencias:", "Bodoni MT", 20, { b: 1, i: 1, u: 1 })])]),
+          T(469, 376, 415, 76, ["PAG-28 - ANEXO 5 (TARJETA BLANCA)", "PAG-71 – SACPAC", "PROGRAMA LIDERES EN CAMPO"].map(t => P("l", [R(t, "Arial", 20, { i: 1 })])))]) },
+        { fondo: "interior", els: cab().concat([T(79, 43, 880, 44, [P("c", [R("TABLA RESUMEN DE LA SEMANA", "Noto Sans", 30, { b: 1, col: "1F5B51" })])]), T(79, 86, 880, 40, [P("c", [R(M.sem, "Arial", 32, { b: 1, u: 1, col: "191919" })])]),
+          tabla, caja(40, 385, 872, 104, M.tx1, 10, 7.5)]) },
+        { fondo: "interior", els: cab().concat([Object.assign({ k: "g", x: 45, y: 88, w: 870, h: 305 }, M.g1), caja(65, 410, 826, 80, M.tx2, 16, 10)]) },
+        { fondo: "interior", els: cab().concat([Object.assign({ k: "g", x: 45, y: 88, w: 870, h: 300 }, M.g2), caja(12, 396, 916, 96, M.tx3, 15, 9)]) }
+      ];
+    },
+
+    /* ------------------------------------------------------------ HTML (vista previa y PDF) */
+    FAM: { "Noto Sans": "'Noto Sans','Segoe UI',Arial,sans-serif", "Calibri": "Calibri,Carlito,Arial,sans-serif", "Calibri Light": "'Calibri Light',Calibri,Arial,sans-serif", "Bodoni MT": "'Bodoni MT','Bodoni 72',Georgia,serif", "Arial": "Arial,Helvetica,sans-serif" },
+    css(pre) {
+      return `${pre} .s{position:relative;width:960pt;height:540pt;overflow:hidden;background-size:100% 100%;color:#000;font-family:Arial,Helvetica,sans-serif;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+        ${pre} .s>.e{position:absolute;box-sizing:border-box}${pre} .s p{margin:0;line-height:1.2;white-space:pre-wrap}
+        ${pre} .s table{position:absolute;border-collapse:collapse;table-layout:fixed;font-family:Calibri,Carlito,Arial,sans-serif}
+        ${pre} .s td{border:.75pt solid #000;text-align:center;vertical-align:middle;padding:0 3pt;font-weight:700;line-height:1.15;white-space:pre-line;overflow:hidden}
+        ${pre} .s svg{position:absolute}`;
+    },
+    span(r) {
+      return `<span style="font-family:${this.FAM[r.f] || this.FAM.Arial};font-size:${r.sz}pt;${r.b ? "font-weight:700;" : ""}${r.i ? "font-style:italic;" : ""}${r.u ? "text-decoration:underline;" : ""}${r.col ? "color:#" + r.col + ";" : ""}">${esc(r.t)}</span>`;
+    },
+    svg(g) {
+      const W = g.w, H = g.h, L = 30, Rm = 8, T = 30, Bm = 66, pw = W - L - Rm, ph = H - T - Bm, n = g.cats.length || 1, k = g.series.length;
+      const max = Math.max(1, ...g.series.flatMap(s => s.v)), paso = [0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500].find(p => max / p <= 7) || 1000, tope = Math.ceil(max / paso + 0.4) * paso;
+      const y = v => T + ph - v / tope * ph, gw = pw / n, bw = gw * 0.8 / k, fe = n > 60 ? 6.2 : 7.2;
+      let s = `<svg style="left:${g.x}pt;top:${g.y}pt;width:${W}pt;height:${H}pt" viewBox="0 0 ${W} ${H}" font-family="Calibri,Carlito,Arial,sans-serif"><text x="${W / 2}" y="17" text-anchor="middle" font-size="14" fill="#595959">${esc(g.titulo)}</text>`;
+      for (let v = 0; v <= tope + 1e-9; v += paso) s += `<line x1="${L}" x2="${W - Rm}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}" stroke="#D9D9D9" stroke-width=".75"/><text x="${L - 5}" y="${(y(v) + 2.6).toFixed(1)}" text-anchor="end" font-size="8" fill="#595959">${+v.toFixed(1)}</text>`;
+      g.cats.forEach((c, i) => {
+        const x0 = L + i * gw + gw * 0.1;
+        g.series.forEach((se, j) => {
+          const v = se.v[i] || 0, x = x0 + j * bw, yy = y(v);
+          if (v) s += `<rect x="${x.toFixed(2)}" y="${yy.toFixed(2)}" width="${Math.max(bw - 0.4, 0.8).toFixed(2)}" height="${(T + ph - yy).toFixed(2)}" fill="#${se.col}"/>`;
+          if (g.etq) s += `<text x="${(x + bw / 2).toFixed(2)}" y="${(yy - 2).toFixed(2)}" text-anchor="middle" font-size="${fe}" fill="#404040">${v}</text>`;
+        });
+        const cx = L + i * gw + gw / 2 + 2.4;
+        s += `<text transform="translate(${cx.toFixed(2)},${T + ph + 5}) rotate(-90)" text-anchor="end" font-size="${n > 60 ? 7 : 8}" fill="#595959">${esc(c)}</text>`;
+      });
+      const anch = g.series.map(se => se.n.length * 4.7 + 22), tot = anch.reduce((a, b) => a + b, 0); let lx = (W - tot) / 2;
+      g.series.forEach((se, j) => { s += `<rect x="${lx}" y="${H - 12}" width="5" height="5" fill="#${se.col}"/><text x="${lx + 8}" y="${H - 7}" font-size="8.5" fill="#595959">${esc(se.n)}</text>`; lx += anch[j]; });
+      return s + "</svg>";
+    },
+    elHtml(e) {
+      if (e.k === "g") return this.svg(e);
+      if (e.k === "tb") {
+        const w = e.cols.reduce((a, b) => a + b, 0);
+        return `<table style="left:${e.x}pt;top:${e.y}pt;width:${w}pt"><colgroup>${e.cols.map(c => `<col style="width:${c}pt">`).join("")}</colgroup>${e.celdas.map((f, i) => `<tr style="height:${e.filas[i]}pt">${f.map(c => c ? `<td${c.rs ? ` rowspan="${c.rs}"` : ""}${c.cs ? ` colspan="${c.cs}"` : ""} style="font-size:${c.sz}pt;${c.fill ? "background:#" + c.fill + ";" : "background:#fff;"}${c.u ? "text-decoration:underline;" : ""}">${esc(c.t)}</td>` : "").join("")}</tr>`).join("")}</table>`;
+      }
+      const p = e.pad || [0, 0, 0, 0];
+      return `<div class="e" style="left:${e.x}pt;top:${e.y}pt;width:${e.w}pt;height:${e.h}pt;padding:${p[1]}pt ${p[2]}pt ${p[3]}pt ${p[0]}pt;${e.fill ? "background:#" + e.fill + ";" : ""}${e.borde ? "border:.75pt dashed #" + e.borde + ";" : ""}">${e.pars.map(pa =>
+        `<p style="text-align:${{ l: "left", c: "center", j: "justify", r: "right" }[pa.al]}">${pa.runs.map(r => this.span(r)).join("")}</p>`).join("")}</div>`;
+    },
+    fondo(n) { return new URL("img/e1_" + n + ".jpg", location.href).href; },
+    slidesHtml(M) { return this.laminas(M).map(l => `<div class="s" style="background-image:url('${this.fondo(l.fondo)}')">${l.els.map(e => this.elHtml(e)).join("")}</div>`).join(""); },
+    doc(M) {
+      return {
+        tipo: "e1", nombre: `E+1 SEMANA ${M.semN}`, carpeta: "E+1", horizontal: true,
+        html: `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>E+1 SEMANA ${M.semN}</title><style>@page{size:960pt 540pt;margin:0}html,body{margin:0;padding:0}${this.css("")} .s{page-break-after:always;break-after:page}.s:last-child{page-break-after:auto;break-after:auto}</style></head><body>${this.slidesHtml(M)}</body></html>`
+      };
+    },
+
+    /* ------------------------------------------------------------ PowerPoint (.pptx) */
+    zip(arch) {
+      const tabla = E1._crc || (E1._crc = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; }));
+      const crc = d => { let c = 0xFFFFFFFF; for (let i = 0; i < d.length; i++) c = tabla[(c ^ d[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
+      const te = new TextEncoder(), now = new Date(), hora = (now.getHours() << 11) | (now.getMinutes() << 5), dia = ((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();
+      const partes = [], cent = []; let off = 0;
+      for (const a of arch) {
+        const d = typeof a.d === "string" ? te.encode(a.d) : a.d, nom = te.encode(a.n), c = crc(d);
+        const cab = (firma, extra) => { const b = new DataView(new ArrayBuffer(extra ? 46 : 30)); let p = 0; const w16 = v => { b.setUint16(p, v, true); p += 2; }, w32 = v => { b.setUint32(p, v, true); p += 4; };
+          w32(firma); if (extra) w16(20); w16(20); w16(0x0800); w16(0); w16(hora); w16(dia); w32(c); w32(d.length); w32(d.length); w16(nom.length); w16(0);
+          if (extra) { w16(0); w16(0); w16(0); w32(0); w32(off); } return new Uint8Array(b.buffer); };
+        cent.push(cab(0x02014b50, true), nom);
+        const loc = cab(0x04034b50, false); partes.push(loc, nom, d); off += loc.length + nom.length + d.length;
+      }
+      const tc = cent.reduce((s, x) => s + x.length, 0), fin = new DataView(new ArrayBuffer(22));
+      fin.setUint32(0, 0x06054b50, true); fin.setUint16(8, arch.length, true); fin.setUint16(10, arch.length, true); fin.setUint32(12, tc, true); fin.setUint32(16, off, true);
+      return new Blob(partes.concat(cent, [new Uint8Array(fin.buffer)]));
+    },
+    // libro de Excel incrustado en cada grafica (para "Modificar datos" en PowerPoint)
+    async xlsx(g) {
+      const col = i => String.fromCharCode(65 + i), cs = (r, i, v) => typeof v === "number" ? `<c r="${col(i)}${r}"><v>${v}</v></c>` : `<c r="${col(i)}${r}" t="inlineStr"><is><t>${esc(v)}</t></is></c>`;
+      const filas = [["Semana"].concat(g.series.map(s => s.n))].concat(g.cats.map((c, i) => [c].concat(g.series.map(s => s.v[i] || 0))));
+      const X = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n', NS = 'xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"', REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships", PK = "http://schemas.openxmlformats.org/package/2006";
+      return new Uint8Array(await this.zip([
+        { n: "[Content_Types].xml", d: X + `<Types xmlns="${PK}/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>` },
+        { n: "_rels/.rels", d: X + `<Relationships xmlns="${PK}/relationships"><Relationship Id="rId1" Type="${REL}/officeDocument" Target="xl/workbook.xml"/></Relationships>` },
+        { n: "xl/workbook.xml", d: X + `<workbook ${NS} xmlns:r="${REL}"><sheets><sheet name="Hoja1" sheetId="1" r:id="rId1"/></sheets></workbook>` },
+        { n: "xl/_rels/workbook.xml.rels", d: X + `<Relationships xmlns="${PK}/relationships"><Relationship Id="rId1" Type="${REL}/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="${REL}/styles" Target="styles.xml"/></Relationships>` },
+        { n: "xl/styles.xml", d: X + `<styleSheet ${NS}><fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>` },
+        { n: "xl/worksheets/sheet1.xml", d: X + `<worksheet ${NS}><sheetData>${filas.map((f, r) => `<row r="${r + 1}">${f.map((v, i) => cs(r + 1, i, v)).join("")}</row>`).join("")}</sheetData></worksheet>` }
+      ]).arrayBuffer());
+    },
+    chartXml(g) {
+      const n = g.cats.length, col = i => String.fromCharCode(66 + i), tx = (sz, c, rot) => `<c:txPr><a:bodyPr${rot ? ' rot="-5400000" vert="horz"' : ""}/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="${sz}" b="0"><a:solidFill><a:srgbClr val="${c}"/></a:solidFill></a:defRPr></a:pPr><a:endParaRPr lang="es-MX"/></a:p></c:txPr>`;
+      const lin = `<c:spPr><a:ln w="9525"><a:solidFill><a:srgbClr val="D9D9D9"/></a:solidFill></a:ln></c:spPr>`;
+      const cats = `<c:cat><c:strRef><c:f>Hoja1!$A$2:$A$${n + 1}</c:f><c:strCache><c:ptCount val="${n}"/>${g.cats.map((c, i) => `<c:pt idx="${i}"><c:v>${esc(c)}</c:v></c:pt>`).join("")}</c:strCache></c:strRef></c:cat>`;
+      const ser = g.series.map((s, j) => `<c:ser><c:idx val="${j}"/><c:order val="${j}"/><c:tx><c:strRef><c:f>Hoja1!$${col(j)}$1</c:f><c:strCache><c:ptCount val="1"/><c:pt idx="0"><c:v>${esc(s.n)}</c:v></c:pt></c:strCache></c:strRef></c:tx>
+        <c:spPr><a:solidFill><a:srgbClr val="${s.col}"/></a:solidFill></c:spPr><c:invertIfNegative val="0"/>
+        <c:dLbls>${g.etq ? `<c:spPr><a:noFill/><a:ln><a:noFill/></a:ln></c:spPr>${tx(n > 60 ? 700 : 800, "404040")}` : ""}<c:showLegendKey val="0"/><c:showVal val="${g.etq ? 1 : 0}"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="0"/><c:showBubbleSize val="0"/></c:dLbls>
+        ${cats}<c:val><c:numRef><c:f>Hoja1!$${col(j)}$2:$${col(j)}$${n + 1}</c:f><c:numCache><c:formatCode>General</c:formatCode><c:ptCount val="${n}"/>${s.v.map((v, i) => `<c:pt idx="${i}"><c:v>${v || 0}</c:v></c:pt>`).join("")}</c:numCache></c:numRef></c:val></c:ser>`).join("");
+      return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><c:date1904 val="0"/><c:roundedCorners val="0"/>
+<c:chart><c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="1400" b="0"><a:solidFill><a:srgbClr val="595959"/></a:solidFill></a:defRPr></a:pPr><a:r><a:rPr lang="es-MX" sz="1400" b="0"><a:solidFill><a:srgbClr val="595959"/></a:solidFill></a:rPr><a:t>${esc(g.titulo)}</a:t></a:r></a:p></c:rich></c:tx><c:overlay val="0"/></c:title><c:autoTitleDeleted val="0"/>
+<c:plotArea><c:layout/><c:barChart><c:barDir val="col"/><c:grouping val="clustered"/><c:varyColors val="0"/>${ser}<c:gapWidth val="30"/><c:axId val="50010001"/><c:axId val="50010002"/></c:barChart>
+<c:catAx><c:axId val="50010001"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="b"/><c:numFmt formatCode="General" sourceLinked="0"/><c:majorTickMark val="none"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/>${lin}${tx(n > 60 ? 700 : 800, "595959", true)}<c:crossAx val="50010002"/><c:crosses val="autoZero"/><c:auto val="1"/><c:lblAlgn val="ctr"/><c:lblOffset val="100"/><c:tickLblSkip val="1"/><c:noMultiLvlLbl val="0"/></c:catAx>
+<c:valAx><c:axId val="50010002"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="l"/><c:majorGridlines>${lin}</c:majorGridlines><c:numFmt formatCode="General" sourceLinked="0"/><c:majorTickMark val="none"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/><c:spPr><a:ln><a:noFill/></a:ln></c:spPr>${tx(800, "595959")}<c:crossAx val="50010001"/><c:crosses val="autoZero"/><c:crossBetween val="between"/></c:valAx>
+<c:spPr><a:noFill/></c:spPr></c:plotArea><c:legend><c:legendPos val="b"/><c:overlay val="0"/>${tx(800, "595959")}</c:legend><c:plotVisOnly val="1"/><c:dispBlanksAs val="gap"/></c:chart>
+<c:spPr><a:noFill/><a:ln><a:noFill/></a:ln></c:spPr><c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr/></a:pPr><a:endParaRPr lang="es-MX"/></a:p></c:txPr><c:externalData r:id="rId1"><c:autoUpdate val="0"/></c:externalData></c:chartSpace>`;
+    },
+    async pptx(M) {
+      const EMU = v => Math.round(v * 12700), X = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
+      const NS = 'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"';
+      const REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships", PK = "http://schemas.openxmlformats.org/package/2006";
+      const rels = l => X + `<Relationships xmlns="${PK}/relationships">${l.map(([id, tipo, dest]) => `<Relationship Id="${id}" Type="${REL}/${tipo}" Target="${dest}"/>`).join("")}</Relationships>`;
+      const img = async n => new Uint8Array(await (await fetch(this.fondo(n))).arrayBuffer());
+      const rPr = (r, tag) => `<a:${tag || "rPr"} lang="es-MX" sz="${Math.round(r.sz * 100)}" b="${r.b ? 1 : 0}" i="${r.i ? 1 : 0}"${r.u ? ' u="sng"' : ""} dirty="0"><a:solidFill><a:srgbClr val="${r.col || "000000"}"/></a:solidFill><a:latin typeface="${r.f || "Arial"}"/><a:cs typeface="${r.f || "Arial"}"/></a:${tag || "rPr"}>`;
+      const par = (pa) => `<a:p><a:pPr algn="${{ l: "l", c: "ctr", j: "just", r: "r" }[pa.al]}"/>${pa.runs.map(r => `<a:r>${rPr(r)}<a:t>${esc(r.t)}</a:t></a:r>`).join("")}</a:p>`;
+      const grupo = `<p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>`;
+      const lado = t => `<a:${t} w="9525"><a:solidFill><a:srgbClr val="000000"/></a:solidFill></a:${t}>`;
+      const arch = [], charts = [], slides = [];
+      let nId = 1;
+      const laminas = this.laminas(M);
+      for (let i = 0; i < laminas.length; i++) {
+        const l = laminas[i], rl = [["rId1", "slideLayout", "../slideLayouts/slideLayout1.xml"], ["rId2", "image", `../media/${l.fondo}.jpg`]];
+        let sp = "";
+        for (const e of l.els) {
+          const id = ++nId, xf = (w, h) => `<a:off x="${EMU(e.x)}" y="${EMU(e.y)}"/><a:ext cx="${EMU(w)}" cy="${EMU(h)}"/>`;
+          if (e.k === "g") {
+            charts.push(e); const rid = "rId" + (rl.length + 1); rl.push([rid, "chart", `../charts/chart${charts.length}.xml`]);
+            sp += `<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="${id}" name="Grafica ${charts.length}"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr><p:xfrm>${xf(e.w, e.h)}</p:xfrm><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart"><c:chart xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" r:id="${rid}"/></a:graphicData></a:graphic></p:graphicFrame>`;
+          } else if (e.k === "tb") {
+            const W = e.cols.reduce((a, b) => a + b, 0), H = e.filas.reduce((a, b) => a + b, 0);
+            const tc = (c, f, k) => {
+              if (!c) {   // celda cubierta por una combinada: hacia arriba (vMerge) o hacia la izquierda (hMerge)
+                const arriba = f > 0 && e.celdas[f - 1][k] && e.celdas[f - 1][k].rs;
+                return `<a:tc ${arriba ? 'vMerge="1"' : 'hMerge="1"'}><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:endParaRPr lang="es-MX"/></a:p></a:txBody><a:tcPr>${["lnL", "lnR", "lnT", "lnB"].map(lado).join("")}</a:tcPr></a:tc>`;
+              }
+              const r = { f: "Calibri", sz: c.sz, b: 1, u: c.u };
+              return `<a:tc${c.rs ? ` rowSpan="${c.rs}"` : ""}${c.cs ? ` gridSpan="${c.cs}"` : ""}><a:txBody><a:bodyPr/><a:lstStyle/>${c.t.split("\n").map(t => par({ al: "c", runs: [Object.assign({ t }, r)] })).join("")}</a:txBody><a:tcPr marL="36000" marR="36000" marT="18000" marB="18000" anchor="ctr">${["lnL", "lnR", "lnT", "lnB"].map(lado).join("")}<a:solidFill><a:srgbClr val="${c.fill || "FFFFFF"}"/></a:solidFill></a:tcPr></a:tc>`;
+            };
+            sp += `<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="${id}" name="Tabla resumen"/><p:cNvGraphicFramePr><a:graphicFrameLocks noGrp="1"/></p:cNvGraphicFramePr><p:nvPr/></p:nvGraphicFramePr><p:xfrm>${xf(W, H)}</p:xfrm><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/table"><a:tbl><a:tblPr/><a:tblGrid>${e.cols.map(c => `<a:gridCol w="${EMU(c)}"/>`).join("")}</a:tblGrid>${e.celdas.map((fila, f) => `<a:tr h="${EMU(e.filas[f])}">${fila.map((c, k) => tc(c, f, k)).join("")}</a:tr>`).join("")}</a:tbl></a:graphicData></a:graphic></p:graphicFrame>`;
+          } else {
+            const p = e.pad || [0, 0, 0, 0], fin = e.pars.length ? e.pars.map(par).join("") : `<a:p><a:endParaRPr lang="es-MX"/></a:p>`;
+            sp += `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="Texto ${id}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm>${xf(e.w, e.h)}</a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom>${e.fill ? `<a:solidFill><a:srgbClr val="${e.fill}"/></a:solidFill>` : "<a:noFill/>"}${e.borde ? `<a:ln w="9525"><a:solidFill><a:srgbClr val="${e.borde}"/></a:solidFill><a:prstDash val="dash"/></a:ln>` : "<a:ln><a:noFill/></a:ln>"}</p:spPr>
+              <p:txBody><a:bodyPr wrap="square" lIns="${EMU(p[0])}" tIns="${EMU(p[1])}" rIns="${EMU(p[2])}" bIns="${EMU(p[3])}" rtlCol="0" anchor="t"><a:noAutofit/></a:bodyPr><a:lstStyle/>${fin}</p:txBody></p:sp>`;
+          }
+        }
+        slides.push(i + 1);
+        arch.push({ n: `ppt/slides/slide${i + 1}.xml`, d: X + `<p:sld ${NS}><p:cSld><p:bg><p:bgPr><a:blipFill dpi="0" rotWithShape="1"><a:blip r:embed="rId2"/><a:srcRect/><a:stretch><a:fillRect/></a:stretch></a:blipFill><a:effectLst/></p:bgPr></p:bg><p:spTree>${grupo}${sp}</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>` });
+        arch.push({ n: `ppt/slides/_rels/slide${i + 1}.xml.rels`, d: rels(rl) });
+      }
+      for (let i = 0; i < charts.length; i++) {
+        arch.push({ n: `ppt/charts/chart${i + 1}.xml`, d: this.chartXml(charts[i]) });
+        arch.push({ n: `ppt/charts/_rels/chart${i + 1}.xml.rels`, d: rels([["rId1", "package", `../embeddings/Datos_grafica${i + 1}.xlsx`]]) });
+        arch.push({ n: `ppt/embeddings/Datos_grafica${i + 1}.xlsx`, d: await this.xlsx(charts[i]) });
+      }
+      const tres = x => x + x + x, cl = (n, v) => `<a:${n}><a:srgbClr val="${v}"/></a:${n}>`;
+      const tema = X + `<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="E+1"><a:themeElements><a:clrScheme name="E+1"><a:dk1><a:sysClr val="windowText" lastClr="000000"/></a:dk1><a:lt1><a:sysClr val="window" lastClr="FFFFFF"/></a:lt1>${cl("dk2", "44546A")}${cl("lt2", "E7E6E6")}${cl("accent1", AZUL)}${cl("accent2", NARANJA)}${cl("accent3", GRIS)}${cl("accent4", "FFC000")}${cl("accent5", "5B9BD5")}${cl("accent6", "70AD47")}${cl("hlink", "0563C1")}${cl("folHlink", "954F72")}</a:clrScheme>
+        <a:fontScheme name="E+1"><a:majorFont><a:latin typeface="Calibri"/><a:ea typeface=""/><a:cs typeface=""/></a:majorFont><a:minorFont><a:latin typeface="Calibri"/><a:ea typeface=""/><a:cs typeface=""/></a:minorFont></a:fontScheme>
+        <a:fmtScheme name="E+1"><a:fillStyleLst>${tres('<a:solidFill><a:schemeClr val="phClr"/></a:solidFill>')}</a:fillStyleLst><a:lnStyleLst>${tres('<a:ln w="6350"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:ln>')}</a:lnStyleLst><a:effectStyleLst>${tres("<a:effectStyle><a:effectLst/></a:effectStyle>")}</a:effectStyleLst><a:bgFillStyleLst>${tres('<a:solidFill><a:schemeClr val="phClr"/></a:solidFill>')}</a:bgFillStyleLst></a:fmtScheme></a:themeElements></a:theme>`;
+      const fijo = [
+        { n: "[Content_Types].xml", d: X + `<Types xmlns="${PK}/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="jpg" ContentType="image/jpeg"/><Default Extension="xlsx" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"/>
+          <Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/><Override PartName="/ppt/slideMasters/slideMaster1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"/><Override PartName="/ppt/slideLayouts/slideLayout1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/><Override PartName="/ppt/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>
+          ${slides.map(i => `<Override PartName="/ppt/slides/slide${i}.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>`).join("")}${charts.map((c, i) => `<Override PartName="/ppt/charts/chart${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/>`).join("")}</Types>` },
+        { n: "_rels/.rels", d: rels([["rId1", "officeDocument", "ppt/presentation.xml"]]) },
+        { n: "ppt/presentation.xml", d: X + `<p:presentation ${NS}><p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="rId1"/></p:sldMasterIdLst><p:sldIdLst>${slides.map(i => `<p:sldId id="${255 + i}" r:id="rId${i + 2}"/>`).join("")}</p:sldIdLst><p:sldSz cx="12192000" cy="6858000"/><p:notesSz cx="6858000" cy="9144000"/></p:presentation>` },
+        { n: "ppt/_rels/presentation.xml.rels", d: rels([["rId1", "slideMaster", "slideMasters/slideMaster1.xml"], ["rId2", "theme", "theme/theme1.xml"]].concat(slides.map(i => ["rId" + (i + 2), "slide", `slides/slide${i}.xml`]))) },
+        { n: "ppt/theme/theme1.xml", d: tema },
+        { n: "ppt/slideMasters/slideMaster1.xml", d: X + `<p:sldMaster ${NS}><p:cSld><p:bg><p:bgRef idx="1001"><a:schemeClr val="bg1"/></p:bgRef></p:bg><p:spTree>${grupo}</p:spTree></p:cSld><p:clrMap bg1="lt1" tx1="dk1" bg2="lt2" tx2="dk2" accent1="accent1" accent2="accent2" accent3="accent3" accent4="accent4" accent5="accent5" accent6="accent6" hlink="hlink" folHlink="folHlink"/><p:sldLayoutIdLst><p:sldLayoutId id="2147483649" r:id="rId1"/></p:sldLayoutIdLst><p:txStyles><p:titleStyle/><p:bodyStyle/><p:otherStyle/></p:txStyles></p:sldMaster>` },
+        { n: "ppt/slideMasters/_rels/slideMaster1.xml.rels", d: rels([["rId1", "slideLayout", "../slideLayouts/slideLayout1.xml"], ["rId2", "theme", "../theme/theme1.xml"]]) },
+        { n: "ppt/slideLayouts/slideLayout1.xml", d: X + `<p:sldLayout ${NS} type="blank" preserve="1"><p:cSld name="En blanco"><p:spTree>${grupo}</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sldLayout>` },
+        { n: "ppt/slideLayouts/_rels/slideLayout1.xml.rels", d: rels([["rId1", "slideMaster", "../slideMasters/slideMaster1.xml"]]) },
+        { n: "ppt/media/portada.jpg", d: await img("portada") }, { n: "ppt/media/interior.jpg", d: await img("interior") }
+      ];
+      return this.zip(fijo.concat(arch));
+    },
+
+    /* ------------------------------------------------------------ pantalla (pestana "Presentacion E+1") */
+    async vista(P, c) {
+      const D = TJ.datos, semanas = [...new Set(Object.keys(D.semanas).concat(Object.keys(D.sem)))].sort();
+      if (!semanas.length) { c.innerHTML = `<div class="tarjeta">${B.ui.vacio("Primero carga los Excel de la semana en la pestaña <b>Tarjetas y tendencias</b>.", "doc")}</div>`; return; }
+      if (!semanas.includes(P.sem)) P.sem = semanas[semanas.length - 1];
+      const W = P.sem, L = D.semanas[W] ? await TJ.semana(W) : [];
+      if (this.W !== W || !this.S) { this.W = W; this.S = this.base(W); this.histEd = Object.assign({}, D.hist || {}); }
+      const S = this.S, C = this.calc(W, S, L), prop = this.textos(W, C, L), h = this.hist(W, C.fila);
+      const ent = (k, ph, w) => `<input class="inp e1-n" data-k="${k}" value="${esc(k.split(".").reduce((o, p) => o[p], S))}" placeholder="${ph}" inputmode="numeric" style="width:${w || 52}px">`;
+      const fila = (t, o, auto) => `<tr><td><b>${t}</b></td>${["t", "a", "c", "i", "n", "x"].map(k => `<td>${o === "sac" && k === "t" ? "N/A" : ent(o + "." + k, auto && auto[k] != null ? auto[k] : "0")}</td>`).join("")}</tr>`;
+      const ult = this.serie(h, "0000-00", W).slice(-8).filter(k => k !== W);
+      const lista = (t, l, col) => l.length ? `<div class="e1-marc"><b style="color:var(--${col})">${t} (${l.length})</b>${l.map(x => `<a href="#" data-ver="${esc(x.id)}">#${esc(x.id)} · ${esc((x.qp || x.doc || "").slice(0, 150))}${(x.qp || "").length > 150 ? "…" : ""}${D.marcas[x.id].nota ? ` <i>(${esc(D.marcas[x.id].nota)})</i>` : ""}${(TJ.fechaMal(x) || {}).grave ? ` <b style="color:var(--rojo)">⚠ fecha dudosa</b>` : ""}</a>`).join("")}</div>` : "";
+      c.innerHTML = `
+        <div class="tarjeta">${cab("pdf", "g", "Presentación E+1", "Se arma con las tarjetas que marcaste como acto o condición insegura. Todo se puede corregir antes de generarla.",
+          `<select class="inp" id="e1Sem" style="width:auto;min-width:220px">${semanas.map(s => `<option value="${s}" ${s === W ? "selected" : ""}>${TJ.semTxt(s)}</option>`).join("")}</select>`)}
+          ${(D.sem[W] || {}).hist ? `<div class="aviso a">${B.ico("historial")}<div><b>Presentación ya entregada</b> (historial de consulta). Aquí están sus números y textos tal como se presentaron${!B.modoMovil && (B.E1_ORIGINALES || {})[W] ? `; también puedes abrir el <a href="${esc(B.E1_ORIGINALES[W])}" target="_blank"><b>PDF original</b></a>` : ""}. Si la modificas y guardas, se conserva tu versión.</div></div>` : ""}
+          <div class="fila"><div class="campo" style="flex:0 0 190px"><label>Fecha de la presentación</label><input class="inp" type="date" data-k="fecha" value="${esc(S.fecha)}"></div>
+            <div class="campo" style="flex:0 0 190px"><label>Gráfica de actos: desde la semana</label><input class="inp" data-k="g1" value="${esc(S.g1)}" placeholder="2025-26"><span class="ayuda">Año-semana, p. ej. 2025-26</span></div>
+            <div class="campo" style="flex:0 0 190px"><label>Gráfica de accidentes: desde</label><input class="inp" data-k="g2" value="${esc(S.g2)}" placeholder="2025-16"></div>
+            <div class="campo"><label>Tarjetas marcadas de la semana</label><div>${lista("Actos inseguros", C.actos, "rojo")}${lista("Condiciones inseguras", C.conds, "azul")}${C.actos.length + C.conds.length ? "" : `<span class="muted peque">Ninguna todavía. Márcalas en <a href="#" id="e1Ir">Tarjetas y tendencias</a>.</span>`}</div></div></div>
+        </div>
+        <div class="cuadricula">
+          <div class="tarjeta c7">${cab("lista", "d", "Tabla resumen", "En gris, el valor que sale de lo cargado y marcado; escribe encima solo si debe ser otro. PAG-28-5 y SACPAC se capturan a mano.")}
+            <div class="tabla-cont"><table class="tabla e1-tabla"><thead><tr><th>Fuente</th><th>Tarjetas</th><th>Actos</th><th>Condiciones</th><th>Incidentes</th><th>Acc. no incap.</th><th>Acc. incap.</th></tr></thead><tbody>
+              ${fila("PAG-28-5", "pag")}${fila("Tarjetas Líderes en Campo", "tlc", { t: C.auto.t, a: C.auto.a, c: C.auto.c })}${fila("SACPAC", "sac")}
+              <tr class="e1-tot"><td><b>TOTAL</b></td><td id="e1Tt">${C.tot.t}</td><td id="e1Ta">${C.tot.a}</td><td id="e1Tc">${C.tot.c}</td><td colspan="3" id="e1Te">${C.tot.ev}</td></tr></tbody></table></div></div>
+          <div class="tarjeta c5">${cab("historial", "a", "Historial de las gráficas", "Semanas anteriores. Corrige un número si la presentación de esa semana cambió.")}
+            <div class="tabla-cont" style="max-height:268px;overflow:auto"><table class="tabla e1-tabla"><thead><tr><th>Sem.</th><th>Actos</th><th>Observ.</th><th>Cond.</th><th>Acc. incap.</th><th>Incid.</th></tr></thead><tbody id="e1Hist">
+              ${ult.reverse().map(k => `<tr><td><b>${k.slice(5)}</b>/${k.slice(2, 4)}</td>${[0, 1, 2, 3, 4].map(i => `<td><input class="inp e1-n" data-h="${k}" data-i="${i}" value="${h[k][i] ?? ""}" inputmode="numeric" style="width:46px"></td>`).join("")}</tr>`).join("")}</tbody></table></div></div>
+        </div>
+        <div class="tarjeta">${cab("editar", "v", "Textos de las láminas", "Vacío = se usa el texto propuesto (en gris). Entre **dobles asteriscos** va en negritas.", `<button class="btn chico sec" id="e1Prop">${B.ico("reutilizar")} Usar los propuestos para editarlos</button>`)}
+          ${[["tx1", "Lámina 3 · bajo la tabla resumen"], ["tx2", "Lámina 4 · bajo la gráfica de actos y condiciones"], ["tx3", "Lámina 5 · bajo la gráfica de accidentes e incidentes"]].map(([k, t]) => `<div class="campo"><label>${t}</label><textarea class="inp" data-k="${k}" placeholder="${esc(prop[k])}" style="min-height:84px">${esc(S[k])}</textarea></div>`).join("")}</div>
+        <div class="tarjeta">${cab("ojo", "g", "Vista previa", "Así quedará. En PowerPoint la tabla, los textos y las gráficas se pueden editar (clic derecho en la gráfica → Modificar datos).",
+          `<button class="btn sec" id="e1Guardar">${B.ico("ok")} Guardar</button><button class="btn dorado" id="e1Pptx">${B.ico("descargar")} PowerPoint (.pptx)</button><button class="btn" id="e1Pdf">${B.ico("pdf")} ${B.modoLocal ? "Guardar PDF" : "Generar PDF"}</button>`)}
+          <style>${this.css(".e1-doc")}</style><div class="e1-prev"><div class="e1-doc" id="e1Doc"></div></div></div>`;
+      const prev = () => {
+        const d = c.querySelector("#e1Doc"); if (!d) return;
+        d.innerHTML = this.slidesHtml(this.modelo(W, S, L));
+        const an = d.parentNode.clientWidth; d.style.zoom = Math.min(1, (an - 2) / 1280);
+      };
+      const tot = () => { const k = this.calc(W, S, L); [["e1Tt", k.tot.t], ["e1Ta", k.tot.a], ["e1Tc", k.tot.c], ["e1Te", k.tot.ev]].forEach(([id, v]) => { const el = c.querySelector("#" + id); if (el) el.textContent = v; }); };
+      const prevLento = U.debounce(prev, 500);
+      c.querySelectorAll("[data-k]").forEach(i => i.oninput = () => { const p = i.dataset.k.split("."); if (p.length === 2) S[p[0]][p[1]] = i.value.trim(); else S[p[0]] = i.type === "textarea" ? i.value : i.value.trim(); tot(); prevLento(); });
+      c.querySelectorAll("[data-h]").forEach(i => i.oninput = () => { const k = i.dataset.h, f = (this.histEd[k] || h[k]).slice(); f[+i.dataset.i] = num(i.value); this.histEd[k] = f; prevLento(); });
+      c.querySelector("#e1Sem").onchange = e => { P.sem = e.target.value; this.S = null; P.pinta(); };
+      const ir = c.querySelector("#e1Ir"); if (ir) ir.onclick = e => { e.preventDefault(); P.tab = "tend"; P.fil.ver = "sug"; P.pinta(); };
+      c.querySelectorAll("[data-ver]").forEach(a => a.onclick = e => { e.preventDefault(); P.detalle(L.find(x => x.id === a.dataset.ver), null, () => P.pinta()); });
+      c.querySelector("#e1Prop").onclick = () => { for (const k of ["tx1", "tx2", "tx3"]) if (!S[k]) { S[k] = prop[k]; c.querySelector(`[data-k="${k}"]`).value = prop[k]; } prev(); };
+      const valida = () => {
+        for (const k of ["g1", "g2"]) if (!/^\d{4}-\d{2}$/.test(S[k])) { B.ui.toast("La semana inicial de las gráficas se escribe como <b>año-semana</b>, por ejemplo 2025-26.", "error"); return false; }
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(S.fecha)) { B.ui.toast("Falta la fecha de la presentación.", "error"); return false; }
+        return true;
+      };
+      const guardar = async callado => {
+        if (!valida()) return false;
+        const k = this.calc(W, S, L), hh = Object.assign({}, this.histEd); hh[W] = k.fila;
+        try { await TJ.llamar("semGuardar", { sem: W, datos: S, hist: hh }); D.sem[W] = JSON.parse(JSON.stringify(S)); D.hist = hh; this.histEd = Object.assign({}, hh); if (!callado) B.ui.toast("Datos de la E+1 guardados.", "ok"); return true; }
+        catch (e) { B.ui.error(e); return false; }
+      };
+      c.querySelector("#e1Guardar").onclick = () => guardar();
+      c.querySelector("#e1Pdf").onclick = async e => { const b = e.currentTarget; if (await guardar(true)) B.rep.pdf(this.doc(this.modelo(W, S, L)), b); };
+      c.querySelector("#e1Pptx").onclick = async () => {
+        if (!(await guardar(true))) return;
+        try { const M = this.modelo(W, S, L); U.descargar(`E+1 SEMANA ${M.semN}.pptx`, await this.pptx(M), "application/vnd.openxmlformats-officedocument.presentationml.presentation"); B.ui.toast("Presentación descargada: búscala en <b>Descargas</b>.", "ok", 6000); }
+        catch (err) { B.ui.error(err); }
+      };
+      prev();
+    }
+  };
+})();
+;
 /* ---- movil.js ---- */
 /* =========================================================================
    BITACORA 24RU1 - VERSION PARA CELULAR e intercambio por archivo (WhatsApp / correo)
@@ -4342,6 +5476,7 @@ B.inter = {
   permitida(k) { return this.LOG.test(k) || k === "usuarios.tourVisto"; },
   seRegistra(k) { return this.LOG.test(k); },
   uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); },
+  SEMANAS_CEL: 4,           // semanas de tarjetas Lideres en Campo que viajan en el paquete para celulares
 
   /* ---------- celular: conexion con los datos guardados en el telefono */
   async conectarMovil() {
@@ -4397,7 +5532,11 @@ B.inter = {
       "ec.crear": () => "Espacio confinado: " + (d.items || []).map(i => i.esp).join(", "), "ec.sumarme": () => "Agregarme a espacio confinado", "ec.monitoreo": () => "Monitoreo de EC #" + d.num + ": " + (d.items || []).map(i => String(i.fh || "").replace("T", " ")).join(", "),
       "ec.monEditar": () => "Corrección de monitoreo de EC #" + d.num, "ec.liberar": () => "Liberación de espacio que estaba NO LIBERADO", "ec.estatus": () => "Cambio de estatus de espacio confinado a " + (d.noLib ? "NO LIBERADO" : "LIBERADO"), "ec.cerrar": () => "Cierre de espacio(s) confinado(s) " + (d.nums || []).join(", "), "ec.reabrir": () => "Reabrir EC #" + d.num, "vig.crear": () => "Vigilancia: " + (d.desc || ""), "vig.retirar": () => "Retiro de vigilancia",
       "he.guardar": () => "Horas extra " + (d.de ? d.de + " a " + d.a : (d.he === "" ? "(quitar)" : d.he + " h")), "he.justificar": () => "Justificación de horas extra", "perfil.guardar": () => "Datos del oficio",
-      "turnos.guardar": () => "Datos del turno", "hojas.guardar": () => "Hoja de asignación" }[op.col + "." + op.accion];
+      "turnos.guardar": () => "Datos del turno", "hojas.guardar": () => "Hoja de asignación",
+      "tarjetas.declarar": () => "Tarjeta Líderes en Campo" + (d.ini ? " de " + d.ini : "") + (d.nota ? ": " + d.nota : ""), "tarjetas.declEstado": () => "Tarjetas " + ({ C: "confirmadas", R: "marcadas como no válidas", P: "regresadas a por confirmar" }[d.est] || "") + " (" + ((d.uids || d.ids || []).length) + ")",
+      "tarjetas.declBorrar": () => "Tarjeta Líderes en Campo eliminada", "tarjetas.marcar": () => "Tarjeta #" + d.id + ({ A: " marcada como acto inseguro", C: " marcada como condición insegura", D: " descartada" }[d.m] || " sin marca"),
+      "tarjetas.semGuardar": () => "Datos de la E+1 de la semana " + d.sem, "tarjetas.importar": () => "Excel de tarjetas de la semana " + d.sem + " (" + (d.tarjetas || []).length + ")", "tarjetas.cfgGuardar": () => "Ajustes del marcador", "tarjetas.semBorrar": () => "Semana " + d.sem + " de tarjetas borrada" }[op.col + "." + op.accion];
+    if (op.col === "tarjetas") return (d.f ? U.cortaDM(d.f) + (d.t ? " " + d.t : "") + " · " : "") + (que ? que() : "tarjetas." + op.accion);
     return f + (que ? que() : op.col + "." + op.accion);
   },
 
@@ -4441,8 +5580,10 @@ B.inter = {
     if (ajenas.length && !sup) throw new Error("Este archivo trae capturas de " + ajenas.join(", ") + ". Cada quien importa las suyas con su usuario; las de otra persona las importa un supervisor.");
     const res = await this.reproducir(ops, {
       db: async () => { await B.api.recargar(); return { actividades: B.dom.todas(), ec: B.estado.ec, vig: B.estado.vig }; },
-      ejecutar: (op, d) => B.api.llamar("op", { col: op.col, accion: op.accion, datos: d, como: U.ini(op.ini) })
+      ejecutar: (op, d) => op.col === "tarjetas" ? B.api.llamar("tarjetas", Object.assign({}, d, { accion: op.accion, como: U.ini(op.ini) }))
+        : B.api.llamar("op", { col: op.col, accion: op.accion, datos: d, como: U.ini(op.ini) })
     });
+    if (B.tj) { B.tj.cartas = {}; B.tj.mias = null; }
     if (ops.length) await B.api.llamar("op", { col: "intercambio", accion: "registrar", datos: { uids: ops.map(o => o.uid) } });
     await B.api.recargar();
     return { ...res, total: f.ops.length, repetidas: f.ops.length - ops.length, de: f.ini, nombre: f.nombre || "" };
@@ -4454,6 +5595,16 @@ B.inter = {
     const c = B.oficio.cfg();
     db.config = { ...db.config, ofVoboNombre: db.config.ofVoboNombre ?? c.voboNombre, ofAutNombre: db.config.ofAutNombre ?? c.autNombre };
     db.ecGrupos = B.EC_GRUPOS || [];
+    // tarjetas Lideres en Campo: marcador completo y las tarjetas de las ultimas semanas (para el resumen y el trabajo remoto)
+    if (db.tarjetas && B.tj) {
+      const ver = await B.tj.llamar("ver"), sems = Object.keys(db.tarjetasSem || {}).sort().slice(-this.SEMANAS_CEL), ts = {};
+      for (const k of sems) ts[k] = db.tarjetasSem[k];
+      db.tarjetasSem = ts;
+      db.tarjetas.cfg = Object.assign({}, db.tarjetas.cfg, { editores: ver.editores, inicio: B.tj.inicio() });
+      // permiso especial: quien elabora la E+1 tambien puede entrar a la version de celular
+      db.config.celPermitidos = [...new Set((db.config.celPermitidos || []).concat(ver.editores).map(U.ini))];
+      db.tarjetas.hist = Object.assign({}, B.E1_SEMILLA || {}, db.tarjetas.hist);
+    }
     db._paquete = { tipo: "b24-paquete", generado: U.ahoraISO(), version: B.app.VERSION, por: B.usuario.ini, periodo: B.t.periodo() };
     const nombre = "Bitacora24RU1 PAQUETE celulares " + U.ahoraISO().replace("T", " ").replace(":", "") + ".json";
     U.descargar(nombre, JSON.stringify(db), "application/json");
@@ -4476,11 +5627,21 @@ B.inter = {
       await L.escribir("ecgrupos", db.ecGrupos || []);
       await L.escribir("paquete", db._paquete);
       B.EC_GRUPOS = db.ecGrupos || []; B.ecLista = B.ecArmar();
+      if (db.tarjetas) {
+        // el celular conserva las semanas que ya tenia; el indice solo anuncia las que si estan guardadas aqui
+        const tiene = new Set((await L.leer("tarjetas_sems")) || []);
+        for (const k in db.tarjetasSem || {}) { await L.escribir("tarjetas_" + k, db.tarjetasSem[k]); tiene.add(k); }
+        const sm = {}; for (const k of Object.keys(db.tarjetas.semanas || {})) if (tiene.has(k)) sm[k] = db.tarjetas.semanas[k];
+        await L.escribir("tarjetas_sems", [...tiene].filter(k => sm[k]));
+        await L.escribir("tarjetas", Object.assign({}, db.tarjetas, { semanas: sm }));
+        if (B.tj) { B.tj.cartas = {}; B.tj.mias = null; }
+      }
       // lo capturado en este celular que la PC todavia no recibe se vuelve a aplicar encima de los datos nuevos
       const leer3 = async () => ({ actividades: (await L.leer("actividades")) || [], ec: (await L.leer("ec")) || [], vig: (await L.leer("vig")) || [] });
       const res = await this.reproducir(quedan, { db: leer3, ejecutar: async (op, d) => {
         const p = db.personal.find(x => U.ini(x.ini) === U.ini(op.ini)); if (!p) throw new Error("persona no encontrada: " + op.ini);
         const s = { rpe: U.ini(p.rpe), ini: U.ini(p.ini), rol: L.rolDe(p), nombre: p.nombre };
+        if (op.col === "tarjetas") return L.tarjetas(s, s.rol === "supervisor", Object.assign({}, d, { accion: op.accion, _replay: true }));
         return L.operacion(s, s.rol === "supervisor", op.col, op.accion, d);
       } });
       await L.escribir("pendientes", quedan);
@@ -4524,7 +5685,7 @@ V.celular = {
           Si el mismo archivo se importa dos veces no pasa nada: lo ya recibido se ignora. ${sup ? "" : "Solo puedes importar tus propias capturas."}</p>
         <div id="celRes"></div>
       </div>
-      <div class="tarjeta c6" data-tour="cel-paquete">${cab("subir", "d", "Paquete de datos para los celulares", "Lleva al celular el personal, las asignaciones, pendientes, espacios, vigilancias y la hoja de asignación.")}
+      <div class="tarjeta c6" data-tour="cel-paquete">${cab("subir", "d", "Paquete de datos para los celulares", "Lleva al celular el personal, las asignaciones, pendientes, espacios, vigilancias, la hoja de asignación y las tarjetas Líderes en Campo.")}
         ${sup ? `<button class="btn dorado bloque" id="celPaq">${B.ico("descargar")} Generar paquete para celulares</button>
           <p class="muted peque" style="margin:10px 0 0">Se descarga un archivo «Bitacora24RU1 PAQUETE celulares …». Mándalo al grupo de WhatsApp (WhatsApp Web → adjuntar → Documento). Cada técnico lo abre en su celular: <b>Celulares → Recibir datos</b>.
             Conviene generarlo al inicio del turno, después de asignar actividades, y después de importar capturas.</p>
@@ -4754,7 +5915,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "2.6", servidorViejo: false,
+  info: {}, VERSION: "2.9", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -4907,10 +6068,12 @@ B.app = {
   /* ---------------------------------------------------------------- shell */
   entrar(recienLogin) {
     document.querySelector(".cargando")?.remove();
-    // la version para celular esta reservada, por ahora, a los supervisores (config.celTecnicos = true la abre a los tecnicos)
-    if (B.modoMovil && !B.dom.esSup() && !(B.estado.config || {}).celTecnicos) {
+    // la version para celular esta reservada a los supervisores y a quien tenga permiso especial: config.celPermitidos
+    // (lo arma la PC al generar el paquete con quienes elaboran la E+1); config.celTecnicos = true la abre a todos los tecnicos
+    const cfgM = B.estado.config || {};
+    if (B.modoMovil && !B.dom.esSup() && !cfgM.celTecnicos && !(cfgM.celPermitidos || []).map(U.ini).includes(U.ini(B.usuario.ini))) {
       B.token = null; B.usuario = null; B.local.sesion = null; B.local.borraSesion(); sessionStorage.removeItem("b_token");
-      return this.pantallaLogin("La versión para celular está reservada, por ahora, a los supervisores. Captura en la bitácora de la PC.");
+      return this.pantallaLogin("La versión para celular está reservada a los supervisores y al personal autorizado. Captura en la bitácora de la PC.");
     }
     if (B.vistas.actividades) B.vistas.actividades.ini = null;
     if (B.vistas.historial) B.vistas.historial.persona = null;
@@ -4923,7 +6086,7 @@ B.app = {
     const enlaces = [
       ["MI TURNO", [["inicio", "Inicio", "inicio"], ["actividades", "Mis actividades", "lista"], ["horasextra", sup ? "Horas extra (captura)" : "Mis horas extra", "calendario"], ["espacios", "Espacios confinados", "escudo"], ["monitoreo", "Monitoreo de E.C.", "reloj"],
         ["vigilancias", "Vigilancias C.I.", "fuego"], ["pendientes", sup ? "Pendientes (todos)" : "Mis pendientes", "reloj"], ["historial", sup ? "Historial por persona" : "Mi historial", "historial"], ["oficio", sup ? "Oficios de tiempo extra" : "Mi oficio de tiempo extra", "doc"]]],
-      ["CONSULTA", [["concentrados", "Concentrados", "doc"]].concat(sup ? [["registros", "Registros del personal", "usuarios"], ["celular", B.modoMovil ? "Enviar / recibir" : "Celulares", "subir"]] : [])]
+      ["CONSULTA", [["concentrados", "Concentrados", "doc"]].concat(B.modoLocal && !B.modoMovil ? [] : [["tarjetas", "Líderes en Campo", "trofeo"]]).concat(!sup && B.modoMovil ? [["celular", "Enviar / recibir", "subir"]] : []).concat(sup ? [["registros", "Registros del personal", "usuarios"], ["celular", B.modoMovil ? "Enviar / recibir" : "Celulares", "subir"]] : [])]
     ];
     if (sup) {
       enlaces.push(["SUPERVISIÓN", [["turno", "Datos del turno", "usuarios"], ["reporte", "Reporte del turno", "pdf"], ["hoja", "Hoja de asignación", "doc"], ["asistencia", "Asistencia y horas extra", "calendario"]]]);
@@ -4934,8 +6097,8 @@ B.app = {
         <aside class="lateral" data-tour="menu">
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
-            `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? "Supervisor" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "2.6")}</div>
+            `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
+          <div class="lateral-pie">${sup ? "Supervisor" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "2.9")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
@@ -5001,7 +6164,7 @@ B.app = {
   navegar() {
     let r = (location.hash || "#/inicio").replace("#/", "").split("?")[0] || "inicio";
     const v = B.vistas[r];
-    if (!v || (v.sup && !B.dom.esSup())) r = "inicio";
+    if (!v || (v.sup && !B.dom.esSup() && !(r === "celular" && B.modoMovil))) r = "inicio";     // en el celular todos envian y reciben
     this.ruta = r;
     document.body.classList.remove("nav-abierto");
     document.querySelectorAll(".nav a").forEach(a => a.classList.toggle("activo", a.dataset.r === r));
@@ -5027,6 +6190,9 @@ B.app = {
     // espacios que siguen liberados y aun no tienen monitoreo en el turno de trabajo
     const cm = document.getElementById("cntMon");
     if (cm) { const nm = B.dom.ecFilasMon(this.trabajo.f, this.trabajo.t).filter(x => !x.ok).length; cm.textContent = nm; cm.classList.toggle("oculto", !nm); }
+    // tarjetas Lideres en Campo que los tecnicos registraron y el supervisor aun no confirma
+    const ct = document.getElementById("cntTarj");
+    if (ct) { const nt = +(B.estado.tarjPend || 0); ct.textContent = nt; ct.classList.toggle("oculto", !nt); }
     if (B.modoMovil) this.estadoMovil();
   },
   // Celular: cuantas capturas faltan por enviar a la PC y que tan viejo es el paquete de datos (barra, menu y pantalla de inicio)
