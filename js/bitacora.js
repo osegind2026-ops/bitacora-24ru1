@@ -754,7 +754,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "3.4", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "3.5", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -4449,17 +4449,60 @@ V.hoja = {
       while (b < orig.length && LETRA.test(ll[b])) b++;
       return (a > 0 ? "… " : "") + this.marcar(orig.slice(a, b), T).replace(/\n/g, " ") + (b < orig.length ? " …" : "");
     },
-    // Lector de un documento, lamina por lamina
+    /* Version condensada de una lamina: sin los encabezados que se repiten en todas, y con los renglones unidos en parrafos y vinetas */
+    RUIDO: /^(["“”]?(curso )?orientaci[oó]n laguna verde["“”]?.*|coordinaci[oó]n corporativa nuclear.*|unidad de entrenamiento|gerencia de centrales nucleoel[eé]ctricas|\(olv\)|\d{1,3})$/i,
+    VIN: /^[➢•✓▪■◼●○·*]\s*|^[-–]\s+|^\(?\d{1,2}[.)]-?\s+|^[a-z]\)\s+/,
+    condensar(txt) {
+      const lin = String(txt || "").split("\n").map(l => l.trim()).filter(l => l && !this.RUIDO.test(l)), bl = [];
+      for (const l of lin) {
+        const vin = this.VIN.test(l), ult = bl[bl.length - 1];
+        if (vin || !ult) bl.push({ v: vin, t: l.replace(/^[➢•✓▪■◼●○·*]\s*|^[-–]\s+/, "") });
+        else if (!ult.v && /[.:;!?]$/.test(ult.t) && /^[A-ZÁÉÍÓÚÑ¿¡"“]/.test(l)) bl.push({ v: false, t: l });
+        else ult.t += " " + l;
+      }
+      return bl;
+    },
+    // ¿la lamina aporta contenido? (se omiten portadas, objetivos del curso y laminas casi vacias)
+    relevante(bl) { const n = bl.reduce((a, b) => a + b.t.length, 0); return n >= 45 && !/^(al (finalizar|t[eé]rmin(o|ar))|objetivos?( terminal| del curso)?:?$)/i.test(bl[0].t); },
+    urlPdf(n) { return "/api/procarchivo?poe=" + encodeURIComponent(n) + "&t=" + encodeURIComponent(B.token); },
+    conPdf(n) { return !B.modoLocal && ((B.estado && B.estado.poePdf) || []).includes(n); },
+    /* Lector: TODO el documento en una sola vista con desplazamiento. Por omision muestra la version condensada
+       (lo relevante de cada lamina); "Texto completo" muestra todas las laminas tal cual. */
     leer(d, p, T) {
       const doc = this.docs()[d]; if (!doc) return;
-      const cuerpo = () => `<div class="poe-nav"><button class="btn sec chico" id="poeAnt" ${p <= 0 ? "disabled" : ""}>‹ Anterior</button><span>Lámina <b>${p + 1}</b> de ${doc.p.length}</span><button class="btn sec chico" id="poeSig" ${p >= doc.p.length - 1 ? "disabled" : ""}>Siguiente ›</button></div>
-        <div class="poe-lamina">${doc.p[p] ? this.marcar(doc.p[p], T || []).replace(/\n/g, "<br>") : `<span class="muted">Esta lámina no tiene texto (es una imagen o un título).</span>`}</div>
-        <p class="muted peque" style="margin:10px 0 0">Archivo original: ${esc(doc.a)}</p>`;
-      const activar = v => {
-        const mover = n => { p = Math.max(0, Math.min(doc.p.length - 1, p + n)); v.querySelector(".modal-cuerpo").innerHTML = cuerpo(); activar(v); v.querySelector(".modal").scrollTop = 0; };
-        v.querySelector("#poeAnt").onclick = () => mover(-1); v.querySelector("#poeSig").onclick = () => mover(1);
+      const sup = B.dom.esSup() && !B.modoLocal; let completo = false; T = T || [];
+      const seccion = (txt, i) => {
+        if (completo) return txt ? `<section id="poeL${i}" class="poe-sec"><span class="poe-num">Lámina ${i + 1}</span><p>${this.marcar(txt, T).replace(/\n/g, "<br>")}</p></section>` : "";
+        const bl = this.condensar(txt); if (!bl.length || (!this.relevante(bl) && i !== p)) return "";
+        const tit = !bl[0].v && bl[0].t.length <= 80 && !/[.;,]$/.test(bl[0].t) && bl.length > 1 ? bl.shift() : null; let h = "", ul = false;
+        for (const b of bl) { if (b.v && !ul) { h += "<ul>"; ul = true; } if (!b.v && ul) { h += "</ul>"; ul = false; } h += b.v ? `<li>${this.marcar(b.t, T)}</li>` : `<p>${this.marcar(b.t, T)}</p>`; }
+        return `<section id="poeL${i}" class="poe-sec"><span class="poe-num">Lámina ${i + 1}</span>${tit ? `<h4>${this.marcar(tit.t, T)}</h4>` : ""}${h}${ul ? "</ul>" : ""}</section>`;
       };
-      B.ui.modal({ titulo: esc(doc.n + " · " + doc.t), icono: "doc", ancho: true, html: cuerpo(), alAbrir: activar, botones: [{ t: "Cerrar", c: "sec", v: null }] });
+      const cuerpo = () => {
+        const secs = doc.p.map(seccion).filter(Boolean), pdf = this.conPdf(doc.n);
+        return `<div class="poe-barra"><div class="seg" id="poeModo"><button type="button" class="${completo ? "" : "on"}" data-m="0">Condensado</button><button type="button" class="${completo ? "on" : ""}" data-m="1">Texto completo</button></div>
+            <span class="muted peque">${secs.length} de ${doc.p.length} láminas${completo ? "" : " con lo relevante"}</span>
+            <span class="poe-pdf">${pdf ? `<a class="btn chico" href="${this.urlPdf(doc.n)}" target="_blank">${B.ico("pdf")} Abrir PDF original</a>` : ""}
+              ${sup ? `<label class="btn chico sec" style="cursor:pointer">${B.ico("subir")} ${pdf ? "Reemplazar PDF" : "Subir PDF"}<input type="file" id="poeArch" accept="application/pdf,.pdf" hidden></label>` : !pdf && !B.modoLocal ? `<span class="muted peque">Sin PDF original</span>` : ""}</span></div>
+          <div class="poe-cont" id="poeCont">${secs.join("") || `<p class="muted">Este documento no tiene texto que mostrar.</p>`}</div>
+          <p class="muted peque" style="margin:10px 0 0">Archivo de origen: ${esc(doc.a)}${completo ? "" : " · La vista condensada une los renglones y omite portadas, objetivos y láminas sin texto; no sustituye al documento original."}</p>`;
+      };
+      const activar = (v, ir) => {
+        v.querySelectorAll("#poeModo button").forEach(b => b.onclick = () => { completo = b.dataset.m === "1"; v.querySelector(".modal-cuerpo").innerHTML = cuerpo(); activar(v, false); });
+        const ar = v.querySelector("#poeArch");
+        if (ar) ar.onchange = async () => {
+          const f = ar.files[0]; if (!f) return;
+          try {
+            const r = await (await fetch("/api/procarchivo?poe=" + encodeURIComponent(doc.n), { method: "POST", headers: { "X-Token": B.token, "Content-Type": "application/pdf" }, body: await f.arrayBuffer() })).json();
+            if (!r.ok) throw new Error(r.error || "No se pudo guardar el PDF.");
+            await B.api.recargar(); B.ui.toast("PDF guardado. Ya se puede abrir desde este documento.", "ok");
+            v.querySelector(".modal-cuerpo").innerHTML = cuerpo(); activar(v, false);
+            if (B.app.ruta === "poe") V.poe.resultados(document.getElementById("vista"));
+          } catch (e) { B.ui.error(e); }
+        };
+        if (ir && p > 0) setTimeout(() => { const el = v.querySelector("#poeL" + p), ct = v.querySelector("#poeCont"); if (el && ct) ct.scrollTop = el.offsetTop - ct.offsetTop - 6; }, 60);
+      };
+      B.ui.modal({ titulo: esc(doc.n + " · " + doc.t), icono: "doc", ancho: true, html: cuerpo(), alAbrir: v => activar(v, true), botones: [{ t: "Cerrar", c: "sec", v: null }] });
     }
   };
 
@@ -4485,7 +4528,7 @@ V.hoja = {
     resultados(c) {
       const caja = c.querySelector("#poeRes"), D = P.docs(), q = this.q.trim(); if (!caja) return;
       if (!q) {
-        caja.innerHTML = `<div class="tarjeta">${cab("doc", "d", "Documentos", "Toca uno para leerlo lámina por lámina.")}<div class="poe-docs">${D.map((d, i) => `<a href="#" class="poe-doc" data-d="${i}"><b>${esc(d.n)}</b><span>${esc(d.t)}</span><small>${d.p.length} láminas</small></a>`).join("")}</div></div>`;
+        caja.innerHTML = `<div class="tarjeta">${cab("doc", "d", "Documentos", "Toca uno para leerlo completo en una sola vista, en versión condensada." + (B.dom.esSup() && !B.modoLocal ? " Dentro de cada uno puedes subir su PDF original." : ""))}<div class="poe-docs">${D.map((d, i) => `<a href="#" class="poe-doc" data-d="${i}"><b>${esc(d.n)}</b><span>${esc(d.t)}</span><small>${d.p.length} láminas${P.conPdf(d.n) ? ` · <i class="poe-tiene">PDF</i>` : ""}</small></a>`).join("")}</div></div>`;
         caja.querySelectorAll("[data-d]").forEach(a => a.onclick = e => { e.preventDefault(); P.leer(+a.dataset.d, 0); });
         return;
       }
@@ -5145,7 +5188,7 @@ V.hoja = {
         const R = TJ.ranking(tt, cta), top = R.filter(r => r.n > 0).slice(0, 5), resto = R.filter(r => !top.includes(r)), mio = resto.find(r => r.ini === yo);
         const fila = (r, fuera) => {
             const p = B.dom.persona(r.ini);
-            return `<div class="tj-fila ${r.ini === yo ? "yo" : ""} ${!fuera && r.pos && r.pos <= 3 ? "top" + r.pos : ""}">${fuera ? `<span class="tj-pos">${r.n ? (R.indexOf(r) + 1) + "º" : "–"}</span>` : medalla(r.pos)}
+            return `<div data-ini="${r.ini}" class="tj-fila ${r.ini === yo ? "yo" : ""} ${!fuera && r.pos && r.pos <= 3 ? "top" + r.pos : ""}">${fuera ? `<span class="tj-pos">${r.n ? (R.indexOf(r) + 1) + "º" : "–"}</span>` : medalla(r.pos)}
               <div class="tj-nom"><b>${esc(p.nombre)}</b><small>${esc(B.dom.catCorta(p.cat))}${r.p && (sup || r.ini === yo) ? ` · <span style="color:#8a6526">${r.p} por confirmar</span>` : ""}${sup ? `<span class="tj-xl" title="Tarjetas a su nombre en los Excel cargados (informativo)"> · en Excel: ${TJ.enExcel(r.ini)}</span>` : ""}</small></div>
               <div class="tj-barra"><i style="width:${Math.round(r.n / max * 100)}%"></i></div><b class="tj-n">${r.n}</b>
               ${sup ? `<span class="tj-pm"><button class="btn sec btn-icono" data-menos="${r.ini}" title="Quitar una tarjeta" ${r.n ? "" : "disabled"}>−</button><button class="btn sec btn-icono" data-mas="${r.ini}" title="Agregar una tarjeta confirmada en ${turnoTxt(f, t)}">+</button></span>` : ""}</div>`;
@@ -5165,13 +5208,13 @@ V.hoja = {
             : `<h2>${mio.c ? `Llevas ${mio.c} tarjeta${mio.c === 1 ? "" : "s"}${posYo && posYo.pos ? ` · ${posYo.pos}.º lugar de tu turno` : ""}` : "Aún no tienes tarjetas en el marcador"}</h2>
                <p>Envía tu tarjeta en Microsoft Forms y manda la <b>captura por WhatsApp</b> al supervisor: él la suma al marcador. Aquí no tienes que registrar nada.</p>`}
             <p class="muted peque" style="margin:6px 0 0">Acumulado desde el ${U.corta(TJ.inicio())} · TOP 5 de cada turno · solo técnicos de la plantilla (sin supervisores).</p></div>
-          <div class="tj-hero-btn">${sup ? `<button class="btn verde" id="tjWa">${B.ico("subir")} Mensaje para WhatsApp</button>` : ""}
+          <div class="tj-hero-btn">${sup ? `<button class="btn sec" id="tjReord" title="Vuelve a acomodar el TOP 5 con los puntos que agregaste o quitaste">${B.ico("reutilizar")} Actualizar el orden</button><button class="btn verde" id="tjWa">${B.ico("subir")} Mensaje para WhatsApp</button>` : ""}
 </div>
         </div>
         ${sup && pend.length ? `<div class="tarjeta c12">${cab("reloj", "d", "Por confirmar (" + pend.length + ")", "Registros que hicieron los técnicos con una versión anterior. Confírmalos o márcalos como no válidos.", `<button class="btn chico verde" id="tjConfTodas">${B.ico("ok")} Confirmar todas</button>`)}
           <div class="tj-pend">${pend.map(d => `<div><div class="tj-pend-t"><b>${esc(B.dom.nombre(d.ini))}</b><span>${turnoTxt(d.f, d.t)}${d.nota ? " · " + esc(d.nota) : ""}</span><small>registrada ${U.fh(d.reg)}</small></div>
             <div class="tj-pend-b"><button class="btn chico verde" data-conf="${esc(d.uid)}">${B.ico("ok")} Confirmar</button><button class="btn chico peligro" data-rech="${esc(d.uid)}">No válida</button></div></div>`).join("")}</div></div>` : ""}
-        ${col("T2", "Turno de día")}${col("T1", "Turno de noche")}
+        ${t === "T1" ? col("T1", "Turno de noche") + col("T2", "Turno de día") : col("T2", "Turno de día") + col("T1", "Turno de noche")}
       </div>`;
       const reg = c.querySelector("#tjReg"); if (reg) reg.onclick = () => this.registrar(yo);
       const wa = c.querySelector("#tjWa"); if (wa) wa.onclick = () => this.whats();
@@ -5183,10 +5226,23 @@ V.hoja = {
         if (m) hacer("declEstado", { uids: [b.dataset.rech], est: "R", motivo: m });
       });
       const ct = c.querySelector("#tjConfTodas"); if (ct) ct.onclick = async () => { if (await B.ui.confirmar(`¿Confirmar las <b>${pend.length}</b> tarjetas registradas?`, "Confirmar todas", "Confirmar")) hacer("declEstado", { uids: pend.map(d => d.uid), est: "C" }); };
-      c.querySelectorAll("[data-mas]").forEach(b => b.onclick = () => hacer("declarar", { ini: b.dataset.mas, f, t, nota: "Agregada por el supervisor" }));
+      // Sumar o quitar un punto NO vuelve a dibujar ni reordena la lista (nada se mueve mientras el supervisor captura):
+      // solo cambia el numero de esa persona. El TOP 5 se acomoda con "Actualizar el orden" o al volver a entrar.
+      const enSitio = async (ini, accion, datos) => {
+        try { await TJ.llamar(accion, datos); await TJ.cargar(); } catch (e) { return B.ui.error(e); }
+        const ct = TJ.cuenta(), n = (ct.get(ini) || {}).c || 0, mx = Math.max(1, ...[...ct.values()].map(x => x.c));
+        c.querySelectorAll(`.tj-fila[data-ini="${ini}"]`).forEach(fl => {
+          fl.querySelector(".tj-n").textContent = n; fl.querySelector(".tj-barra i").style.width = Math.round(n / mx * 100) + "%";
+          const bm = fl.querySelector("[data-menos]"); if (bm) bm.disabled = !n;
+          fl.classList.add("tj-cambio"); setTimeout(() => fl.classList.remove("tj-cambio"), 900);
+        });
+
+      };
+      const br = c.querySelector("#tjReord"); if (br) br.onclick = () => this.pinta();
+      c.querySelectorAll("[data-mas]").forEach(b => b.onclick = () => enSitio(b.dataset.mas, "declarar", { ini: b.dataset.mas, f, t, nota: "Agregada por el supervisor" }));
       c.querySelectorAll("[data-menos]").forEach(b => b.onclick = async () => {
-        const ini = b.dataset.menos, L = D.decl.filter(d => U.ini(d.ini) === ini && d.est === "C" && d.f >= TJ.inicio()).sort((a, x) => (x.f === f && x.t === t) - (a.f === f && a.t === t) || x.id - a.id);
-        if (L[0] && await B.ui.confirmar(`Se quitará una tarjeta confirmada de <b>${esc(B.dom.nombre(ini))}</b> (${turnoTxt(L[0].f, L[0].t)}${L[0].nota ? ": " + esc(L[0].nota) : ""}).`, "Quitar tarjeta", "Quitar", true)) hacer("declBorrar", { uid: L[0].uid });
+        const ini = b.dataset.menos, L = TJ.datos.decl.filter(d => U.ini(d.ini) === ini && d.est === "C" && d.f >= TJ.inicio()).sort((a, x) => (x.f === f && x.t === t) - (a.f === f && a.t === t) || x.id - a.id);
+        if (L[0] && await B.ui.confirmar(`Se quitará una tarjeta de <b>${esc(B.dom.nombre(ini))}</b> (${turnoTxt(L[0].f, L[0].t)}${L[0].nota ? ": " + esc(L[0].nota) : ""}).`, "Quitar tarjeta", "Quitar", true)) enSitio(ini, "declBorrar", { uid: L[0].uid });
       });
     },
     async registrar(ini) {
@@ -6349,7 +6405,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "3.4", servidorViejo: false,
+  info: {}, VERSION: "3.5", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -6532,7 +6588,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "3.4")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "3.5")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
