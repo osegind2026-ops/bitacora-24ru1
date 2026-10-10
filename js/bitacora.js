@@ -754,7 +754,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "3.2", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "3.3", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -4385,6 +4385,123 @@ V.hoja = {
   }
 };
 ;
+/* ---- poe.js ---- */
+/* =========================================================================
+   BITACORA 24RU1 - Estandares POE
+   Consulta de las politicas y estandares del curso para Personal Ocupacionalmente
+   Expuesto (documentos 00 a 26). Cualquiera puede buscar un termino: indica en que
+   documento y lamina aparece y muestra el extracto. El texto viene en poe_datos.js
+   (en el celular llega con el paquete de datos).
+   ========================================================================= */
+"use strict";
+(function () {
+  const esc = s => U.esc(s);
+  const SIN = { "á": "a", "é": "e", "í": "i", "ó": "o", "ú": "u", "ü": "u", "ñ": "n" };
+  // minusculas y sin acentos, conservando la posicion de cada letra (para ubicar el extracto en el texto original)
+  const llano = s => { let r = ""; for (const ch of String(s || "").toLowerCase()) r += ch.length > 1 ? " ".repeat(ch.length) : SIN[ch] || (ch < "!" ? " " : ch); return r; };
+  const LETRA = /[a-z0-9]/;
+  const STOP = new Set("de la el en y a los las del que se por con para un una al es su no sin lo o como mas sus son".split(" "));
+
+  const P = B.poe = {
+    _idx: null,
+    docs() { return B.POE || []; },
+    nombre(i) { const d = this.docs()[i]; return d ? d.n + " · " + d.t : ""; },
+    idx() { if (!this._idx || this._idx.src !== B.POE) this._idx = { src: B.POE, d: this.docs().map(d => d.p.map(llano)) }; return this._idx.d; },
+    // palabras a buscar (sin las vacias, y sin la "s" o "es" final para que "guantes" encuentre "guante")
+    terminos(q) { return [...new Set(llano(q).split(/[^a-z0-9.\-]+/).map(t => t.replace(/^[.\-]+|[.\-]+$/g, "")).filter(t => t.length > 1 && !STOP.has(t)).map(t => t.length >= 7 ? t.replace(/(es|s)$/, "") : t.length > 4 ? t.replace(/s$/, "") : t))]; },
+    // posiciones donde empieza una palabra con ese termino
+    // (las siglas y palabras de hasta 3 letras, solo completas: "EME" no es "emergencia")
+    ocurr(txt, t) {
+      const r = [], corta = t.length <= 3; let k = -1;
+      while ((k = txt.indexOf(t, k + 1)) >= 0) if ((k === 0 || !LETRA.test(txt[k - 1])) && (!corta || k + t.length >= txt.length || !LETRA.test(txt[k + t.length]))) r.push(k);
+      return r;
+    },
+    // documentos que definen los estandares que se revisan en las tarjetas: van primero al consultar desde una tarjeta
+    PRIMERO: ["06", "07", "26", "24.b", "18", "19", "16", "14"],
+    buscar(q, max, primero) {
+      const T = this.terminos(q); if (!T.length) return [];
+      const frase = llano(q).trim().replace(/\s+/g, " "), I = this.idx(), res = [];
+      this.docs().forEach((d, i) => I[i].forEach((txt, j) => {
+        if (!txt) return;
+        let pts = 0, hay = 0;
+        for (const t of T) { const n = this.ocurr(txt, t).length; if (n) { hay++; pts += Math.min(n, 5); } }
+        if (!hay) return;
+        if (T.length > 1 && txt.replace(/\s+/g, " ").includes(frase)) pts += 20;
+        res.push({ d: i, p: j, pts: pts + hay * 10 + (primero && this.PRIMERO.includes(d.n) ? 4 : 0), todos: hay === T.length });
+      }));
+      const todos = res.filter(r => r.todos);     // primero las laminas que tienen todas las palabras; si no hay, las que tienen alguna
+      return (todos.length ? todos : res).sort((a, b) => b.pts - a.pts || a.d - b.d || a.p - b.p).slice(0, max || 300);
+    },
+    marcar(orig, T) {
+      const ll = llano(orig), cortes = [];
+      for (const t of T) for (const k of this.ocurr(ll, t)) { let f = k + t.length; while (f < ll.length && LETRA.test(ll[f])) f++; cortes.push([k, f]); }
+      cortes.sort((a, b) => a[0] - b[0]);
+      let out = "", u = 0;
+      for (const [a, b] of cortes) { if (a < u) continue; out += esc(orig.slice(u, a)) + "<mark>" + esc(orig.slice(a, b)) + "</mark>"; u = b; }
+      return out + esc(orig.slice(u));
+    },
+    extracto(r, T, largo) {
+      const orig = this.docs()[r.d].p[r.p], ll = llano(orig); let pos = -1;
+      for (const t of T) { const k = this.ocurr(ll, t)[0]; if (k != null && (pos < 0 || k < pos)) pos = k; }
+      pos = Math.max(pos, 0); largo = largo || 300;
+      let a = Math.max(0, pos - Math.round(largo * 0.35)), b = Math.min(orig.length, a + largo);
+      while (a > 0 && LETRA.test(ll[a - 1])) a--;
+      while (b < orig.length && LETRA.test(ll[b])) b++;
+      return (a > 0 ? "… " : "") + this.marcar(orig.slice(a, b), T).replace(/\n/g, " ") + (b < orig.length ? " …" : "");
+    },
+    // Lector de un documento, lamina por lamina
+    leer(d, p, T) {
+      const doc = this.docs()[d]; if (!doc) return;
+      const cuerpo = () => `<div class="poe-nav"><button class="btn sec chico" id="poeAnt" ${p <= 0 ? "disabled" : ""}>‹ Anterior</button><span>Lámina <b>${p + 1}</b> de ${doc.p.length}</span><button class="btn sec chico" id="poeSig" ${p >= doc.p.length - 1 ? "disabled" : ""}>Siguiente ›</button></div>
+        <div class="poe-lamina">${doc.p[p] ? this.marcar(doc.p[p], T || []).replace(/\n/g, "<br>") : `<span class="muted">Esta lámina no tiene texto (es una imagen o un título).</span>`}</div>
+        <p class="muted peque" style="margin:10px 0 0">Archivo original: ${esc(doc.a)}</p>`;
+      const activar = v => {
+        const mover = n => { p = Math.max(0, Math.min(doc.p.length - 1, p + n)); v.querySelector(".modal-cuerpo").innerHTML = cuerpo(); activar(v); v.querySelector(".modal").scrollTop = 0; };
+        v.querySelector("#poeAnt").onclick = () => mover(-1); v.querySelector("#poeSig").onclick = () => mover(1);
+      };
+      B.ui.modal({ titulo: esc(doc.n + " · " + doc.t), icono: "doc", ancho: true, html: cuerpo(), alAbrir: activar, botones: [{ t: "Cerrar", c: "sec", v: null }] });
+    }
+  };
+
+  V.poe = {
+    titulo: "Estándares POE", q: "",
+    SUGERIDOS: ["arnés", "andamio", "espacio confinado", "cilindros", "equipo rotatorio", "extintor", "fuga de vapor", "PETAR", "ropa anti-C", "material extraño", "maniobras de izaje", "ALARA", "dosímetro", "señalización"],
+    sub() { return "Políticas y estándares del curso para Personal Ocupacionalmente Expuesto · " + P.docs().length + " documentos"; },
+    render(c) {
+      if (!P.docs().length) {
+        c.innerHTML = `<div class="tarjeta">${B.ui.vacio(B.modoMovil ? "Los documentos POE llegan con el <b>paquete de datos</b> de la PC. Pide un paquete nuevo y cárgalo en <b>Enviar / recibir</b>." : "No se encontraron los documentos POE en esta instalación.", "doc")}</div>`;
+        return;
+      }
+      c.innerHTML = `<div class="tarjeta">${cab("buscar", "g", "Busca una política o un estándar", "Escribe una o varias palabras: te dice en qué documento y lámina aparece y te muestra el texto.")}
+          <input class="inp poe-q" id="poeQ" value="${esc(this.q)}" placeholder="Ej. arnés, cilindros, espacio confinado, PETAR, material extraño…" autocomplete="off">
+          <div class="tj-chips" style="margin-top:10px">${this.SUGERIDOS.map(s => `<a href="#" class="tj-chip" data-s="${esc(s)}">${esc(s)}</a>`).join("")}</div></div>
+        <div id="poeRes"></div>`;
+      const inp = c.querySelector("#poeQ");
+      inp.oninput = U.debounce(() => { this.q = inp.value; this.resultados(c); }, 220);
+      c.querySelectorAll("[data-s]").forEach(a => a.onclick = e => { e.preventDefault(); this.q = inp.value = a.dataset.s; this.resultados(c); });
+      this.resultados(c);
+      if (!B.modoMovil) setTimeout(() => inp.focus(), 60);
+    },
+    resultados(c) {
+      const caja = c.querySelector("#poeRes"), D = P.docs(), q = this.q.trim(); if (!caja) return;
+      if (!q) {
+        caja.innerHTML = `<div class="tarjeta">${cab("doc", "d", "Documentos", "Toca uno para leerlo lámina por lámina.")}<div class="poe-docs">${D.map((d, i) => `<a href="#" class="poe-doc" data-d="${i}"><b>${esc(d.n)}</b><span>${esc(d.t)}</span><small>${d.p.length} láminas</small></a>`).join("")}</div></div>`;
+        caja.querySelectorAll("[data-d]").forEach(a => a.onclick = e => { e.preventDefault(); P.leer(+a.dataset.d, 0); });
+        return;
+      }
+      const T = P.terminos(q), R = P.buscar(q, 120);
+      if (!R.length) { caja.innerHTML = `<div class="tarjeta">${B.ui.vacio(`Nada con «${esc(q)}» en los documentos POE. Prueba con otra palabra o en singular.`, "buscar")}</div>`; return; }
+      const porDoc = new Map(); for (const r of R) (porDoc.get(r.d) || porDoc.set(r.d, []).get(r.d)).push(r);
+      const orden = [...porDoc.entries()].sort((a, b) => b[1][0].pts - a[1][0].pts || b[1].length - a[1].length);
+      caja.innerHTML = `<p class="muted peque" style="margin:0 2px 10px"><b>${R.length}${R.length >= 120 ? "+" : ""}</b> lámina${R.length === 1 ? "" : "s"} en <b>${orden.length}</b> documento${orden.length === 1 ? "" : "s"}${R[0].todos || T.length < 2 ? "" : " · ninguna tiene todas las palabras: se muestran las que tienen alguna"}</p>` +
+        orden.map(([d, l]) => `<div class="tarjeta poe-grupo"><h3><span>${esc(D[d].n)}</span>${esc(D[d].t)}<small>${l.length} lámina${l.length === 1 ? "" : "s"}</small></h3>
+          ${l.slice(0, 6).sort((a, b) => a.p - b.p).map(r => `<a href="#" class="poe-res" data-d="${r.d}" data-p="${r.p}"><b>Lámina ${r.p + 1}</b><span>${P.extracto(r, T)}</span></a>`).join("")}
+          ${l.length > 6 ? `<p class="muted peque" style="margin:8px 0 0">y ${l.length - 6} lámina(s) más en este documento: ${l.slice(6).sort((a, b) => a.p - b.p).map(r => `<a href="#" class="poe-mas" data-d="${r.d}" data-p="${r.p}">${r.p + 1}</a>`).join(", ")}</p>` : ""}</div>`).join("");
+      caja.querySelectorAll("[data-p]").forEach(a => a.onclick = e => { e.preventDefault(); P.leer(+a.dataset.d, +a.dataset.p, T); });
+    }
+  };
+})();
+;
 /* ---- tarjetas.js ---- */
 /* =========================================================================
    BITACORA 24RU1 - Tarjetas "Lideres en Campo"
@@ -4717,15 +4834,26 @@ V.hoja = {
   /* Resalta en el texto de una tarjeta lo que el supervisor debe mirar: la desviacion o el riesgo (rojo), el EPP (ambar),
      el equipo, lugar o procedimiento (azul) y la correccion o retroalimentacion (verde). */
   const LT = "a-záéíóúüñ0-9", PAL = `[${LT}]+`;
+  /* Los terminos salen de las politicas y estandares del curso POE (06 Seguridad Industrial, 07 Proteccion contra incendios,
+     14 ALARA, 16 Contaminacion, 18 PETAR, 19 Senalizacion, 24 SOER de exposiciones e izajes, 26 Exclusion de materiales extranos, 00 Profesional nuclear). */
   const CLAVES = new RegExp(`(^|[^${LT}])(?:` + [
-    // riesgo o desviacion
-    `(no (?:se )?(?:utiliz|us|port|ten[ií]a|cont|cumpl|respet|aplic|coloc|verific|delimit)${PAL}?|sin (?:el |la |los |las |su |sus |usar |portar |utilizar )?${PAL}|falta de ${PAL}(?: ${PAL})?|omit${PAL}|incumpl${PAL}|desapeg${PAL}|descuid${PAL}|mala pr[aá]ctica|malas pr[aá]cticas|acto inseguro|actos inseguros|condici[oó]n insegura|condiciones inseguras|l[ií]nea de fuego|ca[ií]das?|golpe${PAL}?|atrapamiento|descarga el[eé]ctrica|lesi[oó]n(?:es)?|accidentes?|incidentes?|incapacitante|energizad[oa]s?|carga suspendida|bajo la carga|mal estado|riesgos?|peligros?)`,
+    // riesgo, desviacion o incumplimiento
+    `(no (?:se )?(?:utiliz|us|port|ten[ií]a|cont|cumpl|respet|aplic|coloc|verific|delimit|asegur|report|notific|realiz)${PAL}?|sin (?:el |la |los |las |su |sus |usar |portar |utilizar )?${PAL}|falta de ${PAL}(?: ${PAL})?|uso (?:inadecuado|incorrecto|indebido)(?: del? ${PAL})?` +
+      `|omit${PAL}|incumpl${PAL}|desapeg${PAL}|descuid${PAL}|desacat${PAL}|malas? pr[aá]cticas?|actos? inseguros?|condici[oó]n(?:es)? inseguras?|l[ií]nea de fuego|ca[ií]das?(?: de objetos)?|golpe${PAL}?|atrapamientos?|atrapad[oa]s?` +
+      `|descarga el[eé]ctrica|arco el[eé]ctrico|corto ?circuito|choque el[eé]ctrico|lesi[oó]n(?:es)?|accidentes?|incidentes?|incapacitante|energizad[oa]s?|cargas? suspendidas?|bajo la carga|mal estado|da[ñn]ad[oa]s?|expuest[oa]s?|destapad[oa]s?|obstru${PAL}` +
+      `|ropa (?:holgada|suelta)|anillos?|pulseras?|fugas?(?: de (?:vapor|aceite|gas|agua))?|derrames?|deficiencia de ox[ií]geno|estr[eé]s t[eé]rmico|alto ruido|asbesto|materiales? extra[ñn]os?|intrusi[oó]n(?: de materiales)?` +
+      `|contaminaci[oó]n(?: personal| radiactiva)?|part[ií]cula caliente|exposici[oó]n(?:es)? no planeadas?|exceso de confianza|sentido de urgencia|modelo mental equivocado|no calificad[oa]s?|sin liberar|insegur[oa]s?|riesgos?|peligros?)`,
     // equipo de proteccion personal
-    `(guantes?(?: de (?:carnaza|hule|nitrilo|cuero|seguridad)| diel[eé]ctricos?| anticorte)?|lentes(?: de seguridad)?|gafas|casco|barbiquejo|tapones(?: auditivos)?|protecci[oó]n (?:auditiva|respiratoria|facial|personal)|arn[eé]s|l[ií]nea de vida|careta|respirador(?:es)?|mascarilla|calzado(?: de seguridad)?|botas|ropa de trabajo|camisola|faja|EPP)`,
+    `(arn[eé]s(?: de cuerpo entero)?|arrestador(?:es)?(?: de ca[ií]das?)?|l[ií]nea de vida|guantes?(?: de (?:carnaza|hule|nitrilo|cuero|seguridad)| para alto voltaje| diel[eé]ctricos?| anticorte)?|lentes(?: de seguridad)?|gafas|goggles|casco|barbiquejo` +
+      `|tapones(?: auditivos)?|orejeras|protecci[oó]n (?:auditiva|respiratoria|facial|personal|contra ca[ií]das)|careta|respirador(?:es)?|mascarilla|calzado(?: de seguridad)?|zapatos de seguridad|botas|ropa (?:de trabajo|de algod[oó]n|anti-? ?c)|traje anti-? ?c|camisola|faja|EPP|dos[ií]metros?|DLD|TLD)`,
     // equipo, lugar o procedimiento
-    `(\\d-[A-Z0-9]{1,6}(?:-[A-Z0-9]{1,6}){1,3}|(?:MSIE|PAG|MO|MP|CP|VO|PT|OT|AB)-? ?\\d[A-Z0-9-]*|nivel(?:es)? -?\\d+(?:\\.\\d+)?|-?\\d{1,2}\\.\\d{2}|andamios?|escaleras?|extensi[oó]n(?:es)?|cilindros?|turbina|reactor|obra de toma|purificaci[oó]n|generadores? di[eé]sel|taller(?:es)?|[aá]reas? externas?)`,
-    // correccion
-    `(se (?:le |les )?(?:corrig|retroaliment|indic|solicit|detuv|suspend|coment|mencion|aconsej|explic|orient|pidi|platic|levant)${PAL}?|corrig${PAL}|retroaliment${PAL}|de inmediato|inmediatamente|tarjeta de observaci[oó]n)`
+    `(\\d-[A-Z0-9]{1,6}(?:-[A-Z0-9]{1,6}){1,3}|(?:MSIE|PASGO|PAG|PAP|PAS|MG|NOM)-? ?\\d[A-Z0-9-]*|(?:MO|MP|CP|VO|PT|OT|AB|SI|RC)-\\d[A-Z0-9-]*|nivel(?:es)? -?\\d+(?:\\.\\d+)?|-?\\d{1,2}\\.\\d{2}|PETAR|hoja suplementaria|zonas? EME|monitor EME|dispositivos? EME|EME` +
+      `|tapete limitante|PCM|frisker|monitor(?:es)? de portal|[aá]reas? (?:restringidas?|contaminadas?|controladas?|acordonadas?|externas?)|alta radiaci[oó]n|punto caliente|espacios? confinados?|pozo seco|alberca de supresi[oó]n|t[uú]nel de vapor|transformador(?:es)?` +
+      `|andamios?|escaleras?|barandal(?:es)?|baranda|extensi[oó]n(?:es)?(?: el[eé]ctricas?)?|clavijas?|cilindros?|capuch[oó]n|guardas?|esmeriladoras?|pulidoras?|equipo rotatorio|discos? abrasivos?|extintor(?:es)?|puertas? contra incendios?|barreras? contra incendios?` +
+      `|materiales? combustibles?|l[ií]quidos? inflamables?|residuos? peligrosos?|productos? qu[ií]micos?|gr[uú]as?|eslingas?|maniobras? de izaje|plan de izaje|izaje|turbina|reactor|obra de toma|purificaci[oó]n|generadores? di[eé]sel|taller(?:es)?)`,
+    // correccion o buena practica
+    `(se (?:le |les )?(?:corrig|retroaliment|indic|solicit|detuv|suspend|coment|mencion|aconsej|explic|orient|pidi|platic|levant|notific|report|delimit|acordon)${PAL}?|corrig${PAL}|retroaliment${PAL}|de inmediato|inmediatamente|tarjeta de observaci[oó]n` +
+      `|reuni[oó]n(?:es)? pre-? ?trabajo|regla de (?:los )?(?:2|dos) (?:minutos|personas)|automonitoreo|actitud cuestionadora|cuarto de control)`
   ].join("|") + `)(?![${LT}])`, "gi");
   const CLASE = ["", "", "kr", "ke", "kl", "kc"];
   const clave = txt => {
@@ -4995,6 +5123,14 @@ V.hoja = {
       const fm = TJ.fechaMal(x);
       const r = await B.ui.modal({
         titulo: `Tarjeta #${esc(x.id)}`, icono: "doc", ancho: true,
+        // al tocar una palabra resaltada se muestra lo que dicen de ella las politicas y estandares POE
+        alAbrir: v => v.querySelectorAll(".tj-ficha mark").forEach(mk => mk.onclick = () => {
+          const caja = v.querySelector("#tjPoe"), txt = mk.textContent.trim(); if (!caja || !B.poe) return;
+          const T = B.poe.terminos(txt), R = B.poe.buscar(txt, 3, true);
+          caja.innerHTML = `<div class="tj-poe"><b>Estándares POE · «${esc(txt)}»</b>${!B.poe.docs().length ? `<p class="muted">Los documentos POE no están cargados en este equipo.</p>`
+            : R.length ? R.map(r => `<p><span>${esc(B.poe.nombre(r.d))} · lámina ${r.p + 1}</span>${B.poe.extracto(r, T, 260)}</p>`).join("") : `<p class="muted">No aparece con esas palabras en los documentos POE.</p>`}</div>`;
+          caja.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        }),
         html: `${fm ? `<div class="aviso ${fm.grave ? "r" : "d"}" style="margin-bottom:12px">${B.ico("alerta")}<div><b>${fm.grave ? "Fecha dudosa" : "Revisa la fecha"}:</b> ${esc(fm.msg)}. ${puede ? (fm.grave ? "Puede no ser una tarjeta válida para la presentación de esta semana; si no lo es, <b>descártala</b>." : "Confirma que corresponde a la presentación de esta semana.") : ""}</div></div>` : ""}
           <div class="tj-chips" style="margin-bottom:12px"><span class="tj-chip">Capturada ${U.fh(x.fcap)}</span><span class="tj-chip ${fm ? (fm.grave ? "mal" : "duda") : ""}">Observada ${x.fobs ? U.corta(x.fobs) : "sin fecha"} · ${esc(x.turno || "")}</span>${(x.fu || "").includes("SI") ? `<span class="tj-chip pl">Archivo S.I.</span>` : ""}${(x.fu || "").includes("AE") ? `<span class="tj-chip">Archivo alta energía</span>` : ""}
             ${m ? `<span class="badge ${MARCA[m.m][0]}">${MARCA[m.m][1]} · ${esc(m.por)}</span>` : ""}</div>
@@ -5005,7 +5141,8 @@ V.hoja = {
             <div class="tj-d"><span>Estándar de Seguridad Industrial</span><div>${esc(x.std || "—")}${x.epp ? " · " + esc(x.epp) : ""}${res(x.si)}</div></div>
             ${dato("Peligros de alta energía", x.ae ? x.ae + (x.energia ? " · " + x.energia : "") : "")}
           </div>
-          <p class="tj-leyenda">Resaltado: <mark class="kr">riesgo o desviación</mark> <mark class="ke">EPP</mark> <mark class="kl">equipo, lugar o procedimiento</mark> <mark class="kc">corrección</mark></p>
+          <p class="tj-leyenda">Resaltado: <mark class="kr">riesgo o desviación</mark> <mark class="ke">EPP</mark> <mark class="kl">equipo, lugar o procedimiento</mark> <mark class="kc">corrección</mark><span>· toca una palabra resaltada para ver qué dicen los <b>estándares POE</b></span></p>
+          <div id="tjPoe"></div>
           <div class="tj-ficha una">${dato("¿Qué pasó?", x.qp, true)}${dato("¿Por qué pasó?", x.pq, true)}${dato("¿Qué puede pasar?", x.qpp, true)}${dato("Retroalimentación", x.retro === "Si" ? x.retroTxt || "Sí" : x.retro ? "No se dio. " + (x.noRetro || "") : "", true)}${dato("Comentarios adicionales", x.com, true)}${dato("Momento de enseñanza-aprendizaje", x.mea, true)}</div>
           ${otros ? `<details class="tj-otros"><summary>Otros datos de la tarjeta</summary><div class="tj-ficha">${otros}</div></details>` : ""}
           ${puede ? `<div class="campo" style="margin:14px 0 0"><label>Nota para la presentación (opcional)</label><input class="inp" id="dNota" value="${esc(m ? m.nota || "" : "")}" placeholder="Ej. se corrigió en sitio con el supervisor del área"></div>` : ""}`,
@@ -5543,6 +5680,7 @@ B.inter = {
     const per = await L.leer("personal");
     if (!per || !per.length) return false;
     B.EC_GRUPOS = (await L.leer("ecgrupos")) || []; B.ecLista = B.ecArmar();
+    B.POE = (await L.leer("poe")) || [];          // documentos POE (llegan en el paquete)
     return true;
   },
   async infoPaquete() { return (await B.local.leer("paquete")) || null; },
@@ -5654,9 +5792,10 @@ B.inter = {
     const c = B.oficio.cfg();
     db.config = { ...db.config, ofVoboNombre: db.config.ofVoboNombre ?? c.voboNombre, ofAutNombre: db.config.ofAutNombre ?? c.autNombre };
     db.ecGrupos = B.EC_GRUPOS || [];
+    db.poe = B.POE || [];
     // tarjetas Lideres en Campo: marcador completo y las tarjetas de las ultimas semanas (para el resumen y el trabajo remoto)
     if (db.tarjetas && B.tj) {
-      const ver = await B.tj.llamar("ver"), sems = Object.keys(db.tarjetasSem || {}).sort().slice(-this.SEMANAS_CEL), ts = {};
+      const ver = await B.tj.cargar(), sems = Object.keys(db.tarjetasSem || {}).sort().slice(-this.SEMANAS_CEL), ts = {};
       for (const k of sems) ts[k] = db.tarjetasSem[k];
       db.tarjetasSem = ts;
       db.tarjetas.cfg = Object.assign({}, db.tarjetas.cfg, { editores: ver.editores, inicio: B.tj.inicio() });
@@ -5686,6 +5825,7 @@ B.inter = {
       await L.escribir("ecgrupos", db.ecGrupos || []);
       await L.escribir("paquete", db._paquete);
       B.EC_GRUPOS = db.ecGrupos || []; B.ecLista = B.ecArmar();
+      if (Array.isArray(db.poe) && db.poe.length) { await L.escribir("poe", db.poe); B.POE = db.poe; }
       if (db.tarjetas) {
         // el celular conserva las semanas que ya tenia; el indice solo anuncia las que si estan guardadas aqui
         const tiene = new Set((await L.leer("tarjetas_sems")) || []);
@@ -5974,7 +6114,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "3.2", servidorViejo: false,
+  info: {}, VERSION: "3.3", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -6145,7 +6285,7 @@ B.app = {
     const enlaces = [
       ["MI TURNO", [["inicio", "Inicio", "inicio"], ["actividades", "Mis actividades", "lista"], ["horasextra", sup ? "Horas extra (captura)" : "Mis horas extra", "calendario"], ["espacios", "Espacios confinados", "escudo"], ["monitoreo", "Monitoreo de E.C.", "reloj"],
         ["vigilancias", "Vigilancias C.I.", "fuego"], ["pendientes", sup ? "Pendientes (todos)" : "Mis pendientes", "reloj"], ["historial", sup ? "Historial por persona" : "Mi historial", "historial"], ["oficio", sup ? "Oficios de tiempo extra" : "Mi oficio de tiempo extra", "doc"]]],
-      ["CONSULTA", [["concentrados", "Concentrados", "doc"]].concat(B.modoLocal && !B.modoMovil ? [] : [["tarjetas", "Líderes en Campo", "trofeo"]]).concat(!sup && B.modoMovil ? [["celular", "Enviar / recibir", "subir"]] : []).concat(sup ? [["registros", "Registros del personal", "usuarios"], ["celular", B.modoMovil ? "Enviar / recibir" : "Celulares", "subir"]] : [])]
+      ["CONSULTA", [["concentrados", "Concentrados", "doc"], ["poe", "Estándares POE", "buscar"]].concat(B.modoLocal && !B.modoMovil ? [] : [["tarjetas", "Líderes en Campo", "trofeo"]]).concat(!sup && B.modoMovil ? [["celular", "Enviar / recibir", "subir"]] : []).concat(sup ? [["registros", "Registros del personal", "usuarios"], ["celular", B.modoMovil ? "Enviar / recibir" : "Celulares", "subir"]] : [])]
     ];
     if (sup) {
       enlaces.push(["SUPERVISIÓN", [["turno", "Datos del turno", "usuarios"], ["reporte", "Reporte del turno", "pdf"], ["hoja", "Hoja de asignación", "doc"], ["asistencia", "Asistencia y horas extra", "calendario"]]]);
@@ -6157,7 +6297,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "3.2")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "3.3")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
