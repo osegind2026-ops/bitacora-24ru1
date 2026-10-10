@@ -754,7 +754,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "3.3", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "3.4", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -4403,7 +4403,7 @@ V.hoja = {
   const STOP = new Set("de la el en y a los las del que se por con para un una al es su no sin lo o como mas sus son".split(" "));
 
   const P = B.poe = {
-    _idx: null,
+    _idx: null, llano,
     docs() { return B.POE || []; },
     nombre(i) { const d = this.docs()[i]; return d ? d.n + " · " + d.t : ""; },
     idx() { if (!this._idx || this._idx.src !== B.POE) this._idx = { src: B.POE, d: this.docs().map(d => d.p.map(llano)) }; return this._idx.d; },
@@ -4498,6 +4498,232 @@ V.hoja = {
           ${l.slice(0, 6).sort((a, b) => a.p - b.p).map(r => `<a href="#" class="poe-res" data-d="${r.d}" data-p="${r.p}"><b>Lámina ${r.p + 1}</b><span>${P.extracto(r, T)}</span></a>`).join("")}
           ${l.length > 6 ? `<p class="muted peque" style="margin:8px 0 0">y ${l.length - 6} lámina(s) más en este documento: ${l.slice(6).sort((a, b) => a.p - b.p).map(r => `<a href="#" class="poe-mas" data-d="${r.d}" data-p="${r.p}">${r.p + 1}</a>`).join(", ")}</p>` : ""}</div>`).join("");
       caja.querySelectorAll("[data-p]").forEach(a => a.onclick = e => { e.preventDefault(); P.leer(+a.dataset.d, +a.dataset.p, T); });
+    }
+  };
+})();
+;
+/* ---- procedimientos.js ---- */
+/* =========================================================================
+   BITACORA 24RU1 - Procedimientos
+   Copia de consulta de los procedimientos, politicas y estandares de Seguridad
+   Industrial y de Proteccion Contra Incendio (PDF). Los sube un supervisor; todos
+   los consultan, buscan por palabras de su contenido y los imprimen completos o
+   por anexo. Al subir una revision nueva, la anterior queda como historial.
+   Necesita el servidor de la PC (los PDF se guardan en datos\procedimientos).
+   ========================================================================= */
+"use strict";
+(function () {
+  const esc = s => U.esc(s);
+  const AREAS = ["Seguridad Industrial", "Protección Contra Incendio"], TIPOS = ["Procedimiento", "Política", "Estándar", "Otro"];
+
+  const PR = B.proc = {
+    textos: null,
+    lista() { return (B.estado && B.estado.procedimientos) || []; },
+    url(id, pag) { return "/api/procarchivo?id=" + id + "&t=" + encodeURIComponent(B.token) + (pag ? "#page=" + pag : ""); },
+    async cargarTextos() { if (!this.textos) this.textos = (await B.api.llamar("op", { col: "proc", accion: "textos", datos: {} })).textos || {}; return this.textos; },
+    // lector de PDF (pdf.js): se carga solo cuando hace falta
+    async pdfjs() {
+      if (!window.pdfjsLib) await new Promise((ok, no) => { const s = document.createElement("script"); s.src = "lib/pdf.min.js"; s.onload = ok; s.onerror = () => no(new Error("No se pudo cargar el lector de PDF (lib/pdf.min.js).")); document.head.appendChild(s); });
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = "lib/pdf.worker.min.js";
+      return window.pdfjsLib;
+    },
+    // texto de cada pagina (para buscar por contenido y detectar los anexos)
+    async leerPdf(buf) {
+      const lib = await this.pdfjs(), doc = await lib.getDocument({ data: new Uint8Array(buf.slice(0)) }).promise, pags = [];
+      for (let i = 1; i <= doc.numPages; i++) {
+        const c = await (await doc.getPage(i)).getTextContent();
+        let t = ""; for (const it of c.items) t += it.str + (it.hasEOL ? "\n" : "");
+        pags.push(t.split("\n").map(l => l.replace(/\s+/g, " ").trim()).filter(Boolean).join("\n"));
+      }
+      return pags;
+    },
+    // Propone los anexos: paginas que empiezan con "ANEXO n" (o APENDICE / FORMATO); cada uno llega hasta donde empieza el siguiente
+    anexosDe(pags) {
+      const ini = [];
+      pags.forEach((t, i) => {
+        if (i < 1) return;
+        const m = /(?:^|\n)\s*(ANEXO|AP[EÉ]NDICE|FORMATO)\s+(?:N[Oo°º.]*\s*)?([0-9]{1,3}[A-Z]?|[A-Z]{1,3}(?:-[0-9A-Z]+)*|[IVX]{1,5})\b[ .:\-–]*([^\n]{0,70})/.exec(t.slice(0, 350));
+        if (!m) return;
+        const nom = (m[1][0].toUpperCase() + m[1].slice(1).toLowerCase() + " " + m[2]).trim(), ult = ini[ini.length - 1];
+        if (ult && ult.nombre.split(" · ")[0] === nom) return;          // el mismo anexo sigue en esta pagina
+        ini.push({ nombre: nom + (m[3] && m[3].trim().length > 3 ? " · " + m[3].trim() : ""), de: i + 1 });
+      });
+      return ini.map((a, k) => ({ nombre: a.nombre.slice(0, 90), de: a.de, a: k + 1 < ini.length ? ini[k + 1].de - 1 : pags.length }));
+    },
+    // Busca en la clave, el titulo y el contenido
+    buscar(q, docs, textos) {
+      const P = B.poe, T = P.terminos(q); if (!T.length) return [];
+      const res = [];
+      for (const d of docs) {
+        const meta = P.llano([d.clave, d.titulo, d.tipo, d.area, "rev " + d.rev].join(" ")), enMeta = T.filter(t => P.ocurr(meta, t).length).length, hits = [];
+        (textos[d.id] || []).forEach((txt, j) => {
+          const ll = P.llano(txt); let hay = 0, n = 0, pos = -1;
+          for (const t of T) { const o = P.ocurr(ll, t); if (o.length) { hay++; n += o.length; if (pos < 0 || o[0] < pos) pos = o[0]; } }
+          if (hay) hits.push({ p: j + 1, hay, n, pos, txt });
+        });
+        const max = hits.reduce((m, h) => Math.max(m, h.hay), 0), buenos = hits.filter(h => h.hay === max).sort((a, b) => b.n - a.n || a.p - b.p);
+        if (enMeta || buenos.length) res.push({ d, enMeta, hits: buenos, pts: enMeta * 50 + max * 20 + Math.min(buenos.length, 10) });
+      }
+      const ext = h => { const a = Math.max(0, h.pos - 90), b = Math.min(h.txt.length, a + 260); return (a ? "… " : "") + P.marcar(h.txt.slice(a, b), T).replace(/\n/g, " ") + (b < h.txt.length ? " …" : ""); };
+      return res.sort((a, b) => b.pts - a.pts).map(r => ({ d: r.d, hits: r.hits.slice(0, 5).map(h => ({ p: h.p, html: ext(h) })), mas: Math.max(0, r.hits.length - 5) }));
+    },
+    // Imprime el documento completo con el visor del navegador
+    imprimirTodo(d) {
+      const f = document.createElement("iframe"); f.style.cssText = "position:fixed;right:0;bottom:0;width:1px;height:1px;border:0;opacity:0";
+      f.src = this.url(d.id);
+      f.onload = () => setTimeout(() => { try { f.contentWindow.focus(); f.contentWindow.print(); } catch (e) { window.open(this.url(d.id), "_blank"); } }, 600);
+      document.body.appendChild(f); setTimeout(() => f.remove(), 300000);
+      B.ui.toast("Preparando la impresión del documento completo…", "", 4000);
+    },
+    // Imprime solo unas paginas (un anexo): se dibujan con el lector de PDF y se mandan a la impresora
+    async imprimirPags(d, de, a, titulo) {
+      const w = window.open("", "_blank");
+      if (!w) { B.ui.toast("Permite las ventanas emergentes para imprimir.", "aviso"); return; }
+      w.document.write(`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>${esc(titulo)}</title><style>@page{margin:0}html,body{margin:0;background:#fff;font-family:Arial,sans-serif}img{display:block;width:100%;page-break-after:always;break-after:page}img:last-child{page-break-after:auto;break-after:auto}p{padding:30px;color:#555}</style></head><body><p id="m">Preparando ${esc(titulo)}…</p></body></html>`);
+      try {
+        const lib = await this.pdfjs(), buf = await (await fetch(this.url(d.id))).arrayBuffer(), doc = await lib.getDocument({ data: new Uint8Array(buf) }).promise;
+        de = Math.max(1, de | 0); a = Math.min(doc.numPages, a | 0 || doc.numPages);
+        for (let i = de; i <= a; i++) {
+          const pg = await doc.getPage(i), vp = pg.getViewport({ scale: 2 }), cv = document.createElement("canvas");
+          cv.width = vp.width; cv.height = vp.height;
+          await pg.render({ canvasContext: cv.getContext("2d"), viewport: vp }).promise;
+          const im = w.document.createElement("img"); im.src = cv.toDataURL("image/jpeg", 0.92); w.document.body.appendChild(im);
+        }
+        const m = w.document.getElementById("m"); if (m) m.remove();
+        setTimeout(() => { w.focus(); w.print(); }, 500);
+      } catch (e) { try { w.close(); } catch (x) { } B.ui.error(e); }
+    }
+  };
+
+  V.procedimientos = {
+    titulo: "Procedimientos", q: "", area: "Todas",
+    sub() { return "Procedimientos, políticas y estándares de Seguridad Industrial y Protección Contra Incendio · últimas revisiones"; },
+    render(c) {
+      if (B.modoLocal) { c.innerHTML = `<div class="tarjeta">${B.ui.vacio("Los procedimientos se consultan en la bitácora de la PC (necesitan el servidor).", "doc")}</div>`; return; }
+      const sup = B.dom.esSup(), todos = PR.lista(), vig = todos.filter(d => d.vigente !== false);
+      c.innerHTML = `<div class="tarjeta">${cab("doc", "g", "Procedimientos, políticas y estándares", `${vig.length} documento${vig.length === 1 ? "" : "s"} vigente${vig.length === 1 ? "" : "s"}. Busca por clave, título o por palabras de su contenido.`, sup ? `<button class="btn" id="prSubir">${B.ico("subir")} Subir documento</button>` : "")}
+          <div class="fila" style="align-items:flex-end"><div class="campo" style="flex:3 1 280px;margin:0"><input class="inp poe-q" id="prQ" value="${esc(this.q)}" placeholder="Ej. SI-9981, trabajos en caliente, permiso, andamios…" autocomplete="off"></div>
+            <div class="campo" style="flex:0 0 auto;margin:0">${B.ui.seg("area", ["Todas", "Seguridad Industrial", "Contra Incendio"], this.area)}</div></div></div>
+        <div id="prRes"></div>`;
+      const inp = c.querySelector("#prQ");
+      inp.oninput = U.debounce(() => { this.q = inp.value; this.pinta(c); }, 250);
+      B.ui.activarSeg(c, (s, v) => { this.area = v; this.pinta(c); });
+      const bs = c.querySelector("#prSubir"); if (bs) bs.onclick = () => this.editar(null);
+      this.pinta(c);
+    },
+    async pinta(c) {
+      const caja = c.querySelector("#prRes"); if (!caja) return;
+      const sup = B.dom.esSup(), todos = PR.lista(), q = this.q.trim();
+      const deArea = d => this.area === "Todas" || (this.area === "Contra Incendio" ? /incendio/i.test(d.area || "") : !/incendio/i.test(d.area || ""));
+      const vig = todos.filter(d => d.vigente !== false && deArea(d)).sort((a, b) => String(a.clave || a.titulo).localeCompare(String(b.clave || b.titulo), "es", { numeric: true }));
+      if (!todos.length) {
+        caja.innerHTML = `<div class="tarjeta">${B.ui.vacio(sup ? "Todavía no hay documentos. Usa <b>Subir documento</b> para cargar el PDF de un procedimiento, una política o un estándar." : "Todavía no hay documentos cargados. Los sube un supervisor.", "doc")}</div>`;
+        return;
+      }
+      let extra = new Map(), orden = vig;
+      if (q) {
+        let tx = {}; try { tx = await PR.cargarTextos(); } catch (e) { B.ui.error(e); }
+        if (q !== this.q.trim()) return;                         // cambio la busqueda mientras se cargaba
+        const R = PR.buscar(q, vig, tx); orden = R.map(r => r.d); extra = new Map(R.map(r => [r.d.id, r]));
+        if (!R.length) { caja.innerHTML = `<div class="tarjeta">${B.ui.vacio(`Nada con «${esc(q)}» en los documentos${this.area === "Todas" ? "" : " de " + esc(this.area)}.`, "buscar")}</div>`; return; }
+      }
+      const fila = d => {
+        const r = extra.get(d.id), ax = d.anexos || [], hist = todos.filter(x => x !== d && x.vigente === false && d.clave && U.norm(x.clave) === U.norm(d.clave)).sort((a, b) => b.id - a.id);
+        return `<div class="tarjeta pr-doc" data-id="${d.id}">
+          <div class="pr-cab">${d.clave ? `<span class="pr-clave">${esc(d.clave)}</span>` : ""}<b>${esc(d.titulo || d.clave)}</b>${d.rev ? `<span class="badge d">Rev. ${esc(d.rev)}</span>` : ""}<span class="badge ${/incendio/i.test(d.area || "") ? "r" : "v"}">${/incendio/i.test(d.area || "") ? "Contra incendio" : "Seguridad Industrial"}</span></div>
+          <div class="pr-meta">${esc(d.tipo || "Documento")}${d.paginas ? " · " + d.paginas + " págs." : ""}${d.fecha ? " · revisión del " + U.corta(d.fecha) : ""} · subido el ${U.corta(d.fh)} por ${esc(d.subio || "")}${d.nota ? " · " + esc(d.nota) : ""}${d.archivo && d.conTexto === false ? ` · <span style="color:#8a6526">PDF sin texto: no se puede buscar en su contenido</span>` : ""}</div>
+          ${d.archivo ? `<div class="pr-acc"><a class="btn chico" href="${PR.url(d.id)}" target="_blank">${B.ico("ojo")} Abrir</a><button class="btn chico sec" data-imp>${B.ico("imprimir")} Imprimir todo</button>${ax.length ? `<button class="btn chico sec" data-impax>${B.ico("imprimir")} Solo los anexos (${ax.length})</button>` : ""}
+              ${sup ? `<button class="btn chico fantasma" data-ed>${B.ico("editar")} Datos y anexos</button><button class="btn chico fantasma" data-rev>${B.ico("subir")} Nueva revisión</button><button class="btn chico fantasma" data-del>${B.ico("basura")}</button>` : ""}</div>`
+            : `<div class="aviso d" style="margin:0">${B.ico("alerta")}<div>Falta el archivo PDF.${sup ? ` <a href="#" data-ed>Súbelo aquí</a>.` : ""}</div></div>`}
+          ${r && r.hits.length ? `<div class="pr-anexos">${r.hits.map(h => `<a class="poe-res" href="${PR.url(d.id, h.p)}" target="_blank"><b>Pág. ${h.p}</b><span>${h.html}</span></a>`).join("")}${r.mas ? `<p class="muted peque" style="margin:6px 0 0">y ${r.mas} página(s) más.</p>` : ""}</div>` : ""}
+          ${ax.length && d.archivo ? `<div class="pr-anexos">${ax.map((a, i) => `<div><span><b>${esc(a.nombre)}</b> <small>págs. ${a.de}${a.a > a.de ? "–" + a.a : ""}</small></span><a class="btn chico fantasma" href="${PR.url(d.id, a.de)}" target="_blank">Ver</a><button class="btn chico fantasma" data-ax="${i}">${B.ico("imprimir")} Imprimir</button></div>`).join("")}</div>` : ""}
+          ${hist.length ? `<details class="pr-hist"><summary>Revisiones anteriores (${hist.length})</summary>${hist.map(h => `<div data-h="${h.id}"><span>Rev. ${esc(h.rev || "—")}${h.fecha ? " · " + U.corta(h.fecha) : ""} · subida el ${U.corta(h.fh)}</span>${h.archivo ? `<a href="${PR.url(h.id)}" target="_blank">Abrir</a>` : ""}${sup ? `<a href="#" data-hv>Volver a dejarla vigente</a><a href="#" data-hd style="color:var(--rojo)">Borrar</a>` : ""}</div>`).join("")}</details>` : ""}
+        </div>`;
+      };
+      caja.innerHTML = (q ? `<p class="muted peque" style="margin:0 2px 10px"><b>${orden.length}</b> documento${orden.length === 1 ? "" : "s"} con «${esc(q)}»</p>` : "") + orden.map(fila).join("");
+      const op = async (accion, datos, msg) => { try { await B.api.op("proc", accion, datos); PR.textos = null; await B.api.recargar(); if (msg) B.ui.toast(msg, "ok"); this.pinta(c); } catch (e) { B.ui.error(e); } };
+      caja.querySelectorAll(".pr-doc").forEach(el => {
+        const d = todos.find(x => +x.id === +el.dataset.id), on = (sel, fn) => el.querySelectorAll(sel).forEach(b => b.onclick = e => { e.preventDefault(); fn(b); });
+        on("[data-imp]", () => PR.imprimirTodo(d));
+        on("[data-impax]", () => { const ax = d.anexos; PR.imprimirPags(d, Math.min(...ax.map(a => a.de)), Math.max(...ax.map(a => a.a)), (d.clave || d.titulo) + " · anexos"); });
+        on("[data-ax]", b => { const a = d.anexos[+b.dataset.ax]; PR.imprimirPags(d, a.de, a.a, (d.clave || d.titulo) + " · " + a.nombre); });
+        on("[data-ed]", () => this.editar(d));
+        on("[data-rev]", () => this.editar(null, d));
+        on("[data-del]", async () => { if (await B.ui.confirmar(`Se borrará <b>${esc(d.clave || d.titulo)}</b>${d.rev ? " (rev. " + esc(d.rev) + ")" : ""} y su archivo PDF. Las revisiones anteriores no se borran.`, "Borrar documento", "Borrar", true)) op("borrar", { id: d.id }, "Documento borrado."); });
+        el.querySelectorAll("[data-h]").forEach(h => {
+          const hv = h.querySelector("[data-hv]"), hd = h.querySelector("[data-hd]");
+          if (hv) hv.onclick = e => { e.preventDefault(); op("vigente", { id: +h.dataset.h, vigente: true }, "Esa revisión quedó como vigente."); };
+          if (hd) hd.onclick = async e => { e.preventDefault(); if (await B.ui.confirmar("Se borrará esa revisión anterior y su PDF.", "Borrar revisión", "Borrar", true)) op("borrar", { id: +h.dataset.h }, "Revisión borrada."); };
+        });
+      });
+    },
+
+    // Subir un documento nuevo, una revision nueva (revDe) o corregir datos y anexos de uno existente (d)
+    async editar(d, revDe) {
+      const base = d || (revDe ? { clave: revDe.clave, titulo: revDe.titulo, tipo: revDe.tipo, area: revDe.area } : {}), nuevo = !d;
+      let buf = null, textos = null, paginas = d ? d.paginas || 0 : 0, anexos = JSON.parse(JSON.stringify((d && d.anexos) || []));
+      const filaAx = (a, i) => `<div class="pr-ax" data-i="${i}"><input class="inp" data-k="nombre" value="${esc(a.nombre)}" placeholder="Anexo 1 · Lista de verificación"><input class="inp" data-k="de" value="${a.de || ""}" inputmode="numeric" placeholder="de pág."><input class="inp" data-k="a" value="${a.a || ""}" inputmode="numeric" placeholder="a pág."><button class="btn fantasma btn-icono" data-q title="Quitar">${B.ico("cerrar")}</button></div>`;
+      const r = await B.ui.modal({
+        titulo: d ? "Datos y anexos del documento" : revDe ? "Nueva revisión de " + esc(revDe.clave || revDe.titulo) : "Subir documento", icono: "subir", ancho: true,
+        html: `<div class="campo"><label>Archivo PDF${d && d.archivo ? " (déjalo vacío para conservar el actual)" : ""}</label><input class="inp" type="file" id="pArch" accept="application/pdf,.pdf"><span class="ayuda" id="pInfo">Al elegirlo se leen sus páginas para poder buscar por contenido y proponer los anexos.</span></div>
+          <div class="fila"><div class="campo" style="flex:0 0 150px"><label>Clave</label><input class="inp" id="pClave" value="${esc(base.clave || "")}" placeholder="SI-9981" style="text-transform:uppercase"></div>
+            <div class="campo" style="flex:3 1 260px"><label>Título</label><input class="inp" id="pTit" value="${esc(base.titulo || "")}" placeholder="Trabajos en condiciones de alta temperatura"></div></div>
+          <div class="fila"><div class="campo"><label>Tipo</label><select class="inp" id="pTipo">${TIPOS.map(t => `<option ${base.tipo === t ? "selected" : ""}>${t}</option>`).join("")}</select></div>
+            <div class="campo"><label>Área</label><select class="inp" id="pArea">${AREAS.map(t => `<option ${base.area === t ? "selected" : ""}>${t}</option>`).join("")}</select></div>
+            <div class="campo" style="flex:0 0 110px"><label>Revisión</label><input class="inp" id="pRev" value="${esc(d ? d.rev || "" : "")}" placeholder="5"></div>
+            <div class="campo" style="flex:0 0 170px"><label>Fecha de la revisión</label><input class="inp" type="date" id="pFecha" value="${esc(d ? d.fecha || "" : "")}"></div></div>
+          <div class="campo"><label>Nota (opcional)</label><input class="inp" id="pNota" value="${esc(d ? d.nota || "" : "")}" placeholder="Ej. copia para consulta; el original controlado está en…"></div>
+          <label style="font-size:12px;font-weight:600;color:var(--texto-2)">Anexos (para imprimirlos por separado)</label>
+          <p class="muted peque" style="margin:2px 0 8px">Indica en qué páginas del PDF está cada anexo. Al elegir el archivo se proponen solos; corrígelos si hace falta.</p>
+          <div id="pAx"></div><button class="btn chico sec" id="pMas">${B.ico("mas")} Agregar anexo</button>
+          ${revDe ? `<div class="aviso a" style="margin:14px 0 0">${B.ico("info")}<div>La revisión ${esc(revDe.rev || "actual")} quedará en <b>Revisiones anteriores</b> y esta será la vigente.</div></div>` : ""}`,
+        alAbrir: v => {
+          const cAx = v.querySelector("#pAx"), leeAx = () => { anexos = [...cAx.querySelectorAll(".pr-ax")].map(f => ({ nombre: f.querySelector('[data-k="nombre"]').value.trim(), de: parseInt(f.querySelector('[data-k="de"]').value, 10) || 0, a: parseInt(f.querySelector('[data-k="a"]').value, 10) || 0 })); };
+          const pintaAx = () => { cAx.innerHTML = anexos.map(filaAx).join("") || `<p class="muted peque" style="margin:0 0 8px">Sin anexos.</p>`; cAx.querySelectorAll("[data-q]").forEach(b => b.onclick = () => { leeAx(); anexos.splice(+b.parentNode.dataset.i, 1); pintaAx(); }); };
+          cAx.addEventListener("input", leeAx);
+          v.querySelector("#pMas").onclick = () => { leeAx(); anexos.push({ nombre: "Anexo " + (anexos.length + 1), de: "", a: "" }); pintaAx(); };
+          pintaAx();
+          v.querySelector("#pArch").onchange = async e => {
+            const f = e.target.files[0], info = v.querySelector("#pInfo"); if (!f) return;
+            info.textContent = "Leyendo el PDF…";
+            try {
+              buf = await f.arrayBuffer(); textos = await PR.leerPdf(buf); paginas = textos.length;
+              const conTexto = textos.some(t => t.trim().length > 20), nom = f.name.replace(/\.pdf$/i, ""), uno = (textos[0] || "") + "\n" + nom;
+              const set = (id, val) => { const el = v.querySelector(id); if (el && !el.value.trim() && val) el.value = val; };
+              const mc = /\b([A-Z]{1,6}-\d{2,6}(?:-\d+)?)\b/.exec(nom.toUpperCase()) || /\b([A-Z]{2,6}-\d{3,6}(?:-\d+)?)\b/.exec(textos[0] || "");
+              set("#pClave", mc && mc[1]); set("#pTit", nom.replace(mc ? mc[1] : "\u0000", "").replace(/rev(?:isi[oó]n)?\.?\s*\d+/i, "").replace(/[_\-–\s]+/g, " ").trim());
+              const mr = /REV(?:ISI[OÓ]N)?\.?\s*(?:N[Oo°º.]*\s*)?(\d{1,3})\b/i.exec(uno); set("#pRev", mr && mr[1]);
+              if (/incendio/i.test(uno)) v.querySelector("#pArea").value = AREAS[1];
+              leeAx(); if (!anexos.length) { anexos = PR.anexosDe(textos); pintaAx(); }
+              info.innerHTML = `<b>${paginas}</b> páginas · ${(f.size / 1048576).toFixed(1)} MB · ` + (conTexto ? `texto leído: se podrá buscar por contenido${anexos.length ? " · " + anexos.length + " anexo(s) propuestos" : ""}.` : `<span style="color:#8a6526">es un PDF escaneado (sin texto): se podrá abrir e imprimir, pero no buscar en su contenido.</span>`);
+            } catch (err) { buf = null; textos = null; info.innerHTML = `<span style="color:var(--rojo)">No se pudo leer el PDF: ${esc(err.message)}</span>`; }
+          };
+        },
+        botones: [{ t: "Cancelar", c: "sec", v: null }, {
+          t: d ? "Guardar" : "Subir", c: "verde", antes: async v => {
+            const g = id => v.querySelector(id).value.trim();
+            if (nuevo && !buf) { B.ui.toast("Elige el archivo PDF.", "error"); return false; }
+            if (!g("#pClave") && !g("#pTit")) { B.ui.toast("Escribe la clave o el título.", "error"); return false; }
+            const ax = [...v.querySelectorAll(".pr-ax")].map(f => ({ nombre: f.querySelector('[data-k="nombre"]').value.trim(), de: parseInt(f.querySelector('[data-k="de"]').value, 10) || 0, a: parseInt(f.querySelector('[data-k="a"]').value, 10) || 0 })).filter(a => a.nombre || a.de);
+            for (const a of ax) { if (!a.a) a.a = a.de; if (!a.nombre || a.de < 1 || a.a < a.de || (paginas && a.a > paginas)) { B.ui.toast(`Revisa el anexo «${esc(a.nombre || "sin nombre")}»: páginas de 1 a ${paginas || "?"}, y la final no menor que la inicial.`, "error"); return false; } }
+            const bt = v.querySelector(".modal-pie .btn.verde"); bt.disabled = true;
+            try {
+              const datos = { id: d ? d.id : 0, clave: g("#pClave").toUpperCase(), titulo: g("#pTit"), tipo: g("#pTipo"), area: g("#pArea"), rev: g("#pRev"), fecha: g("#pFecha"), nota: g("#pNota"), paginas, anexos: ax };
+              if (textos) datos.textos = textos;
+              const res = await B.api.op("proc", "guardar", datos);
+              if (buf) {
+                const up = await (await fetch("/api/procarchivo?id=" + res.id, { method: "POST", headers: { "X-Token": B.token, "Content-Type": "application/pdf" }, body: buf })).json();
+                if (!up.ok) throw new Error(up.error || "No se pudo guardar el archivo.");
+              }
+            } catch (err) { bt.disabled = false; B.ui.error(err); return false; }
+          }, v: true
+        }]
+      });
+      if (!r) return;
+      PR.textos = null;
+      await B.api.recargar();
+      B.ui.toast(d ? "Documento actualizado." : "Documento subido. Ya se puede consultar.", "ok");
+      if (B.app.ruta === "procedimientos") B.app.render();
     }
   };
 })();
@@ -4697,7 +4923,10 @@ V.hoja = {
       const ap = (this.datos.cfg.apodos || {})[ini]; if (ap) return ap;
       const p = B.dom.persona(ini); if (!p) return ini;
       const w = p.nombre.trim().split(/\s+/), rep = B.estado.personal.filter(q => U.norm(q.nombre.trim().split(/\s+/)[0]) === U.norm(w[0])).length > 1;
-      return w[0] + (rep && w[1] ? " " + w[1][0].toUpperCase() + "." : "");
+      if (!rep || !w[1]) return w[0];
+      // si tambien coincide la inicial siguiente (dos "Carlos E."), se usa la segunda palabra completa
+      const igual = B.estado.personal.filter(q => { const x = q.nombre.trim().split(/\s+/); return U.norm(x[0]) === U.norm(w[0]) && x[1] && U.norm(x[1][0]) === U.norm(w[1][0]); }).length > 1;
+      return w[0] + " " + (igual ? w[1] : w[1][0].toUpperCase() + ".");
     },
     cuenta() {
       const ini0 = this.inicio(), m = new Map();
@@ -4725,8 +4954,11 @@ V.hoja = {
     /* ------------------------------------------------------------ mensaje para WhatsApp */
     mensaje(f, t) {
       const cfg = this.datos.cfg, noche = t === "T1", fm = noche ? U.sumar(f, -1) : f, [y, m, d] = fm.split("-");
-      const gente = this.tecnicos().filter(i => this.turnoDe(i, f) === t), hoy = new Map(), cta = this.cuenta();
-      for (const x of this.datos.decl) if (x.f === f && x.t === t && x.est === "C") hoy.set(U.ini(x.ini), (hoy.get(U.ini(x.ini)) || 0) + 1);
+      // en el mensaje solo aparece el personal que participa en la competencia (por omision los eventuales C-42);
+      // a los demas se les sigue llevando su cuenta en el marcador
+      const participa = i => { const p = B.dom.persona(i); return !!p && this.msgCats().includes(B.dom.catOrden(p.cat)); };
+      const gente = this.tecnicos().filter(i => this.turnoDe(i, f) === t && participa(i)), hoy = new Map(), cta = this.cuenta();
+      for (const x of this.datos.decl) if (x.f === f && x.t === t && x.est === "C" && participa(U.ini(x.ini))) hoy.set(U.ini(x.ini), (hoy.get(U.ini(x.ini)) || 0) + 1);
       const orden = l => B.dom.ordenados(l), nom = i => this.apodo(i);
       const hechas = orden([...hoy.keys()]).map(i => `- ${nom(i)} x${hoy.get(i)}`);
       const faltan = orden(gente.filter(i => !hoy.has(i))).map(i => `- ${nom(i)}`);
@@ -4738,6 +4970,7 @@ V.hoja = {
       return `*TARJETAS REALIZADAS TURNO DE ${noche ? "NOCHE" : "DÍA"} ${d}.${m}.${y}*\n\n*REALIZADAS HOY:* ✅\n\n${hechas.join("\n") || "- (ninguna todavía)"}\n\n*PENDIENTE:* ❌\n\n${faltan.join("\n") || "- Nadie, ¡turno completo! 👏"}\n\n` +
         `👨🏻‍🚒 *TARJETAS ACUMULADAS* 🎉:\n${ac || "- Aún sin tarjetas confirmadas\n"}\n${cierre}`;
     },
+    msgCats() { const c = this.datos.cfg.msgCats; return Array.isArray(c) && c.length ? c.map(Number) : [2]; },      // 1 base/temporal, 2 C-42, 3 especializados
     CIERRE: "Vamos equipo, ustedes pueden, por favor no olviden generar sus tarjetas, iré llevando un acumulado para ver quién resulta el más rifado del team 😎👊🏻. Aún es poca la diferencia así que ánimo para todos, cualquiera puede ser el vencedor.\n\nGracias a todos por su colaboración. 🤝",
 
     /* ------------------------------------------------------------ sugerencias para la E+1
@@ -4971,7 +5204,7 @@ V.hoja = {
     },
     async whats() {
       const { f, t } = B.app.trabajo;
-      await modalMsg("Mensaje para WhatsApp", `Turno <b>${t} ${esc(B.t.nombre(t))} · ${U.corta(f)}</b>. Solo cuentan las tarjetas confirmadas. Puedes corregir el texto antes de copiarlo.`, TJ.mensaje(f, t));
+      await modalMsg("Mensaje para WhatsApp", `Turno <b>${t} ${esc(B.t.nombre(t))} · ${U.corta(f)}</b>. Aparece solo el personal <b>${TJ.msgCats().map(n => ["", "de base/temporal", "eventual C-42", "especializado"][n]).join(", ")}</b> (se cambia en Ajustes). Puedes corregir el texto antes de copiarlo.`, TJ.mensaje(f, t));
     },
 
     /* ------------------------------------------------------------ MIS TARJETAS */
@@ -5167,6 +5400,8 @@ V.hoja = {
       c.innerHTML = `<div class="tarjeta">${cab("engrane", "g", "Marcador", "Desde cuándo se acumula y cómo se llama a cada quien en el mensaje de WhatsApp.")}
           <div class="fila"><div class="campo" style="flex:0 0 200px"><label>El marcador cuenta desde</label><input class="inp" type="date" id="aIni" value="${esc(TJ.inicio())}"><span class="ayuda">Cámbialo para reiniciar el marcador.</span></div>
             <div class="campo"><label>Técnicos especializados (encargados de la E+1 y de las tarjetas)</label><input class="inp" id="aEd" value="${esc(D.editores.join(", "))}" placeholder="Iniciales separadas por coma" ${B.dom.esAdmin() ? "" : "readonly"}><span class="ayuda">Iniciales de la plantilla. El rol lo asigna el administrador (también en Usuarios). Ven todas las tarjetas, las marcan y generan la presentación. También tienen <b>permiso para entrar a la versión de celular</b> (con el siguiente paquete de datos).</span></div></div>
+          <div class="campo"><label>Quién aparece en el mensaje de WhatsApp</label><div class="tj-cats">${[[2, "Eventuales C-42"], [1, "Base / Temporal"], [3, "Especializados"]].map(([n, t]) => `<label><input type="checkbox" data-cat="${n}" ${TJ.msgCats().includes(n) ? "checked" : ""}> ${t}</label>`).join("")}</div>
+            <span class="ayuda">El marcador lleva la cuenta de todos; el mensaje solo nombra a los que participan en la competencia.</span></div>
           <div class="campo"><label>Cierre del mensaje de WhatsApp</label><textarea class="inp" id="aCierre" style="min-height:110px">${esc(cfg.cierre || TJ.CIERRE)}</textarea></div>
           <label style="font-size:12px;font-weight:600;color:var(--texto-2)">Nombre corto de cada técnico</label>
           <div class="tj-apodos">${tec.map(i => `<label><span>${esc(B.dom.nombre(i))}</span><input class="inp" data-ap="${i}" value="${esc(TJ.apodo(i))}"></label>`).join("")}</div>
@@ -5177,7 +5412,7 @@ V.hoja = {
         const apodos = {}; c.querySelectorAll("[data-ap]").forEach(i => { const v = i.value.trim(); if (v) apodos[i.dataset.ap] = v; });
         const editores = c.querySelector("#aEd").value.split(/[,;\s]+/).map(U.ini).filter(Boolean), malos = editores.filter(i => !B.dom.persona(i));
         if (malos.length) return B.ui.toast("Iniciales que no están en la plantilla: <b>" + esc(malos.join(", ")) + "</b>", "error");
-        try { await TJ.llamar("cfgGuardar", { cfg: Object.assign({}, cfg, { inicio: c.querySelector("#aIni").value, cierre: c.querySelector("#aCierre").value.trim(), apodos, editores }) }); B.ui.toast("Ajustes guardados.", "ok"); await this.recarga(); }
+        try { await TJ.llamar("cfgGuardar", { cfg: Object.assign({}, cfg, { inicio: c.querySelector("#aIni").value, cierre: c.querySelector("#aCierre").value.trim(), apodos, editores, msgCats: [...c.querySelectorAll("[data-cat]:checked")].map(x => +x.dataset.cat) }) }); B.ui.toast("Ajustes guardados.", "ok"); await this.recarga(); }
         catch (e) { B.ui.error(e); }
       };
       if (!B.dom.esSup()) c.querySelector(".tarjeta").remove();      // el tecnico especializado administra las semanas, no los ajustes del marcador
@@ -6114,7 +6349,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "3.3", servidorViejo: false,
+  info: {}, VERSION: "3.4", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -6285,7 +6520,7 @@ B.app = {
     const enlaces = [
       ["MI TURNO", [["inicio", "Inicio", "inicio"], ["actividades", "Mis actividades", "lista"], ["horasextra", sup ? "Horas extra (captura)" : "Mis horas extra", "calendario"], ["espacios", "Espacios confinados", "escudo"], ["monitoreo", "Monitoreo de E.C.", "reloj"],
         ["vigilancias", "Vigilancias C.I.", "fuego"], ["pendientes", sup ? "Pendientes (todos)" : "Mis pendientes", "reloj"], ["historial", sup ? "Historial por persona" : "Mi historial", "historial"], ["oficio", sup ? "Oficios de tiempo extra" : "Mi oficio de tiempo extra", "doc"]]],
-      ["CONSULTA", [["concentrados", "Concentrados", "doc"], ["poe", "Estándares POE", "buscar"]].concat(B.modoLocal && !B.modoMovil ? [] : [["tarjetas", "Líderes en Campo", "trofeo"]]).concat(!sup && B.modoMovil ? [["celular", "Enviar / recibir", "subir"]] : []).concat(sup ? [["registros", "Registros del personal", "usuarios"], ["celular", B.modoMovil ? "Enviar / recibir" : "Celulares", "subir"]] : [])]
+      ["CONSULTA", [["concentrados", "Concentrados", "doc"], ["poe", "Estándares POE", "buscar"]].concat(B.modoLocal ? [] : [["procedimientos", "Procedimientos", "doc"]]).concat(B.modoLocal && !B.modoMovil ? [] : [["tarjetas", "Líderes en Campo", "trofeo"]]).concat(!sup && B.modoMovil ? [["celular", "Enviar / recibir", "subir"]] : []).concat(sup ? [["registros", "Registros del personal", "usuarios"], ["celular", B.modoMovil ? "Enviar / recibir" : "Celulares", "subir"]] : [])]
     ];
     if (sup) {
       enlaces.push(["SUPERVISIÓN", [["turno", "Datos del turno", "usuarios"], ["reporte", "Reporte del turno", "pdf"], ["hoja", "Hoja de asignación", "doc"], ["asistencia", "Asistencia y horas extra", "calendario"]]]);
@@ -6297,7 +6532,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "3.3")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "3.4")}</div>
         </aside>
         <div class="principal">
           <header class="barra">

@@ -431,6 +431,14 @@ mark.kr { background: #FBD9D5; color: #8C1D15; } mark.ke { background: #FCE9B8; 
 .tj-ficha mark { cursor: pointer; } .tj-leyenda span { margin-left: 2px; }
 .tj-poe { margin: 0 0 12px; padding: 10px 14px; border-radius: 10px; background: var(--azul-claro); border-left: 4px solid var(--azul); font-size: 13px; line-height: 1.55; } .tj-poe > b { color: var(--azul); }
 .tj-poe p { margin: 8px 0 0; } .tj-poe p > span { display: block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; color: var(--texto-2); } .tj-poe mark { background: #FFE58A; padding: 0 2px; border-radius: 3px; }
+.tj-cats { display: flex; gap: 6px 18px; flex-wrap: wrap; font-size: 13px; } .tj-cats label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+/* === PROCEDIMIENTOS (documentos PDF que suben los supervisores) === */
+.pr-doc { padding: 16px 18px; margin-bottom: 12px; } .pr-cab { display: flex; align-items: center; gap: 8px 10px; flex-wrap: wrap; }
+.pr-clave { padding: 4px 10px; border-radius: 8px; background: var(--guinda); color: #fff; font-weight: 700; font-size: 12.5px; white-space: nowrap; } .pr-cab > b { font-size: 14.5px; flex: 1 1 260px; min-width: 0; }
+.pr-meta { margin: 6px 0 10px; font-size: 12px; color: var(--texto-3); } .pr-acc { display: flex; gap: 8px; flex-wrap: wrap; }
+.pr-anexos { margin-top: 10px; border-top: 1px solid #F0ECE8; padding-top: 8px; } .pr-anexos > div { display: flex; align-items: center; gap: 10px; padding: 5px 2px; font-size: 13px; flex-wrap: wrap; } .pr-anexos > div > span { flex: 1 1 200px; } .pr-anexos small { color: var(--texto-3); }
+.pr-hist { margin-top: 10px; font-size: 12.5px; } .pr-hist summary { cursor: pointer; font-weight: 600; color: var(--texto-2); } .pr-hist > div { display: flex; gap: 10px; align-items: center; padding: 5px 2px; flex-wrap: wrap; }
+.pr-ax { display: grid; grid-template-columns: 1fr 76px 76px 34px; gap: 6px; align-items: center; margin-bottom: 6px; } .pr-ax .inp { padding: 7px 9px; }
 /* === ESTANDARES POE (consulta) === */
 .poe-q { font-size: 16px; padding: 13px 14px; }
 .poe-docs { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 8px; }
