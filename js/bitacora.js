@@ -754,7 +754,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "3.0", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "3.1", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -850,7 +850,8 @@ B.local = {
         return fin();
       }
       case "declarar": {
-        const ini = U.ini(sup && b.ini ? b.ini : s.ini), f = String(b.f || ""), t = b.t; let nota = String(b.nota || "").trim().slice(0, 300);
+        if (!sup) throw new Error("El marcador lo lleva el supervisor: mándale por WhatsApp la captura de tu tarjeta.");
+        const ini = U.ini(b.ini || s.ini), f = String(b.f || ""), t = b.t; let nota = String(b.nota || "").trim().slice(0, 300);
         if (!/^\d{4}-\d{2}-\d{2}$/.test(f) || isNaN(U.fecha(f)) || (t !== "T1" && t !== "T2")) throw new Error("Fecha o turno no válidos.");
         if (!(await this.leer("personal") || []).some(p => U.ini(p.ini) === ini)) throw new Error("Persona no encontrada: " + ini);
         if (!sup) {
@@ -4759,14 +4760,14 @@ V.hoja = {
         const fila = (r, fuera) => {
             const p = B.dom.persona(r.ini);
             return `<div class="tj-fila ${r.ini === yo ? "yo" : ""} ${!fuera && r.pos && r.pos <= 3 ? "top" + r.pos : ""}">${fuera ? `<span class="tj-pos">${r.n ? (R.indexOf(r) + 1) + "º" : "–"}</span>` : medalla(r.pos)}
-              <div class="tj-nom"><b>${esc(p.nombre)}</b><small>${esc(B.dom.catCorta(p.cat))}${r.p && (sup || r.ini === yo) ? ` · <span style="color:#8a6526">${r.p} por confirmar</span>` : ""}${sup ? `<span class="tj-xl"> · en Excel: ${TJ.enExcel(r.ini)}</span>` : ""}</small></div>
+              <div class="tj-nom"><b>${esc(p.nombre)}</b><small>${esc(B.dom.catCorta(p.cat))}${r.p && (sup || r.ini === yo) ? ` · <span style="color:#8a6526">${r.p} por confirmar</span>` : ""}${sup ? `<span class="tj-xl" title="Tarjetas a su nombre en los Excel cargados (informativo)"> · en Excel: ${TJ.enExcel(r.ini)}</span>` : ""}</small></div>
               <div class="tj-barra"><i style="width:${Math.round(r.n / max * 100)}%"></i></div><b class="tj-n">${r.n}</b>
               ${sup ? `<span class="tj-pm"><button class="btn sec btn-icono" data-menos="${r.ini}" title="Quitar una tarjeta" ${r.n ? "" : "disabled"}>−</button><button class="btn sec btn-icono" data-mas="${r.ini}" title="Agregar una tarjeta confirmada en ${turnoTxt(f, t)}">+</button></span>` : ""}</div>`;
         };
         return `<div class="tarjeta c6 tj-col ${tt === "T1" ? "noche" : "dia"}">${cab(tt === "T1" ? "reloj" : "inicio", tt === "T1" ? "a" : "d", titulo + " · TOP 5", R.filter(r => r.n).length + " de " + R.length + " con tarjetas · " + R.reduce((s, r) => s + r.n, 0) + " en total")}
           <div class="tj-rank">${top.map(r => fila(r)).join("") || B.ui.vacio("Aún nadie de este turno tiene tarjetas confirmadas.", "trofeo")}</div>
           ${mio ? `<div class="tj-tu"><span>Tu lugar</span><div class="tj-rank">${fila(mio, true)}</div></div>` : ""}
-          ${sup && resto.length ? `<details class="tj-resto"><summary>Resto del turno (${resto.length}) · para ajustar con + y −</summary><div class="tj-rank">${resto.map(r => fila(r, true)).join("")}</div></details>`
+          ${sup && resto.length ? `<details class="tj-resto" open><summary>Resto del turno (${resto.length})</summary><div class="tj-rank">${resto.map(r => fila(r, true)).join("")}</div></details>`
             : !sup && resto.length ? `<p class="muted peque" style="margin:10px 0 0">Aparecen los 5 que más tarjetas llevan.${mio ? "" : top.some(r => r.ini === yo) ? " ¡Estás en el TOP!" : ""}</p>` : ""}</div>`;
       };
       const pend = D.decl.filter(d => d.est === "P").sort((a, b) => (a.f + a.t).localeCompare(b.f + b.t));
@@ -4774,14 +4775,14 @@ V.hoja = {
       c.innerHTML = `<div class="cuadricula">
         <div class="tarjeta c12 tj-hero">
           <div class="tj-hero-txt">${sup
-            ? `<h2>Marcador del equipo</h2><p>Los técnicos registran aquí cada tarjeta que envían y tú la <b>confirmas contra su captura</b> de Microsoft Forms. Solo las confirmadas cuentan. Con <b>+</b> y <b>−</b> ajustas a mano.</p>`
-            : `<h2>${mio.c ? `Llevas ${mio.c} tarjeta${mio.c === 1 ? "" : "s"}${posYo && posYo.pos ? ` · ${posYo.pos}.º lugar de tu turno` : ""}` : "Aún no tienes tarjetas confirmadas"}</h2>
-               <p>Al enviar tu tarjeta en Microsoft Forms, <b>regístrala aquí</b> y manda tu captura al supervisor. Cuenta en el marcador cuando el supervisor la confirma.${mio.p ? ` Tienes <b>${mio.p} por confirmar</b>.` : ""}</p>`}
+            ? `<h2>Marcador del equipo</h2><p>Suma con <b>+</b> (o quita con <b>−</b>) las tarjetas de cada técnico conforme te manden su captura por WhatsApp; se anotan en el turno elegido arriba (<b>${turnoTxt(f, t)}</b>). El dato <b>«en Excel»</b> es solo informativo: cuántas tarjetas a su nombre vienen en los archivos cargados, para cotejar que no se repitan capturas ni se cuenten tarjetas que no existen.</p>`
+            : `<h2>${mio.c ? `Llevas ${mio.c} tarjeta${mio.c === 1 ? "" : "s"}${posYo && posYo.pos ? ` · ${posYo.pos}.º lugar de tu turno` : ""}` : "Aún no tienes tarjetas en el marcador"}</h2>
+               <p>Envía tu tarjeta en Microsoft Forms y manda la <b>captura por WhatsApp</b> al supervisor: él la suma al marcador. Aquí no tienes que registrar nada.</p>`}
             <p class="muted peque" style="margin:6px 0 0">Acumulado desde el ${U.corta(TJ.inicio())} · TOP 5 de cada turno · solo técnicos de la plantilla (sin supervisores).</p></div>
           <div class="tj-hero-btn">${sup ? `<button class="btn verde" id="tjWa">${B.ico("subir")} Mensaje para WhatsApp</button>` : ""}
-            ${sup ? "" : `<button class="btn" id="tjReg">${B.ico("mas")} Registrar mi tarjeta · ${turnoTxt(f, t)}</button>`}</div>
+</div>
         </div>
-        ${sup && pend.length ? `<div class="tarjeta c12">${cab("reloj", "d", "Por confirmar (" + pend.length + ")", "Revisa la captura que te mandó cada técnico antes de confirmar.", `<button class="btn chico verde" id="tjConfTodas">${B.ico("ok")} Confirmar todas</button>`)}
+        ${sup && pend.length ? `<div class="tarjeta c12">${cab("reloj", "d", "Por confirmar (" + pend.length + ")", "Registros que hicieron los técnicos con una versión anterior. Confírmalos o márcalos como no válidos.", `<button class="btn chico verde" id="tjConfTodas">${B.ico("ok")} Confirmar todas</button>`)}
           <div class="tj-pend">${pend.map(d => `<div><div class="tj-pend-t"><b>${esc(B.dom.nombre(d.ini))}</b><span>${turnoTxt(d.f, d.t)}${d.nota ? " · " + esc(d.nota) : ""}</span><small>registrada ${U.fh(d.reg)}</small></div>
             <div class="tj-pend-b"><button class="btn chico verde" data-conf="${esc(d.uid)}">${B.ico("ok")} Confirmar</button><button class="btn chico peligro" data-rech="${esc(d.uid)}">No válida</button></div></div>`).join("")}</div></div>` : ""}
         ${col("T2", "Turno de día")}${col("T1", "Turno de noche")}
@@ -4823,10 +4824,10 @@ V.hoja = {
     /* ------------------------------------------------------------ MIS TARJETAS */
     async t_mias(c) {
       const yo = U.ini(B.usuario.ini), D = TJ.datos, mias = D.decl.filter(d => U.ini(d.ini) === yo).sort((a, b) => b.id - a.id);
-      c.innerHTML = `<div class="tarjeta">${cab("lista", "g", "Tarjetas que registré", "Lo que has declarado en la bitácora y si el supervisor ya lo confirmó.")}
+      c.innerHTML = `<div class="tarjeta">${cab("lista", "g", "Mis tarjetas en el marcador", "Las que el supervisor te ha contado con las capturas que le mandaste.")}
         ${mias.length ? `<div class="tabla-cont"><table class="tabla"><thead><tr><th>Turno</th><th>Tarjeta</th><th>Estado</th><th></th></tr></thead><tbody>${mias.map(d => `<tr><td>${turnoTxt(d.f, d.t)}</td><td>${esc(d.nota || "—")}</td>
           <td><span class="badge ${EST[d.est][0]}">${EST[d.est][1]}</span>${d.est === "R" && d.motivo ? ` <span class="muted peque">${esc(d.motivo)}</span>` : ""}</td>
-          <td style="text-align:right">${d.est === "P" ? `<button class="btn fantasma btn-icono" data-borra="${esc(d.uid)}" title="Borrar">${B.ico("basura")}</button>` : ""}</td></tr>`).join("")}</tbody></table></div>` : B.ui.vacio("Todavía no registras tarjetas. Hazlo desde la pestaña Marcador.")}</div>
+          <td></td></tr>`).join("")}</tbody></table></div>` : B.ui.vacio("Todavía no tienes tarjetas en el marcador. Manda tu captura por WhatsApp al supervisor.")}</div>
         <div class="tarjeta">${cab("doc", "v", "Mis tarjetas en los reportes de Desempeño Humano", "Las que aparecen a tu nombre en los archivos semanales que carga el supervisor (solo las relacionadas con Seguridad Industrial o alta energía).")}<div id="tjMias"><div class="vacio"><span class="giro" style="display:inline-block"></span></div></div></div>`;
       c.querySelectorAll("[data-borra]").forEach(b => b.onclick = async () => { try { await TJ.llamar("declBorrar", { uid: b.dataset.borra }); await this.recarga(); } catch (e) { B.ui.error(e); } });
       if (!TJ.mias) TJ.mias = (await TJ.llamar("mias")).tarjetas;
@@ -5946,7 +5947,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "3.0", servidorViejo: false,
+  info: {}, VERSION: "3.1", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -6129,7 +6130,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "3.0")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "3.1")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
