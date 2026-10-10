@@ -152,6 +152,7 @@ B.dom = {
     this.idx.cambios = (e.cambios || []).filter(c => c.ini && c.desde && c.turno);
   },
   esSup() { return B.usuario && B.usuario.rol === "supervisor"; },
+  esAdmin() { return this.esSup() && !!B.usuario.admin; },      // supervisor administrador: unico que cambia plantilla, catalogos, configuracion y roles
   persona(ini) { return this.idx.personal.get(U.ini(ini)); },
   nombre(ini) { const p = this.persona(ini); return p ? p.nombre : ini; },
   catOrden(cat) {
@@ -753,7 +754,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "2.9", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "3.0", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -805,7 +806,7 @@ B.local = {
     };
     switch (acc) {
       case "ver": {
-        const r = { ok: true, editor: ed, editores: eds, cfg: T.cfg };
+        const r = { ok: true, editor: ed, esp: ed && !sup, editores: eds, cfg: T.cfg };
         if (ed) Object.assign(r, { decl: T.decl, marcas: T.marcas, sem: T.sem, hist: T.hist, semanas: T.semanas });
         else r.decl = T.decl.filter(x => U.ini(x.ini) === s.ini || x.est === "C").map(x => U.ini(x.ini) === s.ini ? x : { ini: x.ini, f: x.f, t: x.t, est: "C" });
         return r;
@@ -834,8 +835,16 @@ B.local = {
         T.semanas[sem] = { n: L.length, si: L.filter(x => String(x.fu || "").includes("SI")).length, ae: L.filter(x => String(x.fu || "").includes("AE")).length, fh: ahora(), por: s.ini, rpes };
         return fin({ nuevas, actualizadas: act, total: L.length });
       }
+      case "rolEsp": {
+        soloSup();
+        const ie = U.ini(b.ini), pe = (await this.leer("personal") || []).find(x => U.ini(x.ini) === ie);
+        if (!pe) throw new Error("Persona no encontrada: " + ie);
+        if (this.rolDe(pe) === "supervisor") throw new Error("Un supervisor ya tiene todos los permisos.");
+        T.cfg.editores = eds.filter(x => x !== ie).concat(b.on ? [ie] : []);
+        return fin({ editores: T.cfg.editores });
+      }
       case "semBorrar": {
-        soloSup(); semOk();
+        soloEd(); semOk();
         await this.escribir("tarjetas_" + sem, []); delete T.semanas[sem];
         for (const k of Object.keys(T.marcas)) if ((T.marcas[k] || {}).sem === sem) delete T.marcas[k];
         return fin();
@@ -971,6 +980,8 @@ B.local = {
   async estado(s) {
     const db = await this.cargar(), sup = s.rol === "supervisor";
     const u = db.usuarios.find(x => U.ini(x.rpe) === s.rpe);
+    const tjL = (await this.leer("tarjetas")) || {}, esps = (((tjL.cfg || {}).editores) || []).map(U.ini);
+    const admins = (db.config.admins || []).map(U.ini), hayAdm = db.personal.some(p => this.rolDe(p) === "supervisor" && U.norm(p.activo) !== "NO" && admins.includes(U.ini(p.rpe)));
     const mias = a => U.ini(a.ini) === s.ini;
     const sug = new Map();
     for (const a of db.actividades) {
@@ -979,9 +990,9 @@ B.local = {
       const e = sug.get(k); e.n++; if (mias(a)) e.mia = true;
     }
     return {
-      ok: true, usuario: this.infoUsuario(s, u), config: db.config, catalogos: db.catalogos, imgVer: (db.imagenes && db.imagenes.ver) || "", personal: db.personal, cambios: db.cambios,
+      ok: true, usuario: Object.assign(this.infoUsuario(s, u), { esp: !sup && esps.includes(s.ini), admin: sup && (admins.includes(s.rpe) || !hayAdm) }), especializados: sup ? esps : undefined, admins: sup ? admins : undefined, config: db.config, catalogos: db.catalogos, imgVer: (db.imagenes && db.imagenes.ver) || "", personal: db.personal, cambios: db.cambios,
       ec: db.ec, vig: db.vig, actividades: sup ? db.actividades : db.actividades.filter(a => mias(a) || !a.ini), he: sup ? db.he : db.he.filter(mias),
-      turnos: sup ? db.turnos : [], hojas: db.hojas || [], tarjPend: sup ? (((await this.leer("tarjetas")) || {}).decl || []).filter(x => x.est === "P").length : undefined,
+      turnos: sup ? db.turnos : [], hojas: db.hojas || [], tarjPend: sup ? (tjL.decl || []).filter(x => x.est === "P").length : undefined,
       equipo: sup ? undefined : db.actividades.filter(a => a.ini && !mias(a) && (a.est === "Pendiente" || a.est === "En proceso" || a.fecha >= U.sumar(U.iso(new Date()), -3))),
       sugerencias: [...sug.values()].sort((a, b) => (b.mia - a.mia) || (b.n - a.n)).slice(0, 1500),
       usuarios: sup ? db.usuarios.map(x => ({ rpe: x.rpe, rol: x.rol, cambiada: !!x.cambiada, ultimo: x.ultimo || "", ofCat: x.ofCat || "", ofTit: x.ofTit || "", ofDepto: x.ofDepto || "" })) : undefined,
@@ -1508,7 +1519,7 @@ B.local = {
       }
       case "catalogos.reemplazar": soloSup(); await this.escribir("catalogos", d.catalogos || {}); return { ok: true };
       case "catalogos.agregar": { const cat = await this.leer("catalogos") || {}; if (this.agregarCatalogo(cat, d.tipo, d.texto, d.item)) await this.escribir("catalogos", cat); return { ok: true }; }
-      case "config.guardar": { soloSup(); const ant = (await this.leer("config")) || {}, c = d.config || {}; for (const k of ["recibidos", "cargas"]) if (k in ant) c[k] = ant[k]; await this.escribir("config", c); return { ok: true }; }
+      case "config.guardar": { soloSup(); const ant = (await this.leer("config")) || {}, c = d.config || {}; for (const k of ["recibidos", "cargas", "admins"]) if (k in ant) c[k] = ant[k]; await this.escribir("config", c); return { ok: true }; }
       case "intercambio.registrar": {
         const c = (await this.leer("config")) || {}; let l = (c.recibidos || []).map(String);
         for (const u of d.uids || []) { const x = String(u); if (x && x.length <= 40 && !l.includes(x)) l.push(x); }
@@ -3285,7 +3296,8 @@ V.personal = {
   titulo: "Personal y turnos", sup: true, tab: "personal",
   render(c) {
     const cats = ["TÉCNICOS DE BASE/TEMPORAL", "TÉCNICOS DE C-42", "TÉCNICOS ESPECIALIZADOS", "SUPERVISORES"];
-    c.innerHTML = `<div class="tarjeta"><div class="pestanas"><button data-tab="personal" class="${this.tab === "personal" ? "on" : ""}">Personal (${B.estado.personal.length})</button>
+    const adm = B.dom.esAdmin(); if (!adm) this.tab = "cambios";       // la plantilla la modifica solo el administrador
+    c.innerHTML = `<div class="tarjeta"><div class="pestanas"><button data-tab="personal" class="${this.tab === "personal" ? "on" : ""} ${adm ? "" : "oculto"}">Personal (${B.estado.personal.length})</button>
       <button data-tab="cambios" class="${this.tab === "cambios" ? "on" : ""}">Cambios de turno (${B.estado.cambios.length})</button></div><div id="pCont"></div></div>`;
     c.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => { this.tab = b.dataset.tab; B.app.render(); });
     const cont = c.querySelector("#pCont");
@@ -3352,7 +3364,7 @@ V.personal = {
 
 /* ===================================================================== CATALOGOS */
 V.catalogos = {
-  titulo: "Catálogos", sup: true, tab: "espacios",
+  titulo: "Catálogos", sup: true, admin: true, tab: "espacios",
   render(c) {
     const cat = B.estado.catalogos;
     const tabs = [["espacios", "Espacios confinados"], ["vigilancias", "Vigilancias C.I."], ["difusion", "Mensajes de difusión"]];
@@ -3385,14 +3397,26 @@ V.catalogos = {
 V.usuarios = {
   titulo: "Usuarios", sup: true,
   render(c) {
-    const us = new Map((B.estado.usuarios || []).map(u => [u.rpe, u]));
+    const us = new Map((B.estado.usuarios || []).map(u => [u.rpe, u])), esp = new Set((B.estado.especializados || []).map(U.ini)), adms = new Set((B.estado.admins || []).map(U.ini)), adm = B.dom.esAdmin(), conTj = (!B.modoLocal || B.modoMovil) && adm;
     c.innerHTML = `<div class="tarjeta">${cab("llave", "g", "Usuarios y contraseñas", "Usuario = RPE. Contraseña inicial: RPE + iniciales (supervisores: 24RU1). Cada quien la cambia desde su menú.")}
+      ${adm ? `<div class="aviso d">${B.ico("llave")}<div><b>Administrador:</b> supervisor con acceso a todo. Solo el administrador cambia la plantilla de personal, los catálogos, la configuración, las imágenes de los formatos y los roles, y restaura respaldos. Los demás supervisores conservan la operación diaria (turno, reportes, hoja de asignación, cambios de turno y restablecer contraseñas).</div></div>` : ""}
+      ${conTj ? `<div class="aviso a">${B.ico("info")}<div><b>Técnico especializado:</b> técnico encargado de la <b>E+1</b> y de revisar las <b>tarjetas Líderes en Campo</b>. En esa sección puede lo mismo que un supervisor (cargar los Excel, marcar o descartar tarjetas, borrar semanas y generar la presentación) y entra a la versión de celular. No confirma ni ajusta el marcador, y en el resto de la bitácora sigue siendo técnico.</div></div>` : ""}
       <div class="tabla-cont"><table class="tabla"><thead><tr><th>RPE</th><th>Iniciales</th><th>Nombre</th><th>Rol</th><th>Contraseña</th><th>Último acceso</th><th></th></tr></thead><tbody>
       ${B.dom.ordenados(B.estado.personal.map(p => p.ini)).map(i => { const p = B.dom.persona(i), u = us.get(U.ini(p.rpe)) || {};
         return `<tr><td class="tnum"><b>${U.esc(p.rpe)}</b></td><td>${U.esc(p.ini)}</td><td>${U.esc(p.nombre)}${U.norm(p.activo) === "NO" ? ' <span class="badge n">Inactivo</span>' : ""}</td>
-        <td>${u.rol === "supervisor" ? '<span class="badge g">Supervisor</span>' : '<span class="badge n">Técnico</span>'}</td>
+        <td>${u.rol === "supervisor" ? (adms.has(U.ini(p.rpe)) ? '<span class="badge d">Administrador</span>' : '<span class="badge g">Supervisor</span>') : esp.has(U.ini(p.ini)) ? '<span class="badge a">Técnico especializado</span>' : '<span class="badge n">Técnico</span>'}</td>
         <td>${u.cambiada ? '<span class="badge v">Personalizada</span>' : '<span class="badge d">Inicial</span>'}</td><td class="muted tnum">${U.esc((u.ultimo || "").replace("T", " ").slice(0, 16))}</td>
-        <td class="acc"><button class="btn chico sec" data-rpe="${U.esc(p.rpe)}">Restablecer</button></td></tr>`; }).join("")}</tbody></table></div></div>`;
+        <td class="acc">${adm && !B.modoLocal && u.rol === "supervisor" && U.norm(p.activo) !== "NO" && U.ini(p.rpe) !== U.ini(B.usuario.rpe) ? `<button class="btn chico fantasma" data-adm="${U.esc(p.rpe)}" data-on="${adms.has(U.ini(p.rpe)) ? "" : "1"}">${adms.has(U.ini(p.rpe)) ? "Quitar administrador" : "Hacer administrador"}</button> ` : ""}${conTj && u.rol !== "supervisor" && U.norm(p.activo) !== "NO" ? `<button class="btn chico fantasma" data-esp="${U.esc(p.ini)}" data-on="${esp.has(U.ini(p.ini)) ? "" : "1"}">${esp.has(U.ini(p.ini)) ? "Quitar rol especializado" : "Hacer especializado"}</button> ` : ""}<button class="btn chico sec" data-rpe="${U.esc(p.rpe)}">Restablecer</button></td></tr>`; }).join("")}</tbody></table></div></div>`;
+    c.querySelectorAll("[data-adm]").forEach(b => b.onclick = async () => {
+      const on = !!b.dataset.on;
+      if (!(await ui.confirmar(on ? `El supervisor con RPE <b>${U.esc(b.dataset.adm)}</b> tendrá acceso a todo, igual que tú.` : `El supervisor con RPE <b>${U.esc(b.dataset.adm)}</b> dejará de ver Catálogos, Configuración y la plantilla de personal.`, on ? "Hacer administrador" : "Quitar administrador", on ? "Hacer administrador" : "Quitar"))) return;
+      await ejecutar(() => B.api.op("usuarios", "admin", { rpe: b.dataset.adm, on }), on ? "Ahora es administrador." : "Ya no es administrador.");
+    });
+    c.querySelectorAll("[data-esp]").forEach(b => b.onclick = async () => {
+      const on = !!b.dataset.on, nom = U.esc(B.dom.nombre(b.dataset.esp));
+      if (!(await ui.confirmar(on ? `<b>${nom}</b> podrá cargar los Excel, marcar tarjetas y generar la presentación E+1, y entrar a la versión de celular.` : `<b>${nom}</b> volverá a ser técnico: solo verá el marcador y sus propias tarjetas.`, on ? "Técnico especializado" : "Quitar rol especializado", on ? "Dar el rol" : "Quitar el rol"))) return;
+      try { await B.api.llamar("tarjetas", { accion: "rolEsp", ini: b.dataset.esp, on }); await B.app.refrescar(); ui.toast(on ? "Rol asignado. Entra en vigor la próxima vez que inicie sesión o recargue la página." : "Rol retirado.", "ok"); } catch (e) { ui.error(e); }
+    });
     c.querySelectorAll("[data-rpe]").forEach(b => b.onclick = async () => {
       if (!(await ui.confirmar(`¿Restablecer la contraseña de ${U.esc(b.dataset.rpe)} a la contraseña inicial?`, "Restablecer contraseña", "Restablecer"))) return;
       await ejecutar(() => B.api.op("usuarios", "restablecer", { rpe: b.dataset.rpe }), r => "Contraseña restablecida. Contraseña inicial: <b>" + U.esc(r.clave) + "</b>");
@@ -3402,7 +3426,7 @@ V.usuarios = {
 
 /* ===================================================================== CONFIGURACION Y RESPALDOS */
 V.config = {
-  titulo: "Configuración y respaldos", sup: true,
+  titulo: "Configuración y respaldos", sup: true, admin: true,
   /* Convierte la imagen a data URL; si es muy grande la reduce (max. 2600 px de ancho) */
   async reducir(f) {
     const url = await new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = no; r.readAsDataURL(f); });
@@ -4714,7 +4738,7 @@ V.hoja = {
     },
     pinta() {
       const c = this.c, D = TJ.datos, sup = B.dom.esSup(), comp = this.completa();
-      const tabs = [["marcador", "Marcador"], ["mias", "Mis tarjetas"]].concat(!D.editor ? [] : comp ? [["tend", "Tarjetas y tendencias"], ["e1", "Presentación E+1"]] : [["res", "Resumen"]]).concat(sup ? [["ajustes", "Ajustes"]] : []);
+      const tabs = [["marcador", "Marcador"], ["mias", "Mis tarjetas"]].concat(!D.editor ? [] : comp ? [["tend", "Tarjetas y tendencias"], ["e1", "Presentación E+1"]] : [["res", "Resumen"]]).concat(sup ? [["ajustes", "Ajustes"]] : D.editor && comp ? [["ajustes", "Semanas cargadas"]] : []);
       if (!tabs.some(x => x[0] === this.tab)) this.tab = this.tab === "tend" || this.tab === "e1" ? "res" : this.tab === "res" ? "tend" : "marcador";
       c.innerHTML = `${B.modoMovil && D.editor ? `<div class="tj-modo"><span>${comp ? "<b>Vista completa</b>: trabajo remoto con todas las funciones." : "<b>Vista resumida</b> para celular."}</span><a href="#" id="tjModo">${comp ? "Cambiar a la vista resumida" : "Usar la vista completa (trabajo remoto)"}</a></div>` : ""}
         <div class="pestanas">${tabs.map(([k, t]) => `<button data-t="${k}" class="${k === this.tab ? "on" : ""}">${t}</button>`).join("")}</div><div id="tjCuerpo"></div>`;
@@ -4728,16 +4752,22 @@ V.hoja = {
     t_marcador(c) {
       const D = TJ.datos, sup = B.dom.esSup(), yo = U.ini(B.usuario.ini), { f, t } = B.app.trabajo, cta = TJ.cuenta(), mio = cta.get(yo) || { c: 0, p: 0 };
       const max = Math.max(1, ...[...cta.values()].map(x => x.c));
+      // TOP 5 de cada turno (los que mas tarjetas confirmadas llevan). Quien no aparece ve aparte su propio lugar;
+      // el supervisor puede desplegar al resto del turno para ajustar con + y -.
       const col = (tt, titulo) => {
-        const R = TJ.ranking(tt, cta);
-        return `<div class="tarjeta c6 tj-col ${tt === "T1" ? "noche" : "dia"}">${cab(tt === "T1" ? "reloj" : "inicio", tt === "T1" ? "a" : "d", titulo, R.filter(r => r.n).length + " de " + R.length + " con tarjetas · " + R.reduce((s, r) => s + r.n, 0) + " en total")}
-          <div class="tj-rank">${R.map(r => {
+        const R = TJ.ranking(tt, cta), top = R.filter(r => r.n > 0).slice(0, 5), resto = R.filter(r => !top.includes(r)), mio = resto.find(r => r.ini === yo);
+        const fila = (r, fuera) => {
             const p = B.dom.persona(r.ini);
-            return `<div class="tj-fila ${r.ini === yo ? "yo" : ""} ${r.pos && r.pos <= 3 ? "top" + r.pos : ""}">${medalla(r.pos)}
+            return `<div class="tj-fila ${r.ini === yo ? "yo" : ""} ${!fuera && r.pos && r.pos <= 3 ? "top" + r.pos : ""}">${fuera ? `<span class="tj-pos">${r.n ? (R.indexOf(r) + 1) + "º" : "–"}</span>` : medalla(r.pos)}
               <div class="tj-nom"><b>${esc(p.nombre)}</b><small>${esc(B.dom.catCorta(p.cat))}${r.p && (sup || r.ini === yo) ? ` · <span style="color:#8a6526">${r.p} por confirmar</span>` : ""}${sup ? `<span class="tj-xl"> · en Excel: ${TJ.enExcel(r.ini)}</span>` : ""}</small></div>
               <div class="tj-barra"><i style="width:${Math.round(r.n / max * 100)}%"></i></div><b class="tj-n">${r.n}</b>
               ${sup ? `<span class="tj-pm"><button class="btn sec btn-icono" data-menos="${r.ini}" title="Quitar una tarjeta" ${r.n ? "" : "disabled"}>−</button><button class="btn sec btn-icono" data-mas="${r.ini}" title="Agregar una tarjeta confirmada en ${turnoTxt(f, t)}">+</button></span>` : ""}</div>`;
-          }).join("") || B.ui.vacio("Sin personal en este turno.")}</div></div>`;
+        };
+        return `<div class="tarjeta c6 tj-col ${tt === "T1" ? "noche" : "dia"}">${cab(tt === "T1" ? "reloj" : "inicio", tt === "T1" ? "a" : "d", titulo + " · TOP 5", R.filter(r => r.n).length + " de " + R.length + " con tarjetas · " + R.reduce((s, r) => s + r.n, 0) + " en total")}
+          <div class="tj-rank">${top.map(r => fila(r)).join("") || B.ui.vacio("Aún nadie de este turno tiene tarjetas confirmadas.", "trofeo")}</div>
+          ${mio ? `<div class="tj-tu"><span>Tu lugar</span><div class="tj-rank">${fila(mio, true)}</div></div>` : ""}
+          ${sup && resto.length ? `<details class="tj-resto"><summary>Resto del turno (${resto.length}) · para ajustar con + y −</summary><div class="tj-rank">${resto.map(r => fila(r, true)).join("")}</div></details>`
+            : !sup && resto.length ? `<p class="muted peque" style="margin:10px 0 0">Aparecen los 5 que más tarjetas llevan.${mio ? "" : top.some(r => r.ini === yo) ? " ¡Estás en el TOP!" : ""}</p>` : ""}</div>`;
       };
       const pend = D.decl.filter(d => d.est === "P").sort((a, b) => (a.f + a.t).localeCompare(b.f + b.t));
       const posYo = ["T1", "T2"].map(tt => TJ.ranking(tt, cta).find(r => r.ini === yo)).find(Boolean);
@@ -4747,7 +4777,7 @@ V.hoja = {
             ? `<h2>Marcador del equipo</h2><p>Los técnicos registran aquí cada tarjeta que envían y tú la <b>confirmas contra su captura</b> de Microsoft Forms. Solo las confirmadas cuentan. Con <b>+</b> y <b>−</b> ajustas a mano.</p>`
             : `<h2>${mio.c ? `Llevas ${mio.c} tarjeta${mio.c === 1 ? "" : "s"}${posYo && posYo.pos ? ` · ${posYo.pos}.º lugar de tu turno` : ""}` : "Aún no tienes tarjetas confirmadas"}</h2>
                <p>Al enviar tu tarjeta en Microsoft Forms, <b>regístrala aquí</b> y manda tu captura al supervisor. Cuenta en el marcador cuando el supervisor la confirma.${mio.p ? ` Tienes <b>${mio.p} por confirmar</b>.` : ""}</p>`}
-            <p class="muted peque" style="margin:6px 0 0">Acumulado desde el ${U.corta(TJ.inicio())} · solo técnicos de la plantilla (sin supervisores).</p></div>
+            <p class="muted peque" style="margin:6px 0 0">Acumulado desde el ${U.corta(TJ.inicio())} · TOP 5 de cada turno · solo técnicos de la plantilla (sin supervisores).</p></div>
           <div class="tj-hero-btn">${sup ? `<button class="btn verde" id="tjWa">${B.ico("subir")} Mensaje para WhatsApp</button>` : ""}
             ${sup ? "" : `<button class="btn" id="tjReg">${B.ico("mas")} Registrar mi tarjeta · ${turnoTxt(f, t)}</button>`}</div>
         </div>
@@ -4971,7 +5001,7 @@ V.hoja = {
       const D = TJ.datos, cfg = D.cfg, tec = B.dom.ordenados(TJ.tecnicos());
       c.innerHTML = `<div class="tarjeta">${cab("engrane", "g", "Marcador", "Desde cuándo se acumula y cómo se llama a cada quien en el mensaje de WhatsApp.")}
           <div class="fila"><div class="campo" style="flex:0 0 200px"><label>El marcador cuenta desde</label><input class="inp" type="date" id="aIni" value="${esc(TJ.inicio())}"><span class="ayuda">Cámbialo para reiniciar el marcador.</span></div>
-            <div class="campo"><label>Quién elabora la E+1 (además de los supervisores)</label><input class="inp" id="aEd" value="${esc(D.editores.join(", "))}" placeholder="Iniciales separadas por coma"><span class="ayuda">Iniciales de la plantilla. Ven todas las tarjetas, las marcan y generan la presentación. También tienen <b>permiso para entrar a la versión de celular</b> (con el siguiente paquete de datos).</span></div></div>
+            <div class="campo"><label>Técnicos especializados (encargados de la E+1 y de las tarjetas)</label><input class="inp" id="aEd" value="${esc(D.editores.join(", "))}" placeholder="Iniciales separadas por coma" ${B.dom.esAdmin() ? "" : "readonly"}><span class="ayuda">Iniciales de la plantilla. El rol lo asigna el administrador (también en Usuarios). Ven todas las tarjetas, las marcan y generan la presentación. También tienen <b>permiso para entrar a la versión de celular</b> (con el siguiente paquete de datos).</span></div></div>
           <div class="campo"><label>Cierre del mensaje de WhatsApp</label><textarea class="inp" id="aCierre" style="min-height:110px">${esc(cfg.cierre || TJ.CIERRE)}</textarea></div>
           <label style="font-size:12px;font-weight:600;color:var(--texto-2)">Nombre corto de cada técnico</label>
           <div class="tj-apodos">${tec.map(i => `<label><span>${esc(B.dom.nombre(i))}</span><input class="inp" data-ap="${i}" value="${esc(TJ.apodo(i))}"></label>`).join("")}</div>
@@ -4985,6 +5015,7 @@ V.hoja = {
         try { await TJ.llamar("cfgGuardar", { cfg: Object.assign({}, cfg, { inicio: c.querySelector("#aIni").value, cierre: c.querySelector("#aCierre").value.trim(), apodos, editores }) }); B.ui.toast("Ajustes guardados.", "ok"); await this.recarga(); }
         catch (e) { B.ui.error(e); }
       };
+      if (!B.dom.esSup()) c.querySelector(".tarjeta").remove();      // el tecnico especializado administra las semanas, no los ajustes del marcador
       c.querySelectorAll("[data-bsem]").forEach(b => b.onclick = async () => {
         const s = b.dataset.bsem;
         if (!(await B.ui.confirmar(`Se borrarán las tarjetas cargadas de la <b>${TJ.semTxt(s)}</b> y sus marcas para la E+1.`, "Borrar semana", "Borrar", true))) return;
@@ -5535,7 +5566,7 @@ B.inter = {
       "turnos.guardar": () => "Datos del turno", "hojas.guardar": () => "Hoja de asignación",
       "tarjetas.declarar": () => "Tarjeta Líderes en Campo" + (d.ini ? " de " + d.ini : "") + (d.nota ? ": " + d.nota : ""), "tarjetas.declEstado": () => "Tarjetas " + ({ C: "confirmadas", R: "marcadas como no válidas", P: "regresadas a por confirmar" }[d.est] || "") + " (" + ((d.uids || d.ids || []).length) + ")",
       "tarjetas.declBorrar": () => "Tarjeta Líderes en Campo eliminada", "tarjetas.marcar": () => "Tarjeta #" + d.id + ({ A: " marcada como acto inseguro", C: " marcada como condición insegura", D: " descartada" }[d.m] || " sin marca"),
-      "tarjetas.semGuardar": () => "Datos de la E+1 de la semana " + d.sem, "tarjetas.importar": () => "Excel de tarjetas de la semana " + d.sem + " (" + (d.tarjetas || []).length + ")", "tarjetas.cfgGuardar": () => "Ajustes del marcador", "tarjetas.semBorrar": () => "Semana " + d.sem + " de tarjetas borrada" }[op.col + "." + op.accion];
+      "tarjetas.semGuardar": () => "Datos de la E+1 de la semana " + d.sem, "tarjetas.importar": () => "Excel de tarjetas de la semana " + d.sem + " (" + (d.tarjetas || []).length + ")", "tarjetas.cfgGuardar": () => "Ajustes del marcador", "tarjetas.rolEsp": () => (d.on ? "Rol de técnico especializado para " : "Se quita el rol de técnico especializado a ") + d.ini, "tarjetas.semBorrar": () => "Semana " + d.sem + " de tarjetas borrada" }[op.col + "." + op.accion];
     if (op.col === "tarjetas") return (d.f ? U.cortaDM(d.f) + (d.t ? " " + d.t : "") + " · " : "") + (que ? que() : "tarjetas." + op.accion);
     return f + (que ? que() : op.col + "." + op.accion);
   },
@@ -5915,7 +5946,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "2.9", servidorViejo: false,
+  info: {}, VERSION: "3.0", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -6090,7 +6121,7 @@ B.app = {
     ];
     if (sup) {
       enlaces.push(["SUPERVISIÓN", [["turno", "Datos del turno", "usuarios"], ["reporte", "Reporte del turno", "pdf"], ["hoja", "Hoja de asignación", "doc"], ["asistencia", "Asistencia y horas extra", "calendario"]]]);
-      if (!B.modoMovil) enlaces.push(["ADMINISTRACIÓN", [["personal", "Personal y turnos", "usuario"], ["catalogos", "Catálogos", "lista"], ["usuarios", "Usuarios", "llave"], ["config", "Configuración y respaldos", "engrane"]]]);
+      if (!B.modoMovil) enlaces.push(["ADMINISTRACIÓN", [["personal", B.dom.esAdmin() ? "Personal y turnos" : "Cambios de turno", "usuario"]].concat(B.dom.esAdmin() ? [["catalogos", "Catálogos", "lista"]] : []).concat([["usuarios", "Usuarios", "llave"]]).concat(B.dom.esAdmin() ? [["config", "Configuración y respaldos", "engrane"]] : [])]);
     }
     document.getElementById("raiz").innerHTML = `
       <div class="app">
@@ -6098,7 +6129,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? "Supervisor" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "2.9")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "3.0")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
@@ -6164,7 +6195,7 @@ B.app = {
   navegar() {
     let r = (location.hash || "#/inicio").replace("#/", "").split("?")[0] || "inicio";
     const v = B.vistas[r];
-    if (!v || (v.sup && !B.dom.esSup() && !(r === "celular" && B.modoMovil))) r = "inicio";     // en el celular todos envian y reciben
+    if (!v || (v.sup && !B.dom.esSup() && !(r === "celular" && B.modoMovil)) || (v.admin && !B.dom.esAdmin())) r = "inicio";     // en el celular todos envian y reciben
     this.ruta = r;
     document.body.classList.remove("nav-abierto");
     document.querySelectorAll(".nav a").forEach(a => a.classList.toggle("activo", a.dataset.r === r));
@@ -6219,7 +6250,7 @@ B.app = {
     const u = B.usuario, sup = B.dom.esSup();
     m = document.createElement("div");
     m.className = "menu-usuario";
-    m.innerHTML = `<div class="cab"><b>${U.esc(u.nombre)}</b><span class="muted peque">RPE ${U.esc(u.rpe)} · ${U.esc(u.ini)} · ${sup ? "Supervisor" : "Técnico"}</span></div>
+    m.innerHTML = `<div class="cab"><b>${U.esc(u.nombre)}</b><span class="muted peque">RPE ${U.esc(u.rpe)} · ${U.esc(u.ini)} · ${sup ? (u.admin ? "Supervisor · Administrador" : "Supervisor") : u.esp ? "Técnico especializado (E+1 y tarjetas)" : "Técnico"}</span></div>
       <button data-a="clave">${B.ico("llave")} Cambiar contraseña</button>
       <button data-a="tour">${B.ico("ayuda")} Recorrido para técnicos</button>
       ${sup ? `<button data-a="tourSup">${B.ico("ayuda")} Recorrido para supervisores</button>` : ""}
