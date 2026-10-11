@@ -754,7 +754,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "3.6", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "3.7", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -2836,10 +2836,27 @@ V.concentrados = {
         <div class="tabla-cont"><table class="tabla"><thead><tr><th>Conservar</th><th>#</th><th>Espacio</th><th>Liberación o 1.ª prueba</th><th>O2 · HR · Temp · LEL · CO · H2S</th><th>Personal</th><th>Monitoreos</th></tr></thead><tbody>
         ${L.map(e => `<tr><td class="c"><input type="radio" name="fDest" value="${e.num}" ${e === pref ? "checked" : ""} style="width:18px;height:18px"></td><td class="c"><b>${U.esc(B.dom.ecNum(e))}</b>${e.noLib ? `<div class="peque" style="color:#8a6526">no liberado</div>` : ""}</td><td>${U.esc(e.esp)}</td><td class="tnum">${U.fh(e.lib) || "—"}</td><td class="tnum">${U.esc(lect(e))}</td><td>${U.esc(e.pers || "")}</td><td class="c">${(e.mon || []).length}</td></tr>`).join("")}</tbody></table></div>
         <p class="muted peque" style="margin:10px 0 0">Esta acción no se puede deshacer desde la pantalla (queda el respaldo automático del día).</p>`,
-      botones: [{ t: "Cancelar", c: "sec", v: null }, { t: "Fusionar", c: "peligro", v: v => +((v.querySelector('input[name="fDest"]:checked') || {}).value || 0) }]
+      botones: [{ t: "Cancelar", c: "sec", v: null }, { t: "Ver cómo quedará…", v: v => +((v.querySelector('input[name="fDest"]:checked') || {}).value || 0) }]
     });
     if (!r) return;
     const dest = L.find(e => e.num === r);
+    // Antes de fusionar: el servidor arma el resultado SIN guardarlo y se muestra para confirmarlo
+    let sim; try { sim = await B.api.op("ec", "fusionar", { destino: r, nums: L.map(e => e.num), simular: true }); } catch (e) { ui.error(e); return; }
+    const R = sim.resultado, mons = R.mon || [], elim = L.filter(e => e.num !== r), nuevos = mons.filter(m => m._de).length, antesLib = R.lib ? mons.filter(m => m.fh < R.lib) : [];
+    const ok = await ui.modal({
+      titulo: "Confirma la fusión", icono: "alerta", ancho: true,
+      html: `<p style="margin:0 0 10px;line-height:1.55">Revisa cómo quedará. <b>Nada se ha cambiado todavía</b>: la fusión se hace hasta que presiones <b>Confirmar fusión</b>.</p>
+        <div class="aviso v" style="margin-bottom:12px">${B.ico("ok")}<div><b>Quedará un solo registro: ${R.noLib ? "sin número (NO liberado)" : "EC #" + U.esc(B.dom.ecNum(R))} · ${U.esc(R.esp)}</b><br>
+          ${R.lib ? "Liberación o 1.ª prueba: <b>" + U.fh(R.lib) + "</b> · " : ""}O2 · HR · Temp · LEL · CO · H2S: <b>${U.esc(lect(R))}</b><br>Personal TSI: <b>${U.esc(R.pers || "—")}</b> · Reporte: ${B.t.corto(R.fecha, R.turno)}</div></div>
+        <label style="font-size:12px;font-weight:700;color:var(--texto-2)">MONITOREOS QUE TENDRÁ (${mons.length})${nuevos ? ` · ${nuevos} llegan de los registros que se eliminan` : ""}</label>
+        ${mons.length ? `<div class="tabla-cont" style="margin:6px 0 12px;max-height:260px;overflow:auto"><table class="tabla"><thead><tr><th>Fecha y hora</th><th>O2 · HR · Temp · LEL · CO · H2S</th><th>Personal</th><th>De dónde viene</th></tr></thead><tbody>
+          ${mons.map(m => `<tr style="${m._de ? "background:var(--dorado-claro)" : ""}"><td class="tnum">${U.fh(m.fh)}${m.elev ? ` · elev. ${U.esc(m.elev)}` : ""}</td><td class="tnum">${U.esc(lect(m))}</td><td>${U.esc(m.pers || "")}</td><td>${m._de ? "<b>" + U.esc(m._de) + "</b>" : "Ya estaba en este registro"}</td></tr>`).join("")}</tbody></table></div>`
+          : `<p class="muted peque" style="margin:6px 0 12px">Ninguno: los registros tenían la misma lectura y no tenían monitoreos.</p>`}
+        ${antesLib.length ? `<div class="aviso d">${B.ico("info")}<div>${antesLib.length} monitoreo(s) quedan con fecha <b>anterior</b> a la liberación del registro que se conserva. Si el registro más antiguo es el correcto, regresa y elige conservar ese.</div></div>` : ""}
+        <div class="aviso r" style="margin:0">${B.ico("basura")}<div><b>Se eliminará${elim.length === 1 ? "" : "n"} ${elim.length} registro${elim.length === 1 ? "" : "s"}:</b> ${elim.map(e => (e.noLib ? "sin número" : "EC #" + U.esc(B.dom.ecNum(e))) + " (" + (U.fh(e.lib) || B.t.corto(e.fecha, e.turno)) + ")").join(", ")}. No se puede deshacer desde la pantalla.</div></div>`,
+      botones: [{ t: "Regresar sin cambiar nada", c: "sec", v: null }, { t: "Confirmar fusión", c: "peligro", v: true }]
+    });
+    if (!ok) { ui.toast("No se fusionó nada.", "", 3000); return; }
     await ejecutar(async () => { const x = await B.api.op("ec", "fusionar", { destino: r, nums: L.map(e => e.num) }); this.sel = new Set(); return x; },
       x => `Registros fusionados en <b>${U.esc(B.dom.ecNum(dest))} · ${U.esc(dest.esp)}</b>: ${x.fusionados} duplicado(s) eliminado(s); ahora tiene ${x.monitoreos} monitoreo(s).`);
   },
@@ -6434,7 +6451,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "3.6", servidorViejo: false,
+  info: {}, VERSION: "3.7", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -6617,7 +6634,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "3.6")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "3.7")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
