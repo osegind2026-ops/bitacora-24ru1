@@ -326,7 +326,7 @@ B.dom = {
     return B.estado.vig.filter(v => v.inicio && v.inicio <= fin && (!v.retiro || v.retiro >= ini)).sort((a, b) => a.num - b.num);
   },
   // # de espacio confinado como se muestra: los de pre-recarga llevan su marca (PR 121)
-  ecNum(e) { return e.noLib ? "NL-" + (e.num - 900000) : (e.pre ? e.pre + " " : "") + e.num; },
+  ecNum(e) { return e.noLib ? "S/N" : (e.pre ? e.pre + " " : "") + e.num; },      // los NO liberados van sin numero hasta que se liberan
   // NO LIBERADOS (prueba no satisfactoria): se guardan con su monitoreo, pero no cuentan ni salen como espacios liberados
   ecNoLiberados() { return B.estado.ec.filter(e => e.noLib).sort((a, b) => a.num - b.num); },
   ecDelTurno(f, t) { return B.estado.ec.filter(e => !e.noLib && e.fecha === f && e.turno === t).sort((a, b) => a.num - b.num); },
@@ -754,7 +754,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "3.5", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "3.6", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -1381,6 +1381,7 @@ B.local = {
         if (n === "vig") x.est = x.retiro ? "RETIRADA" : "ACTIVA"; else x.mod = ahora() + " " + s.ini;
         await this.escribir(n, L); return { ok: true };
       }
+      case "ec.fusionar": throw new Error("La fusión de registros duplicados se hace en la bitácora de la PC.");
       case "ec.borrar": case "vig.borrar": { soloSup(); const L = (await this.leer(col) || []).filter(x => +x.num !== +d.num); await this.escribir(col, L); return { ok: true }; }
       case "vig.crear": {
         const L = await this.leer("vig") || [], cat = await this.leer("catalogos") || {}, nums = [];
@@ -1971,7 +1972,7 @@ B.rep.ecBitacora = function (lista, vacia) {
   };
   const uno = lista.length === 1 ? lista[0] : null;
   return { html: B.rep.documento("Bitácora de monitoreo EC", lista.map(una).join("")),
-    nombre: uno ? `BITACORA MONITOREO EC ${D.ecNum(uno)} ${String(uno.esp).replace(/[\\/:*?"<>|]/g, "-").slice(0, 50)}` : `BITACORAS MONITOREO EC (${lista.length}) ${U.corta(U.iso(new Date())).replace(/\//g, ".")}`,
+    nombre: uno ? `BITACORA MONITOREO EC ${D.ecNum(uno).replace("/", "")} ${String(uno.esp).replace(/[\\/:*?"<>|]/g, "-").slice(0, 50)}` : `BITACORAS MONITOREO EC (${lista.length}) ${U.corta(U.iso(new Date())).replace(/\//g, ".")}`,
     carpeta: "ESPACIOS CONFINADOS", tipo: "concentrado" };
 };
 
@@ -2624,7 +2625,7 @@ V.espacios = {
         return;
       }
       await ejecutar(() => B.api.op("ec", "crear", { fecha: f, turno: t, items, capt: capt() === yo() ? "" : capt() }),
-        r => "Registrado: " + r.nums.map(n => n > 900000 ? "NO LIBERADO NL-" + (n - 900000) : "EC #" + n).join(", ") + (capt() !== yo() ? " · asignado a " + capt() : "") + (r.nums.some(n => n > 900000) ? "<br>Los no liberados quedan en Monitoreo de E.C. hasta que la prueba sea satisfactoria." : ""));
+        r => "Registrado: " + r.nums.map(n => n > 900000 ? "NO LIBERADO (sin número hasta que se libere)" : "EC #" + n).join(", ") + (capt() !== yo() ? " · asignado a " + capt() : "") + (r.nums.some(n => n > 900000) ? "<br>Los no liberados quedan en Monitoreo de E.C. hasta que la prueba sea satisfactoria." : ""));
     };
   }
 };
@@ -2776,10 +2777,11 @@ V.concentrados = {
         <div class="campo"><label>Desde (fecha reporte)</label><input class="inp" type="date" id="cD1" value="${this.d1}"></div>
         <div class="campo"><label>Hasta</label><input class="inp" type="date" id="cD2" value="${this.d2}"></div>
         <div class="campo buscar" style="flex:1;min-width:220px"><label>Buscar</label>${B.ico("buscar", 'style="top:auto;bottom:11px;transform:none"')}<input class="inp" id="cQ" value="${U.esc(this.q)}" placeholder="Espacio, persona, INOP…"></div>
+        ${sup && esEC && !B.modoLocal ? `<button class="btn dorado" id="cFus" disabled title="Marca con la casilla dos o más registros del mismo espacio">${B.ico("reutilizar")} Fusionar duplicados (0)</button>` : ""}
         ${sup ? `<button class="btn sec" id="cCsv">${B.ico("descargar")} Excel (CSV)</button><button class="btn sec" id="cImp">${B.ico("imprimir")} Imprimir</button><button class="btn" id="cPdf">${B.ico("pdf")} PDF</button>` : ""}
       </div>
-      <p class="muted peque" style="margin-top:-4px">${base.length} registro(s)${this.d1 || this.d2 ? " en el rango" : ""}. ${sup ? "Como supervisor puedes corregir registros (con el lápiz también el <b># de espacio confinado</b>) o eliminarlos." : "Consulta de solo lectura."}</p>
-      <div class="tabla-cont">${esEC ? this.tablaEC(base, sup) : this.tablaVig(base, sup)}</div></div>`;
+      <p class="muted peque" style="margin-top:-4px">${base.length} registro(s)${this.d1 || this.d2 ? " en el rango" : ""}. ${sup ? "Puedes corregir registros (con el lápiz también el <b># de espacio confinado</b> y su estatus), eliminarlos y, si un espacio se capturó dos veces, marcar las casillas y <b>fusionarlos</b> en uno solo. Los NO liberados no llevan número hasta que se liberan." : "Consulta de solo lectura."}</p>
+      <div class="tabla-cont">${esEC ? this.tablaEC(base, sup, sup && !B.modoLocal ? (this.sel = new Set([...(this.sel || [])].filter(n => base.some(e => e.num === n)))) : null) : this.tablaVig(base, sup)}</div></div>`;
     c.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => { this.tab = b.dataset.tab; B.app.render(); });
     c.querySelector("#cD1").onchange = e => { this.d1 = e.target.value; B.app.render(); };
     c.querySelector("#cD2").onchange = e => { this.d2 = e.target.value; B.app.render(); };
@@ -2794,16 +2796,22 @@ V.concentrados = {
         : U.csv("Concentrado vigilancias " + B.estado.config.proyecto, ["#", "Descripción", "Inicio", "INOP", "Ubicación", "Componente", "Retiro", "Estatus", "Observaciones", "Alta", "Retiro por", "Fecha reporte", "Turno"],
           base.map(v => [v.num, v.desc, U.fh(v.inicio), v.inop, v.ubic, v.comp, U.fh(v.retiro), v.est, v.obs, v.capAlta, v.capRet, U.corta(v.fecha), v.turno]));
       c.querySelectorAll("[data-ed]").forEach(b => b.onclick = () => this.editar(esEC ? "ec" : "vig", +b.dataset.ed));
+      const bf = c.querySelector("#cFus");
+      if (bf) {
+        const act = () => { const n = this.sel.size; bf.disabled = n < 2; bf.innerHTML = B.ico("reutilizar") + " Fusionar duplicados (" + n + ")"; };
+        c.querySelectorAll("[data-sel]").forEach(ch => ch.onchange = () => { ch.checked ? this.sel.add(+ch.dataset.sel) : this.sel.delete(+ch.dataset.sel); act(); });
+        bf.onclick = () => this.fusionar(); act();
+      }
       c.querySelectorAll("[data-del]").forEach(b => b.onclick = async () => {
-        if (await ui.confirmar(`¿Eliminar el registro #${b.dataset.del}? Se recomienda mejor escribir "ANULADO" en observaciones para conservar el consecutivo.`, "Eliminar registro", "Eliminar", true))
+        if (await ui.confirmar(`¿Eliminar el registro ${esEC ? U.esc(B.dom.ecNum(B.estado.ec.find(e => e.num === +b.dataset.del) || { num: b.dataset.del })) : "#" + b.dataset.del}? Se recomienda mejor escribir "ANULADO" en observaciones para conservar el consecutivo.`, "Eliminar registro", "Eliminar", true))
           await ejecutar(() => B.api.op(esEC ? "ec" : "vig", "borrar", { num: +b.dataset.del }), "Registro eliminado.");
       });
     }
   },
-  tablaEC(l, sup) {
+  tablaEC(l, sup, sel) {
     if (!l.length) return ui.vacio("Sin registros.", "escudo");
-    return `<table class="tabla"><thead><tr><th>#</th><th>Espacio confinado</th><th>O2</th><th>HR</th><th>Temp</th><th>LEL</th><th>CO</th><th>H2S</th><th>Día que se liberó</th><th>Personal TSI</th><th>Observaciones</th><th>Reporte</th>${sup ? "<th></th>" : ""}</tr></thead><tbody>
-      ${l.map(e => `<tr style="${B.dom.ecFaltan(e).length ? "background:#FFF7DB" : ""}" title="${B.dom.ecFaltan(e).length ? "Falta: " + B.dom.ecFaltan(e).join(", ") : ""}"><td class="c" style="white-space:nowrap"><b>${U.esc(B.dom.ecNum(e))}</b>${B.dom.ecFaltan(e).length ? `<div class="peque" style="color:var(--rojo);font-weight:700">FALTA DATO</div>` : ""}${e.numAnt != null && e.numAnt !== "" ? `<div class="muted peque" title="Número anterior">antes ${U.esc(e.numAnt)}</div>` : ""}</td><td>${U.esc(e.esp)}</td>${["o2", "hr", "temp", "lel", "co", "h2s"].map(k => `<td class="c ${B.dom.rango(k, e[k]) ? "alerta" : ""}">${U.esc(e[k])}</td>`).join("")}
+    return `<table class="tabla"><thead><tr>${sel ? `<th title="Marca los registros duplicados del mismo espacio para fusionarlos"></th>` : ""}<th>#</th><th>Espacio confinado</th><th>O2</th><th>HR</th><th>Temp</th><th>LEL</th><th>CO</th><th>H2S</th><th>Día que se liberó</th><th>Personal TSI</th><th>Observaciones</th><th>Reporte</th>${sup ? "<th></th>" : ""}</tr></thead><tbody>
+      ${l.map(e => `<tr style="${B.dom.ecFaltan(e).length ? "background:#FFF7DB" : ""}" title="${B.dom.ecFaltan(e).length ? "Falta: " + B.dom.ecFaltan(e).join(", ") : ""}">${sel ? `<td class="c"><input type="checkbox" data-sel="${e.num}" ${sel.has(e.num) ? "checked" : ""} style="width:17px;height:17px"></td>` : ""}<td class="c" style="white-space:nowrap"><b>${U.esc(B.dom.ecNum(e))}</b>${e.noLib ? `<div class="peque" style="color:#8a6526;font-weight:700">NO LIBERADO</div>` : ""}${B.dom.ecFaltan(e).length ? `<div class="peque" style="color:var(--rojo);font-weight:700">FALTA DATO</div>` : ""}</td><td>${U.esc(e.esp)}</td>${["o2", "hr", "temp", "lel", "co", "h2s"].map(k => `<td class="c ${B.dom.rango(k, e[k]) ? "alerta" : ""}">${U.esc(e[k])}</td>`).join("")}
       <td class="tnum">${U.fh(e.lib)}</td><td>${U.esc(e.pers)}</td><td>${U.esc(e.obs)}</td><td class="muted">${B.t.corto(e.fecha, e.turno)}</td>
       ${sup ? `<td class="acc"><button class="btn fantasma btn-icono" data-ed="${e.num}" title="Editar">${B.ico("editar")}</button><button class="btn fantasma btn-icono" data-del="${e.num}" title="Eliminar">${B.ico("basura")}</button></td>` : ""}</tr>`).join("")}</tbody></table>`;
   },
@@ -2813,6 +2821,27 @@ V.concentrados = {
       ${l.map(v => `<tr><td class="c"><b>${v.num}</b></td><td>${U.esc(v.desc)}</td><td class="tnum">${U.fh(v.inicio)}</td><td>${U.esc(v.inop)}</td><td>${U.esc(v.ubic)}</td><td>${U.esc(v.comp)}</td>
       <td class="tnum">${U.fh(v.retiro)}</td><td>${ui.estatusBadge(v.est)}</td><td>${U.esc(v.obs)}</td>
       ${sup ? `<td class="acc"><button class="btn fantasma btn-icono" data-ed="${v.num}" title="Editar">${B.ico("editar")}</button><button class="btn fantasma btn-icono" data-del="${v.num}" title="Eliminar">${B.ico("basura")}</button></td>` : ""}</tr>`).join("")}</tbody></table>`;
+  },
+  /* Un espacio capturado dos veces: se elige cual registro se conserva; la lectura y los monitoreos de los demas pasan a ese
+     registro como monitoreos, se junta el personal y los duplicados se eliminan. */
+  async fusionar() {
+    const L = B.estado.ec.filter(e => this.sel.has(e.num)).sort((a, b) => String(a.lib || "").localeCompare(String(b.lib || "")) || a.num - b.num);
+    if (L.length < 2) return;
+    const nombres = new Set(L.map(e => U.norm(e.esp))), pref = L.find(e => !e.noLib) || L[0];
+    const lect = e => ["o2", "hr", "temp", "lel", "co", "h2s"].map(k => e[k] === "" || e[k] == null ? "—" : e[k]).join(" · ");
+    const r = await ui.modal({
+      titulo: "Fusionar registros duplicados", icono: "reutilizar", ancho: true,
+      html: `<p style="margin:0 0 10px;line-height:1.55">Elige el registro que <b>se conserva</b>. De los otros, su lectura pasa a ser un <b>monitoreo</b> de ese espacio, se le suman sus monitoreos y su personal, y el registro duplicado <b>se elimina</b>.</p>
+        ${nombres.size > 1 ? `<div class="aviso r">${B.ico("alerta")}<div><b>Los registros no tienen el mismo nombre de espacio.</b> Fusiona solo si de verdad son el mismo espacio confinado.</div></div>` : ""}
+        <div class="tabla-cont"><table class="tabla"><thead><tr><th>Conservar</th><th>#</th><th>Espacio</th><th>Liberación o 1.ª prueba</th><th>O2 · HR · Temp · LEL · CO · H2S</th><th>Personal</th><th>Monitoreos</th></tr></thead><tbody>
+        ${L.map(e => `<tr><td class="c"><input type="radio" name="fDest" value="${e.num}" ${e === pref ? "checked" : ""} style="width:18px;height:18px"></td><td class="c"><b>${U.esc(B.dom.ecNum(e))}</b>${e.noLib ? `<div class="peque" style="color:#8a6526">no liberado</div>` : ""}</td><td>${U.esc(e.esp)}</td><td class="tnum">${U.fh(e.lib) || "—"}</td><td class="tnum">${U.esc(lect(e))}</td><td>${U.esc(e.pers || "")}</td><td class="c">${(e.mon || []).length}</td></tr>`).join("")}</tbody></table></div>
+        <p class="muted peque" style="margin:10px 0 0">Esta acción no se puede deshacer desde la pantalla (queda el respaldo automático del día).</p>`,
+      botones: [{ t: "Cancelar", c: "sec", v: null }, { t: "Fusionar", c: "peligro", v: v => +((v.querySelector('input[name="fDest"]:checked') || {}).value || 0) }]
+    });
+    if (!r) return;
+    const dest = L.find(e => e.num === r);
+    await ejecutar(async () => { const x = await B.api.op("ec", "fusionar", { destino: r, nums: L.map(e => e.num) }); this.sel = new Set(); return x; },
+      x => `Registros fusionados en <b>${U.esc(B.dom.ecNum(dest))} · ${U.esc(dest.esp)}</b>: ${x.fusionados} duplicado(s) eliminado(s); ahora tiene ${x.monitoreos} monitoreo(s).`);
   },
   async editar(col, num) {
     const x = (col === "ec" ? B.estado.ec : B.estado.vig).find(y => y.num === num);
@@ -6405,7 +6434,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "3.5", servidorViejo: false,
+  info: {}, VERSION: "3.6", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -6588,7 +6617,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "3.5")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "3.6")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
