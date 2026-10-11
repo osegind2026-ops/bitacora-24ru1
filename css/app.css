@@ -432,6 +432,8 @@ mark.kr { background: #FBD9D5; color: #8C1D15; } mark.ke { background: #FCE9B8; 
 .tj-poe { margin: 0 0 12px; padding: 10px 14px; border-radius: 10px; background: var(--azul-claro); border-left: 4px solid var(--azul); font-size: 13px; line-height: 1.55; } .tj-poe > b { color: var(--azul); }
 .tj-poe p { margin: 8px 0 0; } .tj-poe p > span { display: block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; color: var(--texto-2); } .tj-poe mark { background: #FFE58A; padding: 0 2px; border-radius: 3px; }
 .tj-cats { display: flex; gap: 6px 18px; flex-wrap: wrap; font-size: 13px; } .tj-cats label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.mon-reps { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 12px; } .mon-reps > div { border: 1px solid var(--borde); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
+.mon-reps span { font-size: 12.5px; color: var(--texto-2); line-height: 1.45; flex: 1; } .mon-reps p { margin: 4px 0 0; display: flex; gap: 8px; }
 /* === PROCEDIMIENTOS (documentos PDF que suben los supervisores) === */
 .pr-doc { padding: 16px 18px; margin-bottom: 12px; } .pr-cab { display: flex; align-items: center; gap: 8px 10px; flex-wrap: wrap; }
 .pr-clave { padding: 4px 10px; border-radius: 8px; background: var(--guinda); color: #fff; font-weight: 700; font-size: 12.5px; white-space: nowrap; } .pr-cab > b { font-size: 14.5px; flex: 1 1 260px; min-width: 0; }

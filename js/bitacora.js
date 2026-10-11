@@ -328,6 +328,25 @@ B.dom = {
   // # de espacio confinado como se muestra: los de pre-recarga llevan su marca (PR 121)
   ecNum(e) { return e.noLib ? "S/N" : (e.pre ? e.pre + " " : "") + e.num; },      // los NO liberados van sin numero hasta que se liberan
   // NO LIBERADOS (prueba no satisfactoria): se guardan con su monitoreo, pero no cuentan ni salen como espacios liberados
+  /* Espacios que siguen ABIERTOS (liberados sin cierre, o no liberados) cuyo nombre es igual o muy parecido al que se escribe.
+     igual: mismo nombre (aunque cambien guiones o espacios). Parecido: uno contiene al otro, difieren en 1 o 2 letras, o comparten casi todas sus palabras. */
+  ecParecidos(nombre, fechaExcluida) {
+    const comp = s => U.norm(s).replace(/[^A-Z0-9]/g, ""), a = comp(nombre), fa = this.fichas(nombre); if (a.length < 4) return [];
+    const dist = (x, y) => { if (Math.abs(x.length - y.length) > 2) return 9; let ant = Array.from({ length: y.length + 1 }, (_, i) => i);
+      for (let i = 1; i <= x.length; i++) { const act = [i]; for (let j = 1; j <= y.length; j++) act[j] = Math.min(ant[j] + 1, act[j - 1] + 1, ant[j - 1] + (x[i - 1] === y[j - 1] ? 0 : 1)); ant = act; } return ant[y.length]; };
+    const r = [];
+    for (const e of B.estado.ec) {
+      if (e.cierre || (fechaExcluida && e.fecha === fechaExcluida && U.norm(e.esp) === U.norm(nombre))) continue;
+      const b = comp(e.esp), fb = this.fichas(e.esp); if (b.length < 4) continue;
+      let igual = a === b, par = false;
+      if (!igual) {
+        const com = fa.filter(x => fb.includes(x)).length, uni = new Set([...fa, ...fb]).size;
+        par = (Math.min(a.length, b.length) >= 6 && (a.includes(b) || b.includes(a))) || (Math.min(a.length, b.length) >= 6 && dist(a, b) <= 2) || (uni >= 3 && com / uni >= 0.75);
+      }
+      if (igual || par) r.push({ e, igual });
+    }
+    return r.sort((x, y) => y.igual - x.igual);
+  },
   ecNoLiberados() { return B.estado.ec.filter(e => e.noLib).sort((a, b) => a.num - b.num); },
   ecDelTurno(f, t) { return B.estado.ec.filter(e => !e.noLib && e.fecha === f && e.turno === t).sort((a, b) => a.num - b.num); },
   /* ---- Monitoreo de espacios confinados mientras siguen liberados (al menos uno por turno).
@@ -754,7 +773,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "3.7", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "3.8", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -1976,6 +1995,115 @@ B.rep.ecBitacora = function (lista, vacia) {
     carpeta: "ESPACIOS CONFINADOS", tipo: "concentrado" };
 };
 
+/* ---------------------------------------------------------------- reportes de monitoreo de espacios confinados (supervisores) */
+B.rep.ecTipoMon = (e, m) => m.lib ? (e.noLib ? "1ª PRUEBA · NO LIBERADO" : "LIBERACIÓN") : m.nl ? "PRUEBA NO SATISFACTORIA" : (e.noLib ? "PRUEBA · NO LIBERADO" : "MONITOREO");
+B.rep.ecFilasMon = function (e, mons) {
+  const D = B.dom, k = v => U.esc(v ?? "");
+  return mons.map(m => `<tr><td>${U.corta(m.fh)}</td><td>${U.hora(m.fh)}</td>` + ["o2", "hr", "temp", "lel", "co", "h2s"].map(x => `<td class="${D.rango(x, m[x]) ? "fuera" : ""}">${k(m[x])}</td>`).join("") +
+    `<td>${k(m.pers)}</td><td class="b" style="font-size:6.5pt">${B.rep.ecTipoMon(e, m)}</td><td class="izq" style="text-align:left;font-size:7pt">${m.elev ? "Elev. " + k(m.elev) + (m.obs ? " · " : "") : ""}${k(m.obs)}</td></tr>`).join("");
+};
+B.rep.ecCabMon = `<thead><tr><th style="width:8%">FECHA</th><th style="width:6%">HORA</th><th style="width:6%">O2<br>(%)</th><th style="width:6%">HR<br>(%)</th><th style="width:6%">TEMP<br>(°C)</th><th style="width:6%">LEL<br>(%)</th><th style="width:6%">CO<br>(ppm)</th><th style="width:6%">H2S<br>(ppm)</th><th style="width:10%">INICIALES</th><th style="width:15%">REGISTRO</th><th>OBSERVACIONES</th></tr></thead>`;
+B.rep.ecEstado = function (e) {
+  return e.noLib ? "NO LIBERADO (sin número)" : "LIBERADO " + (e.lib ? U.fh(e.lib) : U.corta(e.fecha)) + (e.nlNum ? " · antes no liberado" : "") + (e.cierre ? " · CERRADO " + U.fh(e.cierre) + (e.cerro ? " (" + U.esc(e.cerro) + ")" : "") : " · SIGUE LIBERADO");
+};
+// Reporte de monitoreos: cada espacio con todas sus lecturas (liberacion, monitoreos y pruebas), en el rango de fechas
+B.rep.ecMonitoreos = function (lista, d1, d2, titulo) {
+  const c = B.estado.config, D = B.dom, enR = m => (!d1 || m.fh.slice(0, 10) >= d1) && (!d2 || m.fh.slice(0, 10) <= d2);
+  const bloques = lista.map(e => ({ e, mons: D.ecMons(e).filter(enR) })).filter(b => b.mons.length);
+  const nMon = bloques.reduce((s, b) => s + b.mons.length, 0), nFuera = bloques.reduce((s, b) => s + b.mons.filter(m => ["o2", "lel", "co", "h2s"].some(x => D.rango(x, m[x]))).length, 0);
+  const nNL = bloques.filter(b => b.e.noLib).length, nAb = bloques.filter(b => !b.e.noLib && !b.e.cierre).length;
+  let h = `<h2 class="doc">REPORTE DE MONITOREO DE ESPACIOS CONFINADOS</h2><div class="doc-sub">${U.esc(B.t.periodo().toUpperCase())} &nbsp;|&nbsp; ${U.esc(titulo)}${d1 || d2 ? " &nbsp;|&nbsp; " + (d1 ? "del " + U.corta(d1) : "") + (d2 ? " al " + U.corta(d2) : "") : ""}</div>
+    <div class="c" style="margin-bottom:6px;font-size:8pt">Espacios: <b>${bloques.length}</b> &nbsp;|&nbsp; Siguen liberados: <b>${nAb}</b> &nbsp;|&nbsp; Cerrados: <b>${bloques.length - nAb - nNL}</b> &nbsp;|&nbsp; No liberados: <b>${nNL}</b> &nbsp;|&nbsp; Registros: <b>${nMon}</b> &nbsp;|&nbsp; Con lecturas fuera de rango: <b>${nFuera}</b>
+      &nbsp;|&nbsp; Emitido: ${U.fh(U.ahoraISO())}</div>
+    <table class="dat">${B.rep.ecCabMon}<tbody>` +
+    (bloques.length ? bloques.map(({ e, mons }) => `<tr><td colspan="11" style="text-align:left;background:#E7E6E6;font-size:8pt;padding:4px 6px"><b>${e.noLib ? "S/N" : "EC #" + U.esc(D.ecNum(e))} · ${U.esc(e.esp)}</b> &nbsp;—&nbsp; ${B.rep.ecEstado(e)} &nbsp;—&nbsp; ${mons.length} registro(s)</td></tr>` + B.rep.ecFilasMon(e, mons)).join("")
+      : `<tr><td colspan="11">Sin monitoreos con ese filtro.</td></tr>`) + `</tbody></table>
+    <div style="margin-top:6px;font-size:7pt;color:#595959">Rangos de referencia: O2 ${U.esc(c.o2Min)}–${U.esc(c.o2Max)} % · LEL ≤ ${U.esc(c.lelMax)} % · CO ≤ ${U.esc(c.coMax)} ppm · H2S ≤ ${U.esc(c.h2sMax)} ppm. En rojo, las lecturas fuera de rango.</div>`;
+  return { html: B.rep.documento("Monitoreo de espacios confinados", h), nombre: `MONITOREO ESPACIOS CONFINADOS ${c.proyecto} ${U.norm(titulo).replace(/[^A-Z0-9 ]/g, "")}${d1 ? " del " + U.corta(d1).replace(/\//g, ".") : ""}${d2 ? " al " + U.corta(d2).replace(/\//g, ".") : ""}`.trim(), carpeta: "ESPACIOS CONFINADOS", tipo: "concentrado" };
+};
+/* Bitacora de seguimiento de los espacios NO LIBERADOS: los que siguen sin liberarse y los que lo estuvieron, con la fecha en que
+   se liberaron, el numero que recibieron y cuanto tardaron. Despues, el detalle de cada prueba. */
+B.rep.ecSeguimientoNL = function (d1, d2) {
+  const c = B.estado.config, D = B.dom, k = v => U.esc(v ?? ""), LEC = [["o2", "O2"], ["hr", "HR"], ["temp", "Temp"], ["lel", "LEL"], ["co", "CO"], ["h2s", "H2S"]];
+  const dur = (a, b) => { const h = Math.max(0, Math.round((new Date(b + ":00") - new Date(a + ":00")) / 36e5)); return h >= 48 ? Math.round(h / 24) + " días" : h + " h"; };
+  const filas = B.estado.ec.filter(e => e.noLib || +e.nlNum > 0).map(e => {
+    const M = D.ecMons(e), nl = e.noLib ? M : M.filter(m => m.nl), prim = nl[0] || M[0], ult = nl[nl.length - 1] || prim;
+    return { e, M, nl, prim, ult, sigue: !!e.noLib };
+  }).filter(x => (!d1 || x.prim.fh.slice(0, 10) >= d1) && (!d2 || x.prim.fh.slice(0, 10) <= d2))
+    .sort((a, b) => (b.sigue - a.sigue) || String(a.prim.fh).localeCompare(String(b.prim.fh)));
+  const motivo = m => { const f = LEC.filter(([x]) => D.rango(x, m[x])).map(([x, n]) => n + " " + m[x]); return (f.length ? `<span class="fuera" style="padding:0 2px">${k(f.join(", "))}</span>` : "") + (m.obs ? (f.length ? " · " : "") + k(m.obs) : (f.length ? "" : "—")); };
+  const lect = m => LEC.map(([x, n]) => m[x] === "" || m[x] == null ? "" : `<span class="${D.rango(x, m[x]) ? "fuera" : ""}" style="white-space:nowrap">${n} ${k(m[x])}</span>`).filter(Boolean).join(" · ");
+  const ahora = U.ahoraISO(), nSig = filas.filter(x => x.sigue).length;
+  let h = `<h2 class="doc">BITÁCORA DE SEGUIMIENTO DE ESPACIOS CONFINADOS NO LIBERADOS</h2><div class="doc-sub">${U.esc(B.t.periodo().toUpperCase())}${d1 || d2 ? " &nbsp;|&nbsp; primera prueba " + (d1 ? "del " + U.corta(d1) : "") + (d2 ? " al " + U.corta(d2) : "") : ""}</div>
+    <div class="c" style="margin-bottom:6px;font-size:8pt">Espacios con prueba no satisfactoria: <b>${filas.length}</b> &nbsp;|&nbsp; Siguen NO LIBERADOS: <b>${nSig}</b> &nbsp;|&nbsp; Ya liberados: <b>${filas.length - nSig}</b> &nbsp;|&nbsp; Emitido: ${U.fh(ahora)}</div>
+    <table class="dat"><thead><tr><th style="width:3%">No.</th><th style="width:19%">ESPACIO CONFINADO</th><th style="width:9%">1ª PRUEBA</th><th style="width:19%">LECTURAS FUERA DE RANGO / OBSERVACIONES</th><th style="width:5%">PRUEBAS</th>
+      <th style="width:15%">ÚLTIMA PRUEBA NO SATISFACTORIA</th><th style="width:9%">ESTATUS</th><th style="width:8%">LIBERADO EL</th><th style="width:5%">EC #</th><th style="width:8%">LIBERÓ</th><th>TIEMPO SIN LIBERAR</th></tr></thead><tbody>` +
+    (filas.length ? filas.map((x, i) => `<tr><td>${i + 1}</td><td class="izq b" style="text-align:left">${k(x.e.esp)}</td><td>${U.fh(x.prim.fh)}<br><span class="gris">${k(x.prim.pers)}</span></td><td class="izq" style="text-align:left">${motivo(x.prim)}</td><td>${x.sigue ? x.M.length : x.nl.length + 1}</td>
+        <td style="font-size:7pt">${x.nl.length > 1 || !x.sigue ? U.fh(x.ult.fh) + "<br>" + lect(x.ult) : "—"}</td>
+        <td class="b" style="${x.sigue ? "background:#FFD2D2;color:#C00000" : "background:#E2F0D9;color:#1E6B4A"}">${x.sigue ? "NO LIBERADO" : "LIBERADO"}</td><td>${x.sigue ? "" : U.fh(x.e.lib)}</td><td class="b">${x.sigue ? "" : k(D.ecNum(x.e))}</td>
+        <td>${x.sigue ? "" : (x.e.liberoPor === "AUTO" ? "Prueba satisfactoria<br>" + k(x.e.pers) : k(x.e.liberoPor || x.e.pers))}</td><td>${dur(x.prim.fh, x.sigue ? ahora : x.e.lib)}${x.sigue ? " (a la fecha)" : ""}</td></tr>`).join("")
+      : `<tr><td colspan="11">No hay espacios confinados con pruebas no satisfactorias${d1 || d2 ? " en ese rango" : ""}.</td></tr>`) + `</tbody></table>`;
+  if (filas.length) h += `<h2 class="doc" style="font-size:11pt;margin-top:14px">DETALLE DE PRUEBAS Y MONITOREOS</h2><table class="dat">${B.rep.ecCabMon}<tbody>` +
+    filas.map((x, i) => `<tr><td colspan="11" style="text-align:left;background:#E7E6E6;font-size:8pt;padding:4px 6px"><b>${i + 1}. ${k(x.e.esp)}</b> &nbsp;—&nbsp; ${B.rep.ecEstado(x.e)}${x.sigue ? "" : " &nbsp;—&nbsp; EC #" + k(D.ecNum(x.e))}</td></tr>` + B.rep.ecFilasMon(x.e, x.M) +
+      (x.sigue ? `<tr>${'<td style="height:17px"></td>'.repeat(11)}</tr>`.repeat(3) : "")).join("") + `</tbody></table>
+    <div style="margin-top:6px;font-size:7pt;color:#595959">Un espacio NO LIBERADO no lleva número: lo recibe cuando una prueba resulta satisfactoria en todos sus parámetros. Los renglones en blanco son para anotar a mano las pruebas siguientes.
+      Rangos: O2 ${k(c.o2Min)}–${k(c.o2Max)} % · LEL ≤ ${k(c.lelMax)} % · CO ≤ ${k(c.coMax)} ppm · H2S ≤ ${k(c.h2sMax)} ppm.</div>`;
+  return { html: B.rep.documento("Seguimiento de espacios no liberados", h, true), horizontal: true, nombre: `SEGUIMIENTO ESPACIOS NO LIBERADOS ${c.proyecto} ${U.corta(U.iso(new Date())).replace(/\//g, ".")}`, carpeta: "ESPACIOS CONFINADOS", tipo: "concentrado" };
+};
+
+/* ---------------------------------------------------------------- relatoria de un espacio confinado
+   Cronologia en texto de todo lo ocurrido con el espacio (pruebas, liberacion, monitoreos, cierre) y las actividades de la bitacora
+   que lo mencionan. Sirve para la reportabilidad y para redactar el reporte de condicion (RC). Devuelve el texto y el documento. */
+B.rep.ecRelatoria = function (e) {
+  const c = B.estado.config, D = B.dom, of = B.ecLista ? B.ecLista.buscar(e.esp) : null, M = D.ecMons(e), ahora = U.ahoraISO();
+  const REF = { o2: `${c.o2Min}–${c.o2Max} %`, lel: `máx. ${c.lelMax} %`, co: `máx. ${c.coMax} ppm`, h2s: `máx. ${c.h2sMax} ppm` }, UNI = { o2: "%", hr: "%", temp: "°C", lel: "%", co: "ppm", h2s: "ppm" }, NOM = { o2: "O2", hr: "HR", temp: "Temp", lel: "LEL", co: "CO", h2s: "H2S" };
+  const lect = m => Object.keys(NOM).filter(k => m[k] !== "" && m[k] != null).map(k => `${NOM[k]} ${m[k]} ${UNI[k]}`).join(", ") || "sin lecturas capturadas";
+  const fuera = m => ["o2", "lel", "co", "h2s"].filter(k => D.rango(k, m[k])).map(k => `${NOM[k]} ${m[k]} ${UNI[k]} (referencia ${REF[k]})`);
+  const dur = (a, b) => { const h = Math.max(0, Math.round((new Date(b + ":00") - new Date(a + ":00")) / 36e5)); return h >= 48 ? Math.round(h / 24) + " días" : h + " h"; };
+  const id = e.noLib ? "sin número (NO LIBERADO)" : "EC #" + D.ecNum(e), L = [];
+  // cronologia
+  for (const m of M) {
+    const f = fuera(m), cuando = `${U.corta(m.fh)} ${U.hora(m.fh)} h`, quien = m.pers ? ` por ${m.pers}` : "", el = m.elev ? ` (elevación ${m.elev})` : "", obs = m.obs ? ` Observaciones: ${m.obs}.` : "";
+    const res = f.length ? ` Fuera de rango: ${f.join("; ")}.` : " Todas las lecturas con límite dentro de rango.";
+    if (m.lib && !e.noLib) L.push(`${cuando} — LIBERACIÓN del espacio${e.nlNum ? " (después de pruebas no satisfactorias)" : ""} como ${id}${quien}${el}${e.liberoPor ? (e.liberoPor === "AUTO" ? ", liberado al resultar satisfactoria la prueba" : `, liberación registrada por ${e.liberoPor}`) : ""}: ${lect(m)}.${res}${obs}`);
+    else if (m.lib || m.nl || e.noLib) L.push(`${cuando} — ${m.lib ? "Primera prueba" : "Prueba"} NO SATISFACTORIA${quien}${el}: ${lect(m)}.${res}${obs} El espacio NO se liberó.`);
+    else L.push(`${cuando} — Monitoreo${quien}${el}: ${lect(m)}.${res}${obs}`);
+  }
+  if (e.cierre) L.push(`${U.corta(e.cierre)} ${U.hora(e.cierre)} h — CIERRE del espacio confinado${e.cerro ? ", registrado por " + e.cerro : ""}. Ya no requiere monitoreo.`);
+  L.sort((a, b) => { const k = s => s.slice(6, 10) + s.slice(3, 5) + s.slice(0, 2) + s.slice(11, 16); return k(a).localeCompare(k(b)); });
+  // actividades de la bitacora que mencionan el espacio
+  const fe = D.fichas(e.esp).filter(x => /\d/.test(x) || x.length >= 4), ne = U.norm(e.esp);
+  const acts = (D.todas ? D.todas() : B.estado.actividades || []).filter(a => { const t = U.norm(a.txt); if (!t) return false; if (t.includes(ne)) return true; const fa = D.fichas(a.txt); return fe.length >= 2 && fe.every(x => fa.includes(x)); })
+    .sort((a, b) => B.t.clave(a.fecha, a.turno) - B.t.clave(b.fecha, b.turno));
+  const nl = M.filter(m => m.nl || (e.noLib)), conF = M.filter(m => fuera(m).length), gente = [...new Set(M.flatMap(m => D.tokensIni ? D.tokensIni(m.pers) : String(m.pers || "").split("/")).filter(Boolean))];
+  const prim = M[0], ult = M[M.length - 1];
+  const resumen = [
+    `Registros de lecturas: ${M.length} (del ${U.fh(prim.fh)} al ${U.fh(ult.fh)}).`,
+    e.noLib ? `El espacio sigue NO LIBERADO: lleva ${dur(prim.fh, ahora)} desde la primera prueba y ${M.length} prueba(s).` : null,
+    !e.noLib && e.nlNum ? `Estuvo NO LIBERADO ${dur(prim.fh, e.lib)}: ${M.filter(m => m.nl).length} prueba(s) no satisfactoria(s) antes de liberarse el ${U.fh(e.lib)}.` : null,
+    !e.noLib ? (e.cierre ? `Permaneció liberado ${dur(e.lib || prim.fh, e.cierre)}, hasta su cierre el ${U.fh(e.cierre)}.` : `Sigue LIBERADO y abierto: lleva ${dur(e.lib || prim.fh, ahora)}; requiere al menos un monitoreo por turno.`) : null,
+    conF.length ? `Registros con lecturas fuera de rango: ${conF.length} (${conF.map(m => U.cortaDM(m.fh) + " " + U.hora(m.fh)).join(", ")}).` : "Ningún registro con lecturas fuera de rango.",
+    gente.length ? `Personal de Seguridad Industrial que participó: ${gente.join(", ")}.` : null
+  ].filter(Boolean);
+  const datos = [["Edificio", e.edif || (of && of.edif)], ["Nivel / elevación", e.elev || (of && of.nivel)], ["Equipo", e.equipo], ["Cuarto", e.cuarto], ["Muestreo requerido", of ? of.reqTxt : ""], ["Equipo de protección", e.epp]].filter(x => x[1]);
+  const estado = e.noLib ? "NO LIBERADO (sin número)" : "LIBERADO el " + (e.lib ? U.fh(e.lib) : U.corta(e.fecha)) + (e.cierre ? " y CERRADO el " + U.fh(e.cierre) : "; sigue abierto");
+  const texto = `RELATORÍA DEL ESPACIO CONFINADO: ${e.esp}\n${id} · ${B.t.periodo()} · emitida el ${U.fh(ahora)}\n\n` +
+    `1. DATOS DEL ESPACIO\n${datos.map(x => `${x[0]}: ${x[1]}`).join("\n") || "Sin datos adicionales capturados."}\nEstatus actual: ${estado}.\n\n` +
+    `2. CRONOLOGÍA\n${L.map(x => "- " + x).join("\n")}\n\n3. RESUMEN\n${resumen.map(x => "- " + x).join("\n")}\n\n` +
+    `4. ACTIVIDADES RELACIONADAS EN LA BITÁCORA\n${acts.length ? acts.map(a => `- ${U.corta(a.fecha)} ${a.turno}${a.ini ? " · " + a.ini : ""}: ${String(a.txt).replace(/\s+/g, " ").trim()} (${a.est === "Concluida" ? "Realizada" : a.est || ""})${a.com ? " — " + a.com : ""}`).join("\n") : "- No se encontraron actividades de la bitácora que mencionen este espacio."}\n\n` +
+    `Rangos de referencia: O2 ${c.o2Min}–${c.o2Max} % · LEL ≤ ${c.lelMax} % · CO ≤ ${c.coMax} ppm · H2S ≤ ${c.h2sMax} ppm.`;
+  const k = v => U.esc(v ?? ""), sec = (t, items) => `<div style="margin:8px 0 3px;font-weight:bold;font-size:9pt;color:#691C32;border-bottom:1px solid #691C32">${t}</div>${items}`;
+  const lista = l => `<ul style="margin:2px 0 0;padding-left:16px;font-size:8.5pt;line-height:1.45">${l.map(x => `<li>${k(x)}</li>`).join("")}</ul>`;
+  const h = `<h2 class="doc">RELATORÍA DE ESPACIO CONFINADO</h2><div class="doc-sub">${k(e.esp)} &nbsp;|&nbsp; ${k(id)} &nbsp;|&nbsp; ${k(B.t.periodo().toUpperCase())}</div>
+    <div class="c" style="font-size:8pt;margin-bottom:4px">Estatus actual: <b>${k(estado)}</b> &nbsp;|&nbsp; Emitida: ${U.fh(ahora)} por ${k(B.usuario.ini)}</div>` +
+    sec("1. DATOS DEL ESPACIO", `<div style="font-size:8.5pt;line-height:1.5">${datos.map(x => `<b>${k(x[0])}:</b> ${k(x[1])}`).join(" &nbsp;·&nbsp; ") || "Sin datos adicionales capturados."}</div>`) +
+    sec("2. CRONOLOGÍA", lista(L)) + sec("3. RESUMEN", lista(resumen)) +
+    sec("4. ACTIVIDADES RELACIONADAS EN LA BITÁCORA", acts.length ? lista(acts.map(a => `${U.corta(a.fecha)} ${a.turno}${a.ini ? " · " + a.ini : ""}: ${String(a.txt).replace(/\s+/g, " ").trim()} (${a.est === "Concluida" ? "Realizada" : a.est || ""})${a.com ? " — " + a.com : ""}`)) : `<div style="font-size:8.5pt">No se encontraron actividades de la bitácora que mencionen este espacio.</div>`) +
+    sec("5. LECTURAS", `<table class="dat">${B.rep.ecCabMon}<tbody>${B.rep.ecFilasMon(e, M)}</tbody></table>`) +
+    `<div style="margin-top:6px;font-size:7pt;color:#595959">Rangos de referencia: O2 ${k(c.o2Min)}–${k(c.o2Max)} % · LEL ≤ ${k(c.lelMax)} % · CO ≤ ${k(c.coMax)} ppm · H2S ≤ ${k(c.h2sMax)} ppm. Documento de apoyo generado con los registros de la bitácora; verifíquelo antes de usarlo en un reporte de condición.</div>`;
+  return { texto, html: B.rep.documento("Relatoría EC", h), nombre: `RELATORIA EC ${D.ecNum(e).replace("/", "")} ${String(e.esp).replace(/[\\/:*?"<>|]/g, "-").slice(0, 50)}`, carpeta: "ESPACIOS CONFINADOS", tipo: "concentrado" };
+};
+
 /* ---------------------------------------------------------------- historial */
 B.rep.historial = function (ini, d1, d2) {
   const p = B.dom.persona(ini), r = B.dom.historial(ini, d1, d2), c = B.estado.config;
@@ -2559,7 +2687,17 @@ V.espacios = {
       });
       tr.querySelector("[data-ahora]").onclick = e => { e.preventDefault(); tr.querySelector('[data-k="hora"]').value = U.ahoraISO().slice(11, 16); };
       // si ese espacio ya se libero antes, se ofrece reutilizar sus observaciones y los datos de la tarjeta de aviso
+      // aviso inmediato si ya hay un espacio ABIERTO con ese nombre o uno muy parecido (para no dividir sus monitoreos en dos registros)
+      const alDup = () => {
+        let caja = tr.querySelector(".ec-dup");
+        if (!caja) { caja = document.createElement("div"); caja.className = "ec-dup"; cajaUlt.insertAdjacentElement("afterend", caja); }
+        const P = iEsp.value.trim() ? B.dom.ecParecidos(iEsp.value, f) : [];
+        caja.innerHTML = P.length ? `<div class="aviso ${P[0].igual ? "r" : "d"}" style="margin:8px 0 0">${B.ico("alerta")}<div><b>${P[0].igual ? "Ya hay un espacio ABIERTO con este nombre" : "Hay un espacio abierto con un nombre muy parecido"}:</b><br>
+          ${P.slice(0, 4).map(x => `${x.e.noLib ? "Sin número (NO liberado)" : "EC #" + U.esc(B.dom.ecNum(x.e))} · <b>${U.esc(x.e.esp)}</b> · ${x.e.noLib ? "1.ª prueba" : "liberado"} ${x.e.lib ? U.fh(x.e.lib) : U.corta(x.e.fecha)} · ${B.dom.ecMons(x.e).length} registro(s)`).join("<br>")}<br>
+          Si es <b>el mismo espacio, no lo captures de nuevo</b>: registra el monitoreo o la nueva prueba en <a href="#/monitoreo"><b>Monitoreo de E.C.</b></a> para que todo quede en un solo registro. Si es otro espacio, puedes continuar.</div></div>` : "";
+      };
       const alUlt = () => {
+        alDup();
         const k = U.norm(iEsp.value), u = k ? prev.find(e => U.norm(e.esp) === k && (e.obs || e.epp || [...TARJ, ...TIEM].some(([x]) => e[x]))) : null;
         if (!u) { cajaUlt.innerHTML = ""; return; }
         cajaUlt.innerHTML = `${B.ico("reutilizar", 'style="width:14px;height:14px;flex:none"')}<span>Este espacio ya se liberó el <b>${U.corta(u.fecha)}</b> (EC #${U.esc(B.dom.ecNum(u))}, ${U.esc(u.pers || u.capt || "")})${u.obs ? ": " + U.esc(u.obs) : ""}</span>
@@ -2614,6 +2752,10 @@ V.espacios = {
       if (faltan.length) { ui.toast(faltan.join("<br>"), "error"); return; }
       if (fuera.length && !(await ui.confirmar("Valores fuera del rango de referencia:<br><b>" + fuera.map(U.esc).join("<br>") + "</b><br><br>¿Registrar de todos modos?", "Atención", "Registrar", true))) return;
       const ya = items.map(it => B.estado.ec.find(e => e.fecha === f && U.norm(e.esp) === U.norm(it.esp))).filter(Boolean);
+      // mismo espacio (o muy parecido) que sigue abierto de otro dia: se pide validar antes de crear un segundo registro
+      const dup = items.map(it => ({ it, P: B.dom.ecParecidos(it.esp, f) })).filter(x => x.P.length && !ya.some(e => U.norm(e.esp) === U.norm(x.it.esp)));
+      if (dup.length && !(await ui.confirmar(`${dup.map(x => `<b>«${U.esc(x.it.esp)}»</b> ${x.P[0].igual ? "ya está <b>abierto</b>" : "se parece mucho a un espacio <b>abierto</b>"}:<br>${x.P.slice(0, 3).map(p => "&nbsp;&nbsp;• " + (p.e.noLib ? "Sin número (NO liberado)" : "EC #" + U.esc(B.dom.ecNum(p.e))) + " · " + U.esc(p.e.esp) + " · " + (p.e.lib ? U.fh(p.e.lib) : U.corta(p.e.fecha))).join("<br>")}`).join("<br><br>")}
+        <br><br>Si es el <b>mismo espacio</b>, cancela y captura el monitoreo en <b>Monitoreo de E.C.</b>; así no se dividen sus registros. Registra uno nuevo solo si de verdad es <b>otro espacio</b> (o una liberación nueva después de cerrarlo).`, "¿Es el mismo espacio confinado?", "Es otro espacio: registrar", true))) return;
       if (ya.some(e => e.noLib)) { ui.toast("Ya está registrado ese día como <b>NO LIBERADO</b>: " + ya.filter(e => e.noLib).map(e => U.esc(e.esp)).join(", ") + ".<br>Entra a <b>Monitoreo de E.C.</b> para capturar la nueva prueba o liberarlo.", "error", 9000); return; }
       if (ya.length) {
         // no se duplica: quien tambien participo se agrega al personal TSI del registro que ya existe
@@ -2848,16 +2990,19 @@ V.concentrados = {
       html: `<p style="margin:0 0 10px;line-height:1.55">Revisa cómo quedará. <b>Nada se ha cambiado todavía</b>: la fusión se hace hasta que presiones <b>Confirmar fusión</b>.</p>
         <div class="aviso v" style="margin-bottom:12px">${B.ico("ok")}<div><b>Quedará un solo registro: ${R.noLib ? "sin número (NO liberado)" : "EC #" + U.esc(B.dom.ecNum(R))} · ${U.esc(R.esp)}</b><br>
           ${R.lib ? "Liberación o 1.ª prueba: <b>" + U.fh(R.lib) + "</b> · " : ""}O2 · HR · Temp · LEL · CO · H2S: <b>${U.esc(lect(R))}</b><br>Personal TSI: <b>${U.esc(R.pers || "—")}</b> · Reporte: ${B.t.corto(R.fecha, R.turno)}</div></div>
-        <label style="font-size:12px;font-weight:700;color:var(--texto-2)">MONITOREOS QUE TENDRÁ (${mons.length})${nuevos ? ` · ${nuevos} llegan de los registros que se eliminan` : ""}</label>
-        ${mons.length ? `<div class="tabla-cont" style="margin:6px 0 12px;max-height:260px;overflow:auto"><table class="tabla"><thead><tr><th>Fecha y hora</th><th>O2 · HR · Temp · LEL · CO · H2S</th><th>Personal</th><th>De dónde viene</th></tr></thead><tbody>
-          ${mons.map(m => `<tr style="${m._de ? "background:var(--dorado-claro)" : ""}"><td class="tnum">${U.fh(m.fh)}${m.elev ? ` · elev. ${U.esc(m.elev)}` : ""}</td><td class="tnum">${U.esc(lect(m))}</td><td>${U.esc(m.pers || "")}</td><td>${m._de ? "<b>" + U.esc(m._de) + "</b>" : "Ya estaba en este registro"}</td></tr>`).join("")}</tbody></table></div>`
+        <label style="font-size:12px;font-weight:700;color:var(--texto-2)">MONITOREOS QUE TENDRÁ (<span id="fNum">${mons.length}</span> de ${mons.length})${nuevos ? ` · ${nuevos} llegan de los registros que se eliminan` : ""}</label>
+        ${mons.length ? `<p class="muted peque" style="margin:2px 0 0">Se conservan <b>todos</b>. Si alguno no debe quedar (por ejemplo, uno capturado dos veces con distinta hora), quítale la palomita.</p>
+          <div class="tabla-cont" style="margin:6px 0 12px;max-height:260px;overflow:auto"><table class="tabla"><thead><tr><th title="Conservar">✔</th><th>Fecha y hora</th><th>O2 · HR · Temp · LEL · CO · H2S</th><th>Personal</th><th>De dónde viene</th></tr></thead><tbody>
+          ${mons.map(m => `<tr style="${m._de ? "background:var(--dorado-claro)" : ""}"><td class="c"><input type="checkbox" checked data-mk="${U.esc(m.fh + "|" + (m.elev || ""))}" style="width:17px;height:17px"></td><td class="tnum">${U.fh(m.fh)}${m.elev ? ` · elev. ${U.esc(m.elev)}` : ""}</td><td class="tnum">${U.esc(lect(m))}</td><td>${U.esc(m.pers || "")}</td><td>${m._de ? "<b>" + U.esc(m._de) + "</b>" : "Ya estaba en este registro"}</td></tr>`).join("")}</tbody></table></div>`
           : `<p class="muted peque" style="margin:6px 0 12px">Ninguno: los registros tenían la misma lectura y no tenían monitoreos.</p>`}
         ${antesLib.length ? `<div class="aviso d">${B.ico("info")}<div>${antesLib.length} monitoreo(s) quedan con fecha <b>anterior</b> a la liberación del registro que se conserva. Si el registro más antiguo es el correcto, regresa y elige conservar ese.</div></div>` : ""}
         <div class="aviso r" style="margin:0">${B.ico("basura")}<div><b>Se eliminará${elim.length === 1 ? "" : "n"} ${elim.length} registro${elim.length === 1 ? "" : "s"}:</b> ${elim.map(e => (e.noLib ? "sin número" : "EC #" + U.esc(B.dom.ecNum(e))) + " (" + (U.fh(e.lib) || B.t.corto(e.fecha, e.turno)) + ")").join(", ")}. No se puede deshacer desde la pantalla.</div></div>`,
-      botones: [{ t: "Regresar sin cambiar nada", c: "sec", v: null }, { t: "Confirmar fusión", c: "peligro", v: true }]
+      alAbrir: v => v.querySelectorAll("[data-mk]").forEach(ch => ch.onchange = () => { ch.closest("tr").style.opacity = ch.checked ? "" : ".45"; v.querySelector("#fNum").textContent = v.querySelectorAll("[data-mk]:checked").length; }),
+      botones: [{ t: "Regresar sin cambiar nada", c: "sec", v: null }, { t: "Confirmar fusión", c: "peligro", v: v => ({ quitar: [...v.querySelectorAll("[data-mk]:not(:checked)")].map(ch => ch.dataset.mk) }) }]
     });
     if (!ok) { ui.toast("No se fusionó nada.", "", 3000); return; }
-    await ejecutar(async () => { const x = await B.api.op("ec", "fusionar", { destino: r, nums: L.map(e => e.num) }); this.sel = new Set(); return x; },
+    if (ok.quitar.length && !(await ui.confirmar(`Quitaste la palomita a <b>${ok.quitar.length}</b> monitoreo(s): <b>no se conservarán</b>. ¿Continuar con la fusión?`, "Monitoreos que no se conservan", "Sí, fusionar", true))) { ui.toast("No se fusionó nada.", "", 3000); return; }
+    await ejecutar(async () => { const x = await B.api.op("ec", "fusionar", { destino: r, nums: L.map(e => e.num), quitar: ok.quitar }); this.sel = new Set(); return x; },
       x => `Registros fusionados en <b>${U.esc(B.dom.ecNum(dest))} · ${U.esc(dest.esp)}</b>: ${x.fusionados} duplicado(s) eliminado(s); ahora tiene ${x.monitoreos} monitoreo(s).`);
   },
   async editar(col, num) {
@@ -2917,6 +3062,17 @@ V.concentrados = {
 V.monitoreo = {
   titulo: "Monitoreo de espacios confinados",
   sub() { return "Al menos un monitoreo por turno en cada espacio que siga liberado · " + B.app.textoTurno(); },
+  // Relatoria: el texto se puede copiar (para pegarlo en el reporte de condicion) o imprimir / guardar en PDF con la tabla de lecturas
+  async relatoria(e) {
+    const R = B.rep.ecRelatoria(e);
+    await ui.modal({
+      titulo: "Relatoría · " + U.esc(e.noLib ? "sin número" : "EC #" + B.dom.ecNum(e)) + " · " + U.esc(e.esp), icono: "doc", ancho: true,
+      html: `<p class="muted peque" style="margin:0 0 8px">Cronología armada con los registros de la bitácora. Puedes corregir el texto antes de copiarlo; el PDF y la impresión llevan además la tabla de lecturas.</p>
+        <textarea class="inp" id="relTxt" style="min-height:min(430px,52vh);font-family:inherit;font-size:13px;line-height:1.5">${U.esc(R.texto)}</textarea>`,
+      botones: [{ t: "Cerrar", c: "sec", v: null }, { t: "Imprimir", c: "sec", antes: () => { B.rep.imprimir(R); return false; } }, { t: B.modoLocal ? "Guardar PDF" : "Generar PDF", c: "", antes: async v => { await B.rep.pdf(R, v.querySelector(".modal-pie .btn:nth-child(3)")); return false; } },
+        { t: "Copiar texto", c: "verde", antes: async v => { const t = v.querySelector("#relTxt").value; try { await navigator.clipboard.writeText(t); } catch (x) { const a = v.querySelector("#relTxt"); a.select(); document.execCommand("copy"); } ui.toast("Relatoría copiada. Pégala en el reporte de condición.", "ok"); return false; } }]
+    });
+  },
   valores(m) {
     return B.dom.LECT.map(([k, e]) => String(m[k] ?? "").trim() === "" ? "" : `<span class="mon-val ${B.dom.rango(k, m[k]) ? "fuera" : ""}"><b>${e}</b>${U.esc(m[k])}</span>`).join(" ") || `<span class="muted peque">sin lecturas</span>`;
   },
@@ -2966,12 +3122,35 @@ V.monitoreo = {
           <div class="meta"><span>liberado ${e.lib ? U.fh(e.lib) : U.corta(e.fecha)}</span><span>cerrado ${U.fh(e.cierre)} por ${U.esc(e.cerro || "")}</span><span>${(e.mon || []).length} monitoreo(s)</span></div></div>
           <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn chico sec" data-a="his">${B.ico("historial")} Historial</button>${sup ? `<button class="btn chico sec" data-a="bitc">${B.ico("imprimir")} Bitácora</button>` : ""}
           ${sup ? `<button class="btn chico fantasma" data-a="rea">Reabrir</button><button class="btn chico fantasma" data-a="edi">${B.ico("editar")} Editar registro</button>` : ""}</div></div>`).join("")}</div></div>` : ""}`;
+    if (sup) {
+      // Reportes para imprimir o guardar en PDF: monitoreos de los espacios liberados o no liberados, y seguimiento de los no liberados
+      const R = this.rep = this.rep || { d1: "", d2: "", tipo: "todos" }, nNL = B.estado.ec.filter(e => e.noLib || +e.nlNum > 0).length;
+      const TIPOS = { todos: ["Todos los espacios", () => true], abiertos: ["Liberados que siguen abiertos", e => !e.noLib && !e.cierre], lib: ["Liberados (abiertos y cerrados)", e => !e.noLib], cerr: ["Liberados ya cerrados", e => !e.noLib && !!e.cierre], nolib: ["NO liberados (actuales)", e => !!e.noLib] };
+      const caja = document.createElement("div"); caja.className = "tarjeta";
+      caja.innerHTML = `${cab("pdf", "g", "Reportes de monitoreo", "Para imprimir o guardar en PDF. El rango de fechas es opcional; vacío = toda la recarga.")}
+        <div class="fila" style="align-items:flex-end"><div class="campo" style="flex:0 0 160px"><label>Desde</label><input class="inp" type="date" id="mrD1" value="${R.d1}"></div><div class="campo" style="flex:0 0 160px"><label>Hasta</label><input class="inp" type="date" id="mrD2" value="${R.d2}"></div>
+          <div class="campo" style="flex:1 1 240px"><label>Espacios del reporte de monitoreos</label><select class="inp" id="mrTipo">${Object.entries(TIPOS).map(([k, v]) => `<option value="${k}" ${R.tipo === k ? "selected" : ""}>${v[0]} (${B.estado.ec.filter(v[1]).length})</option>`).join("")}</select></div></div>
+        <div class="mon-reps"><div><b>Reporte de monitoreos</b><span>Cada espacio con todas sus lecturas: liberación, monitoreos y pruebas, con lo que esté fuera de rango en rojo.</span><p><button class="btn chico sec" data-r="mon" data-m="imp">${B.ico("imprimir")} Imprimir</button><button class="btn chico" data-r="mon" data-m="pdf">${B.ico("pdf")} PDF</button></p></div>
+          <div><b>Bitácora de seguimiento de NO liberados (${nNL})</b><span>Los que siguen sin liberarse y los que ya se liberaron: primera prueba, motivo, cuándo se liberaron, con qué número y cuánto tardaron. Incluye el detalle de cada prueba.</span><p><button class="btn chico sec" data-r="nl" data-m="imp">${B.ico("imprimir")} Imprimir</button><button class="btn chico" data-r="nl" data-m="pdf">${B.ico("pdf")} PDF</button></p></div>
+          <div><b>Hojas para llenar a mano (${noLib.length} no liberados)</b><span>Una hoja por cada espacio NO liberado, con sus pruebas ya capturadas y renglones en blanco para las siguientes.</span><p><button class="btn chico sec" data-r="hojas" data-m="imp" ${noLib.length ? "" : "disabled"}>${B.ico("imprimir")} Imprimir</button><button class="btn chico" data-r="hojas" data-m="pdf" ${noLib.length ? "" : "disabled"}>${B.ico("pdf")} PDF</button></p></div></div>`;
+      c.appendChild(caja);
+      caja.querySelector("#mrD1").onchange = e => R.d1 = e.target.value; caja.querySelector("#mrD2").onchange = e => R.d2 = e.target.value; caja.querySelector("#mrTipo").onchange = e => R.tipo = e.target.value;
+      caja.querySelectorAll("[data-r]").forEach(b => b.onclick = ev => {
+        if (R.d1 && R.d2 && R.d2 < R.d1) return ui.toast("La fecha «Hasta» no puede ser anterior a «Desde».", "error");
+        const doc = b.dataset.r === "mon" ? B.rep.ecMonitoreos(B.estado.ec.filter(TIPOS[R.tipo][1]).sort((x, y) => (!!x.noLib - !!y.noLib) || x.num - y.num), R.d1, R.d2, TIPOS[R.tipo][0])
+          : b.dataset.r === "nl" ? B.rep.ecSeguimientoNL(R.d1, R.d2) : B.rep.ecBitacora(noLib);
+        b.dataset.m === "pdf" ? B.rep.pdf(doc, ev.currentTarget) : B.rep.imprimir(doc);
+      });
+    }
+    // relatoria de cada espacio (supervisores): cronologia en texto para la reportabilidad y los reportes de condicion
+    if (sup) c.querySelectorAll(".item[data-num]").forEach(it => { const b0 = it.querySelector("[data-a]"); if (b0) b0.parentNode.insertAdjacentHTML("beforeend", `<button class="btn chico sec" data-a="rel" title="Cronología en texto del espacio, para la reportabilidad y el reporte de condición (RC)">${B.ico("doc")} Relatoría</button>`); });
     const ec = n => B.estado.ec.find(x => +x.num === +n);
     c.querySelectorAll(".item[data-num] [data-a]").forEach(b => b.onclick = async () => {
       const e = ec(b.closest("[data-num]").dataset.num); if (!e) return;
       const a = b.dataset.a;
       if (a === "cap") return this.capturar(e);
       if (a === "lib") return this.liberar(e);
+      if (a === "rel") return this.relatoria(e);
       if (a === "his") return this.historial(e.num);
       if (a === "bit") return this.imprimir([e], b);
       if (a === "bitc") return B.rep.pdf(B.rep.ecBitacora([e]), b);
@@ -6451,7 +6630,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "3.7", servidorViejo: false,
+  info: {}, VERSION: "3.8", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -6634,7 +6813,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "3.7")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "3.8")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
