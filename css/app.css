@@ -441,6 +441,12 @@ mark.kr { background: #FBD9D5; color: #8C1D15; } mark.ke { background: #FCE9B8; 
 .pr-anexos { margin-top: 10px; border-top: 1px solid #F0ECE8; padding-top: 8px; } .pr-anexos > div { display: flex; align-items: center; gap: 10px; padding: 5px 2px; font-size: 13px; flex-wrap: wrap; } .pr-anexos > div > span { flex: 1 1 200px; } .pr-anexos small { color: var(--texto-3); }
 .pr-hist { margin-top: 10px; font-size: 12.5px; } .pr-hist summary { cursor: pointer; font-weight: 600; color: var(--texto-2); } .pr-hist > div { display: flex; gap: 10px; align-items: center; padding: 5px 2px; flex-wrap: wrap; }
 .pr-ax { display: grid; grid-template-columns: 1fr 76px 76px 34px; gap: 6px; align-items: center; margin-bottom: 6px; } .pr-ax .inp { padding: 7px 9px; }
+.pr-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+.pr-kpi { display: block; padding: 11px 14px; border-radius: 12px; background: #FAF8F6; border: 2px solid transparent; text-decoration: none; color: var(--texto-2); } .pr-kpi:hover { border-color: var(--borde-2); } .pr-kpi.on { border-color: var(--guinda); background: #fff; }
+.pr-kpi b { display: block; font-size: 25px; line-height: 1.1; } .pr-kpi span { font-size: 11.5px; }
+.pr-tabla td { font-size: 12.5px; padding: 7px 8px; } .pr-tabla th { padding: 8px; } .pr-tabla tr[data-id] { cursor: pointer; } .pr-tit { min-width: 240px; line-height: 1.35; }
+.pr-tabla tr.pr-urg td:first-child, .pr-tabla tr.pr-ven td:first-child { box-shadow: inset 4px 0 0 var(--rojo); } .pr-tabla tr.pr-pv td:first-child { box-shadow: inset 4px 0 0 #E0A100; } .pr-tabla tr.pr-ven td { background: #FFF5F4; }
+.badge.pr-venc { background: var(--rojo); color: #fff; } .pr-hits td { background: #FCFBFA; padding-top: 0 !important; }
 /* === ESTANDARES POE (consulta) === */
 .poe-q { font-size: 16px; padding: 13px 14px; }
 .poe-docs { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 8px; }

@@ -592,7 +592,7 @@ B.modoLocal = B.modoMovil || location.protocol === "file:" || /[?&]modo=local/.t
 
 B.local = {
   raiz: null, sub: "datos", sesion: null, tabId: Math.random().toString(36).slice(2),
-  LISTAS: ["personal", "usuarios", "cambios", "actividades", "ec", "vig", "turnos", "he", "hojas"],
+  LISTAS: ["personal", "usuarios", "cambios", "actividades", "ec", "vig", "turnos", "he", "hojas", "procedimientos"],
   OBJETOS: ["config", "catalogos", "imagenes"],
 
   /* ---------------------------------------------------------- carpeta */
@@ -773,7 +773,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "3.8", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "3.9", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -1012,7 +1012,7 @@ B.local = {
     return {
       ok: true, usuario: Object.assign(this.infoUsuario(s, u), { esp: !sup && esps.includes(s.ini), admin: sup && (admins.includes(s.rpe) || !hayAdm) }), especializados: sup ? esps : undefined, admins: sup ? admins : undefined, config: db.config, catalogos: db.catalogos, imgVer: (db.imagenes && db.imagenes.ver) || "", personal: db.personal, cambios: db.cambios,
       ec: db.ec, vig: db.vig, actividades: sup ? db.actividades : db.actividades.filter(a => mias(a) || !a.ini), he: sup ? db.he : db.he.filter(mias),
-      turnos: sup ? db.turnos : [], hojas: db.hojas || [], tarjPend: sup ? (tjL.decl || []).filter(x => x.est === "P").length : undefined,
+      turnos: sup ? db.turnos : [], hojas: db.hojas || [], procedimientos: db.procedimientos || [], tarjPend: sup ? (tjL.decl || []).filter(x => x.est === "P").length : undefined,
       equipo: sup ? undefined : db.actividades.filter(a => a.ini && !mias(a) && (a.est === "Pendiente" || a.est === "En proceso" || a.fecha >= U.sumar(U.iso(new Date()), -3))),
       sugerencias: [...sug.values()].sort((a, b) => (b.mia - a.mia) || (b.n - a.n)).slice(0, 1500),
       usuarios: sup ? db.usuarios.map(x => ({ rpe: x.rpe, rol: x.rol, cambiada: !!x.cambiada, ultimo: x.ultimo || "", ofCat: x.ofCat || "", ofTit: x.ofTit || "", ofDepto: x.ofDepto || "" })) : undefined,
@@ -1540,7 +1540,7 @@ B.local = {
       }
       case "catalogos.reemplazar": soloSup(); await this.escribir("catalogos", d.catalogos || {}); return { ok: true };
       case "catalogos.agregar": { const cat = await this.leer("catalogos") || {}; if (this.agregarCatalogo(cat, d.tipo, d.texto, d.item)) await this.escribir("catalogos", cat); return { ok: true }; }
-      case "config.guardar": { soloSup(); const ant = (await this.leer("config")) || {}, c = d.config || {}; for (const k of ["recibidos", "cargas", "admins"]) if (k in ant) c[k] = ant[k]; await this.escribir("config", c); return { ok: true }; }
+      case "config.guardar": { soloSup(); const ant = (await this.leer("config")) || {}, c = d.config || {}; for (const k of ["recibidos", "cargas", "admins", "procVig"]) if (k in ant) c[k] = ant[k]; await this.escribir("config", c); return { ok: true }; }
       case "intercambio.registrar": {
         const c = (await this.leer("config")) || {}; let l = (c.recibidos || []).map(String);
         for (const u of d.uids || []) { const x = String(u); if (x && x.length <= 40 && !l.includes(x)) l.push(x); }
@@ -4863,83 +4863,150 @@ V.hoja = {
     }
   };
 
+  /* Semaforo de vigencia, igual que en el Excel de control: dias que faltan para la fecha de vigencia.
+     Vigente: faltan "vig" dias o mas (90); por vencer: "pv" o mas (30); urgente: menos; vencido: ya paso la fecha. */
+  PR.umbral = () => { const u = (B.estado.config || {}).procVig || {}; return { vig: +u.vig || 90, pv: u.pv == null ? 30 : +u.pv }; };
+  PR.dias = d => d.vigencia ? U.dia(d.vigencia) - U.dia(U.iso(new Date())) : null;
+  PR.estado = d => { const n = PR.dias(d), u = PR.umbral(); return n == null ? "sf" : n < 0 ? "ven" : n < u.pv ? "urg" : n < u.vig ? "pv" : "vig"; };
+  PR.EST = { vig: ["v", "Vigente", "#E2F0D9", "#1E6B4A"], pv: ["d", "Por vencer", "#FFF2CC", "#7F6000"], urg: ["r", "Urgente", "#FFD2D2", "#C00000"], ven: ["r", "VENCIDO", "#C00000", "#FFFFFF"], sf: ["n", "Sin fecha", "#EDEDED", "#595959"] };
+  PR.esPCI = d => /incendio/i.test(d.area || "");
+  // Documento imprimible: el control de vigencia tal como se lleva en el Excel
+  PR.docControl = function (lista, titulo) {
+    const c = B.estado.config, k = v => U.esc(v ?? ""), u = PR.umbral(), n = e => lista.filter(d => PR.estado(d) === e).length;
+    const h = `<h2 class="doc">CONTROL DE VIGENCIA DE PROCEDIMIENTOS</h2><div class="doc-sub">SEGURIDAD INDUSTRIAL · SUBGERENCIA DE SEGURIDAD NUCLEAR${titulo ? " &nbsp;|&nbsp; " + k(titulo) : ""}</div>
+      <div class="c" style="font-size:8pt;margin-bottom:6px">Procedimientos: <b>${lista.length}</b> &nbsp;|&nbsp; Vigentes: <b>${n("vig")}</b> &nbsp;|&nbsp; Por vencer (menos de ${u.vig} días): <b>${n("pv")}</b> &nbsp;|&nbsp; Urgentes (menos de ${u.pv} días): <b>${n("urg")}</b> &nbsp;|&nbsp; Vencidos: <b>${n("ven")}</b> &nbsp;|&nbsp; Emitido: ${U.fh(U.ahoraISO())}</div>
+      <table class="dat"><thead><tr><th style="width:3.5%">No.</th><th style="width:9%">PROCEDIMIENTO</th><th style="width:4%">CLASE</th><th style="width:7%">SRP</th><th style="width:3.5%">REV</th><th style="width:4.5%">No. CAMBIO</th><th style="width:4.5%">FREC. REV.</th><th style="width:7.5%">FECHA EMISIÓN</th><th style="width:7.5%">FECHA VIGENCIA</th><th style="width:5.5%">DÍAS RESTANTES</th><th style="width:8%">ESTADO</th><th>TÍTULO DEL PROCEDIMIENTO</th></tr></thead><tbody>` +
+      lista.map((d, i) => { const e = PR.EST[PR.estado(d)], dd = PR.dias(d); return `<tr><td>${k(d.orden || i + 1)}</td><td class="b">${k(d.clave)}</td><td>${k(d.clase)}</td><td>${k(d.srp)}</td><td>${k(d.rev)}</td><td>${k(d.cambio)}</td><td>${k(d.frec)}</td><td>${U.corta(d.fecha)}</td><td>${U.corta(d.vigencia)}</td><td class="b">${dd == null ? "" : dd}</td>
+        <td class="b" style="background:${e[2]};color:${e[3]}">${e[1].toUpperCase()}</td><td class="izq" style="text-align:left">${k(d.titulo)}</td></tr>`; }).join("") + `</tbody></table>`;
+    return { html: B.rep.documento("Control de vigencia de procedimientos", h, true), horizontal: true, nombre: `CONTROL VIGENCIA PROCEDIMIENTOS ${c.proyecto || ""} ${U.corta(U.iso(new Date())).replace(/\//g, ".")}`.replace(/\s+/g, " "), carpeta: "PROCEDIMIENTOS", tipo: "concentrado" };
+  };
+
   V.procedimientos = {
-    titulo: "Procedimientos", q: "", area: "Todas",
-    sub() { return "Procedimientos, políticas y estándares de Seguridad Industrial y Protección Contra Incendio · últimas revisiones"; },
+    titulo: "Procedimientos", q: "", area: "Todas", est: "todos", orden: "no",
+    sub() { return "Control de vigencia de los procedimientos de Seguridad Industrial y Protección Contra Incendio, con su PDF para consulta"; },
+    vigentes() { return PR.lista().filter(d => d.vigente !== false); },
     render(c) {
-      if (B.modoLocal) { c.innerHTML = `<div class="tarjeta">${B.ui.vacio("Los procedimientos se consultan en la bitácora de la PC (necesitan el servidor).", "doc")}</div>`; return; }
-      const sup = B.dom.esSup(), todos = PR.lista(), vig = todos.filter(d => d.vigente !== false);
-      c.innerHTML = `<div class="tarjeta">${cab("doc", "g", "Procedimientos, políticas y estándares", `${vig.length} documento${vig.length === 1 ? "" : "s"} vigente${vig.length === 1 ? "" : "s"}. Busca por clave, título o por palabras de su contenido.`, sup ? `<button class="btn" id="prSubir">${B.ico("subir")} Subir documento</button>` : "")}
-          <div class="fila" style="align-items:flex-end"><div class="campo" style="flex:3 1 280px;margin:0"><input class="inp poe-q" id="prQ" value="${esc(this.q)}" placeholder="Ej. SI-9981, trabajos en caliente, permiso, andamios…" autocomplete="off"></div>
-            <div class="campo" style="flex:0 0 auto;margin:0">${B.ui.seg("area", ["Todas", "Seguridad Industrial", "Contra Incendio"], this.area)}</div></div></div>
+      const sup = B.dom.esSup() && !B.modoLocal, vig = this.vigentes(), u = PR.umbral(), n = e => vig.filter(d => PR.estado(d) === e).length, sinPdf = vig.filter(d => !d.archivo).length;
+      const kpi = (k, num, txt, color) => `<a href="#" class="pr-kpi ${this.est === k ? "on" : ""}" data-est="${k}"><b style="color:${color}">${num}</b><span>${txt}</span></a>`;
+      c.innerHTML = `<div class="tarjeta">${cab("doc", "g", "Control de vigencia de procedimientos", `${vig.length} procedimientos. El semáforo cuenta los días que faltan para la fecha de vigencia.`,
+          `${sup ? `<button class="btn" id="prSubir">${B.ico("mas")} Agregar procedimiento</button>` : ""}<button class="btn sec" id="prImp">${B.ico("imprimir")} Imprimir</button>${B.modoLocal ? "" : `<button class="btn sec" id="prPdf">${B.ico("pdf")} PDF</button>`}<button class="btn sec" id="prCsv">${B.ico("descargar")} Excel (CSV)</button>`)}
+          <div class="pr-kpis">${kpi("todos", vig.length, "Todos", "var(--texto)")}${kpi("vig", n("vig"), "Vigentes · " + u.vig + " días o más", "var(--verde)")}${kpi("pv", n("pv"), "Por vencer · menos de " + u.vig + " días", "#8a6526")}${kpi("urg", n("urg"), "Urgentes · menos de " + u.pv + " días", "var(--rojo)")}${kpi("ven", n("ven"), "Vencidos", "var(--rojo)")}${B.modoLocal ? "" : kpi("sinpdf", sinPdf, "Sin PDF cargado", "var(--azul)")}</div>
+          <div class="fila" style="align-items:flex-end;margin-top:14px"><div class="campo" style="flex:3 1 260px;margin:0"><label>Buscar</label><input class="inp" id="prQ" value="${esc(this.q)}" placeholder="No. de procedimiento, palabras del título${B.modoLocal ? "" : " o del contenido del PDF"}…" autocomplete="off"></div>
+            <div class="campo" style="flex:0 0 auto;margin:0"><label>Área</label>${B.ui.seg("area", ["Todas", "Seguridad Industrial", "Contra Incendio"], this.area)}</div>
+            <div class="campo" style="flex:0 0 210px;margin:0"><label>Orden</label><select class="inp" id="prOrd"><option value="no" ${this.orden === "no" ? "selected" : ""}>Como en el control (No.)</option><option value="dias" ${this.orden === "dias" ? "selected" : ""}>Los que vencen primero</option><option value="clave" ${this.orden === "clave" ? "selected" : ""}>Por número de procedimiento</option></select></div>
+            ${sup ? `<button class="btn fantasma" id="prUmb" title="Días del semáforo">${B.ico("engrane")} Semáforo</button>` : ""}</div></div>
         <div id="prRes"></div>`;
       const inp = c.querySelector("#prQ");
       inp.oninput = U.debounce(() => { this.q = inp.value; this.pinta(c); }, 250);
       B.ui.activarSeg(c, (s, v) => { this.area = v; this.pinta(c); });
+      c.querySelector("#prOrd").onchange = e => { this.orden = e.target.value; this.pinta(c); };
+      c.querySelectorAll("[data-est]").forEach(a => a.onclick = e => { e.preventDefault(); this.est = a.dataset.est; c.querySelectorAll("[data-est]").forEach(x => x.classList.toggle("on", x === a)); this.pinta(c); });
       const bs = c.querySelector("#prSubir"); if (bs) bs.onclick = () => this.editar(null);
+      const bu = c.querySelector("#prUmb"); if (bu) bu.onclick = () => this.semaforo();
+      c.querySelector("#prImp").onclick = () => B.rep.imprimir(PR.docControl(this.visibles, this.tituloFiltro()));
+      const bp = c.querySelector("#prPdf"); if (bp) bp.onclick = e => B.rep.pdf(PR.docControl(this.visibles, this.tituloFiltro()), e.currentTarget);
+      c.querySelector("#prCsv").onclick = () => U.csv("Control vigencia procedimientos", ["No.", "Procedimiento", "Clase", "SRP", "Rev", "No. cambio", "Área", "Frec. rev.", "Fecha emisión", "Fecha vigencia", "Días restantes", "Estado", "Título", "PDF"],
+        this.visibles.map((d, i) => [d.orden || i + 1, d.clave, d.clase, d.srp, d.rev, d.cambio, d.areaResp || d.area, d.frec, U.corta(d.fecha), U.corta(d.vigencia), PR.dias(d) ?? "", PR.EST[PR.estado(d)][1], d.titulo, d.archivo ? "Sí" : "No"]));
       this.pinta(c);
     },
+    visibles: [],
+    tituloFiltro() { return [this.est === "todos" ? "" : this.est === "sinpdf" ? "Sin PDF" : PR.EST[this.est][1], this.area === "Todas" ? "" : this.area, this.q.trim() ? "«" + this.q.trim() + "»" : ""].filter(Boolean).join(" · "); },
     async pinta(c) {
       const caja = c.querySelector("#prRes"); if (!caja) return;
-      const sup = B.dom.esSup(), todos = PR.lista(), q = this.q.trim();
-      const deArea = d => this.area === "Todas" || (this.area === "Contra Incendio" ? /incendio/i.test(d.area || "") : !/incendio/i.test(d.area || ""));
-      const vig = todos.filter(d => d.vigente !== false && deArea(d)).sort((a, b) => String(a.clave || a.titulo).localeCompare(String(b.clave || b.titulo), "es", { numeric: true }));
-      if (!todos.length) {
-        caja.innerHTML = `<div class="tarjeta">${B.ui.vacio(sup ? "Todavía no hay documentos. Usa <b>Subir documento</b> para cargar el PDF de un procedimiento, una política o un estándar." : "Todavía no hay documentos cargados. Los sube un supervisor.", "doc")}</div>`;
-        return;
-      }
-      let extra = new Map(), orden = vig;
+      const sup = B.dom.esSup() && !B.modoLocal, q = this.q.trim();
+      const deArea = d => this.area === "Todas" || (this.area === "Contra Incendio" ? PR.esPCI(d) : !PR.esPCI(d)), deEst = d => this.est === "todos" || (this.est === "sinpdf" ? !d.archivo : PR.estado(d) === this.est);
+      let L = this.vigentes().filter(d => deArea(d) && deEst(d)), extra = new Map();
+      const ord = { no: (a, b) => (a.orden || 1e6) - (b.orden || 1e6) || a.id - b.id, dias: (a, b) => (PR.dias(a) ?? 1e9) - (PR.dias(b) ?? 1e9), clave: (a, b) => String(a.clave).localeCompare(String(b.clave), "es", { numeric: true }) };
+      L.sort(ord[this.orden] || ord.no);
+      if (!PR.lista().length) { caja.innerHTML = `<div class="tarjeta">${B.ui.vacio(B.modoMovil ? "El control de procedimientos llega con el <b>paquete de datos</b> de la PC." : "Todavía no hay procedimientos en el control." + (sup ? " Usa <b>Agregar procedimiento</b>." : ""), "doc")}</div>`; this.visibles = []; return; }
       if (q) {
-        let tx = {}; try { tx = await PR.cargarTextos(); } catch (e) { B.ui.error(e); }
-        if (q !== this.q.trim()) return;                         // cambio la busqueda mientras se cargaba
-        const R = PR.buscar(q, vig, tx); orden = R.map(r => r.d); extra = new Map(R.map(r => [r.d.id, r]));
-        if (!R.length) { caja.innerHTML = `<div class="tarjeta">${B.ui.vacio(`Nada con «${esc(q)}» en los documentos${this.area === "Todas" ? "" : " de " + esc(this.area)}.`, "buscar")}</div>`; return; }
+        let tx = {}; if (!B.modoLocal) try { tx = await PR.cargarTextos(); } catch (e) { }
+        if (q !== this.q.trim()) return;
+        const R = PR.buscar(q, L, tx); extra = new Map(R.map(r => [r.d.id, r])); L = L.filter(d => extra.has(d.id));
       }
-      const fila = d => {
-        const r = extra.get(d.id), ax = d.anexos || [], hist = todos.filter(x => x !== d && x.vigente === false && d.clave && U.norm(x.clave) === U.norm(d.clave)).sort((a, b) => b.id - a.id);
-        return `<div class="tarjeta pr-doc" data-id="${d.id}">
-          <div class="pr-cab">${d.clave ? `<span class="pr-clave">${esc(d.clave)}</span>` : ""}<b>${esc(d.titulo || d.clave)}</b>${d.rev ? `<span class="badge d">Rev. ${esc(d.rev)}</span>` : ""}<span class="badge ${/incendio/i.test(d.area || "") ? "r" : "v"}">${/incendio/i.test(d.area || "") ? "Contra incendio" : "Seguridad Industrial"}</span></div>
-          <div class="pr-meta">${esc(d.tipo || "Documento")}${d.paginas ? " · " + d.paginas + " págs." : ""}${d.fecha ? " · revisión del " + U.corta(d.fecha) : ""} · subido el ${U.corta(d.fh)} por ${esc(d.subio || "")}${d.nota ? " · " + esc(d.nota) : ""}${d.archivo && d.conTexto === false ? ` · <span style="color:#8a6526">PDF sin texto: no se puede buscar en su contenido</span>` : ""}</div>
-          ${d.archivo ? `<div class="pr-acc"><a class="btn chico" href="${PR.url(d.id)}" target="_blank">${B.ico("ojo")} Abrir</a><button class="btn chico sec" data-imp>${B.ico("imprimir")} Imprimir todo</button>${ax.length ? `<button class="btn chico sec" data-impax>${B.ico("imprimir")} Solo los anexos (${ax.length})</button>` : ""}
-              ${sup ? `<button class="btn chico fantasma" data-ed>${B.ico("editar")} Datos y anexos</button><button class="btn chico fantasma" data-rev>${B.ico("subir")} Nueva revisión</button><button class="btn chico fantasma" data-del>${B.ico("basura")}</button>` : ""}</div>`
-            : `<div class="aviso d" style="margin:0">${B.ico("alerta")}<div>Falta el archivo PDF.${sup ? ` <a href="#" data-ed>Súbelo aquí</a>.` : ""}</div></div>`}
-          ${r && r.hits.length ? `<div class="pr-anexos">${r.hits.map(h => `<a class="poe-res" href="${PR.url(d.id, h.p)}" target="_blank"><b>Pág. ${h.p}</b><span>${h.html}</span></a>`).join("")}${r.mas ? `<p class="muted peque" style="margin:6px 0 0">y ${r.mas} página(s) más.</p>` : ""}</div>` : ""}
-          ${ax.length && d.archivo ? `<div class="pr-anexos">${ax.map((a, i) => `<div><span><b>${esc(a.nombre)}</b> <small>págs. ${a.de}${a.a > a.de ? "–" + a.a : ""}</small></span><a class="btn chico fantasma" href="${PR.url(d.id, a.de)}" target="_blank">Ver</a><button class="btn chico fantasma" data-ax="${i}">${B.ico("imprimir")} Imprimir</button></div>`).join("")}</div>` : ""}
-          ${hist.length ? `<details class="pr-hist"><summary>Revisiones anteriores (${hist.length})</summary>${hist.map(h => `<div data-h="${h.id}"><span>Rev. ${esc(h.rev || "—")}${h.fecha ? " · " + U.corta(h.fecha) : ""} · subida el ${U.corta(h.fh)}</span>${h.archivo ? `<a href="${PR.url(h.id)}" target="_blank">Abrir</a>` : ""}${sup ? `<a href="#" data-hv>Volver a dejarla vigente</a><a href="#" data-hd style="color:var(--rojo)">Borrar</a>` : ""}</div>`).join("")}</details>` : ""}
-        </div>`;
-      };
-      caja.innerHTML = (q ? `<p class="muted peque" style="margin:0 2px 10px"><b>${orden.length}</b> documento${orden.length === 1 ? "" : "s"} con «${esc(q)}»</p>` : "") + orden.map(fila).join("");
-      const op = async (accion, datos, msg) => { try { await B.api.op("proc", accion, datos); PR.textos = null; await B.api.recargar(); if (msg) B.ui.toast(msg, "ok"); this.pinta(c); } catch (e) { B.ui.error(e); } };
-      caja.querySelectorAll(".pr-doc").forEach(el => {
-        const d = todos.find(x => +x.id === +el.dataset.id), on = (sel, fn) => el.querySelectorAll(sel).forEach(b => b.onclick = e => { e.preventDefault(); fn(b); });
-        on("[data-imp]", () => PR.imprimirTodo(d));
-        on("[data-impax]", () => { const ax = d.anexos; PR.imprimirPags(d, Math.min(...ax.map(a => a.de)), Math.max(...ax.map(a => a.a)), (d.clave || d.titulo) + " · anexos"); });
-        on("[data-ax]", b => { const a = d.anexos[+b.dataset.ax]; PR.imprimirPags(d, a.de, a.a, (d.clave || d.titulo) + " · " + a.nombre); });
-        on("[data-ed]", () => this.editar(d));
-        on("[data-rev]", () => this.editar(null, d));
-        on("[data-del]", async () => { if (await B.ui.confirmar(`Se borrará <b>${esc(d.clave || d.titulo)}</b>${d.rev ? " (rev. " + esc(d.rev) + ")" : ""} y su archivo PDF. Las revisiones anteriores no se borran.`, "Borrar documento", "Borrar", true)) op("borrar", { id: d.id }, "Documento borrado."); });
-        el.querySelectorAll("[data-h]").forEach(h => {
-          const hv = h.querySelector("[data-hv]"), hd = h.querySelector("[data-hd]");
-          if (hv) hv.onclick = e => { e.preventDefault(); op("vigente", { id: +h.dataset.h, vigente: true }, "Esa revisión quedó como vigente."); };
-          if (hd) hd.onclick = async e => { e.preventDefault(); if (await B.ui.confirmar("Se borrará esa revisión anterior y su PDF.", "Borrar revisión", "Borrar", true)) op("borrar", { id: +h.dataset.h }, "Revisión borrada."); };
-        });
+      this.visibles = L;
+      if (!L.length) { caja.innerHTML = `<div class="tarjeta">${B.ui.vacio("Ningún procedimiento con ese filtro.", "buscar")}</div>`; return; }
+      caja.innerHTML = `<div class="tarjeta" style="padding:14px"><p class="muted peque" style="margin:0 4px 10px"><b>${L.length}</b> procedimiento${L.length === 1 ? "" : "s"}${this.tituloFiltro() ? " · " + esc(this.tituloFiltro()) : ""}. Toca un renglón para ver su ficha${B.modoLocal ? "" : ", abrir el PDF o imprimir sus anexos"}.</p>
+        <div class="tabla-cont"><table class="tabla pr-tabla"><thead><tr><th>No.</th><th>Procedimiento</th><th>Clase</th><th>SRP</th><th>Rev</th><th title="Número de cambio">Camb.</th><th title="Frecuencia de revisión, en años">Frec.</th><th>Emisión</th><th>Vigencia</th><th>Días</th><th>Estado</th><th>Título del procedimiento</th>${B.modoLocal ? "" : "<th>PDF</th>"}</tr></thead><tbody>
+        ${L.map((d, i) => { const e = PR.EST[PR.estado(d)], dd = PR.dias(d), r = extra.get(d.id);
+          return `<tr data-id="${d.id}" class="pr-${PR.estado(d)}"><td class="c">${esc(d.orden || i + 1)}</td><td style="white-space:nowrap"><b>${esc(d.clave)}</b></td><td class="c">${esc(d.clase || "")}</td><td class="tnum">${esc(d.srp || "")}</td><td class="c">${esc(d.rev || "")}</td><td class="c">${esc(d.cambio || "")}</td><td class="c">${esc(d.frec || "")}</td>
+            <td class="tnum">${U.corta(d.fecha)}</td><td class="tnum"><b>${U.corta(d.vigencia)}</b></td><td class="c tnum"><b>${dd == null ? "—" : dd}</b></td><td><span class="badge ${e[0]} ${PR.estado(d) === "ven" ? "pr-venc" : ""}">${e[1]}</span></td><td class="pr-tit">${esc(d.titulo)}</td>
+            ${B.modoLocal ? "" : `<td class="c" style="white-space:nowrap">${d.archivo ? `<a class="btn chico sec" href="${PR.url(d.id)}" target="_blank" data-abre title="Abrir el PDF">${B.ico("pdf")}${(d.anexos || []).length ? " +" + d.anexos.length : ""}</a>` : sup ? `<button class="btn chico fantasma" data-sube title="Cargar el PDF de este procedimiento">${B.ico("subir")}</button>` : `<span class="muted peque">—</span>`}</td>`}</tr>` +
+            (r && r.hits.length ? `<tr class="pr-hits"><td></td><td colspan="${B.modoLocal ? 11 : 12}">${r.hits.map(h => `<a class="poe-res" href="${PR.url(d.id, h.p)}" target="_blank"><b>Pág. ${h.p}</b><span>${h.html}</span></a>`).join("")}${r.mas ? `<span class="muted peque">y ${r.mas} página(s) más.</span>` : ""}</td></tr>` : ""); }).join("")}</tbody></table></div></div>`;
+      caja.querySelectorAll("tr[data-id]").forEach(tr => {
+        const d = PR.lista().find(x => +x.id === +tr.dataset.id);
+        tr.onclick = e => { if (e.target.closest("[data-abre]")) return; if (e.target.closest("[data-sube]")) return this.editar(d); this.ficha(d); };
       });
+    },
+    // Ficha de un procedimiento: datos del control, PDF, anexos para imprimir y revisiones anteriores
+    async ficha(d) {
+      const sup = B.dom.esSup() && !B.modoLocal, todos = PR.lista(), ax = d.anexos || [], e = PR.EST[PR.estado(d)], dd = PR.dias(d);
+      const hist = todos.filter(x => x !== d && x.vigente === false && d.clave && U.norm(x.clave) === U.norm(d.clave)).sort((a, b) => b.id - a.id);
+      const dato = (t, v) => `<div class="tj-d"><span>${t}</span><div>${v || "—"}</div></div>`;
+      let cerrar = () => { };
+      const op = async (accion, datos, msg) => { try { await B.api.op("proc", accion, datos); PR.textos = null; await B.api.recargar(); cerrar(); if (msg) B.ui.toast(msg, "ok"); if (B.app.ruta === "procedimientos") B.app.render(); } catch (err) { B.ui.error(err); } };
+      await B.ui.modal({
+        titulo: esc(d.clave || "Procedimiento") + (d.rev ? " · Rev. " + esc(d.rev) : ""), icono: "doc", ancho: true,
+        html: `<p style="margin:0 0 12px;font-weight:600;line-height:1.45">${esc(d.titulo)}</p>
+          <div class="aviso ${e[0] === "v" ? "v" : e[0] === "d" ? "d" : e[0] === "r" ? "r" : "a"}" style="margin-bottom:12px">${B.ico(e[0] === "v" ? "ok" : "alerta")}<div><b>${e[1]}</b>${dd == null ? ": no tiene fecha de vigencia." : dd < 0 ? `: venció el ${U.corta(d.vigencia)}, hace ${-dd} día(s).` : `: vence el ${U.corta(d.vigencia)}, faltan <b>${dd}</b> día(s).`}</div></div>
+          <div class="tj-ficha" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">${dato("Clase", esc(d.clase))}${dato("SRP", esc(d.srp))}${dato("Revisión", esc(d.rev))}${dato("No. de cambio", esc(d.cambio))}${dato("Frecuencia de revisión", d.frec ? esc(d.frec) + " año(s)" : "")}${dato("Fecha de emisión", U.corta(d.fecha))}${dato("Fecha de vigencia", U.corta(d.vigencia))}${dato("Área", esc(d.areaResp || d.area))}</div>
+          ${d.nota ? `<p class="muted peque" style="margin:0 0 10px">${esc(d.nota)}</p>` : ""}
+          ${B.modoLocal ? `<p class="muted peque">El PDF del procedimiento se consulta en la bitácora de la PC.</p>` : d.archivo ? `<div class="pr-acc"><a class="btn chico" href="${PR.url(d.id)}" target="_blank">${B.ico("ojo")} Abrir PDF</a><button class="btn chico sec" data-imp>${B.ico("imprimir")} Imprimir todo</button>${ax.length ? `<button class="btn chico sec" data-impax>${B.ico("imprimir")} Solo los anexos (${ax.length})</button>` : ""}</div>
+              <p class="muted peque" style="margin:8px 0 0">${d.paginas ? d.paginas + " páginas · " : ""}PDF cargado el ${U.corta(d.mod || d.fh)}${d.conTexto === false ? " · es un PDF escaneado: no se puede buscar en su contenido" : ""}</p>`
+            : `<div class="aviso a" style="margin:0">${B.ico("info")}<div>Este procedimiento aún no tiene su PDF.${sup ? " Cárgalo con <b>Datos, PDF y anexos</b>." : " Lo carga un supervisor."}</div></div>`}
+          ${ax.length && d.archivo && !B.modoLocal ? `<div class="pr-anexos">${ax.map((a, i) => `<div><span><b>${esc(a.nombre)}</b> <small>págs. ${a.de}${a.a > a.de ? "–" + a.a : ""}</small></span><a class="btn chico fantasma" href="${PR.url(d.id, a.de)}" target="_blank">Ver</a><button class="btn chico fantasma" data-ax="${i}">${B.ico("imprimir")} Imprimir</button></div>`).join("")}</div>` : ""}
+          ${hist.length ? `<details class="pr-hist"><summary>Revisiones anteriores (${hist.length})</summary>${hist.map(h => `<div data-h="${h.id}"><span>Rev. ${esc(h.rev || "—")}${h.cambio ? " · cambio " + esc(h.cambio) : ""}${h.fecha ? " · emitida " + U.corta(h.fecha) : ""}${h.vigencia ? " · vigencia " + U.corta(h.vigencia) : ""}</span>${h.archivo && !B.modoLocal ? `<a href="${PR.url(h.id)}" target="_blank">Abrir PDF</a>` : ""}${sup ? `<a href="#" data-hv>Volver a dejarla vigente</a><a href="#" data-hd style="color:var(--rojo)">Borrar</a>` : ""}</div>`).join("")}</details>` : ""}`,
+        alAbrir: v => {
+          cerrar = () => { const x = v.querySelector("[data-x]"); if (x) x.click(); };
+          const on = (sel, fn) => v.querySelectorAll(sel).forEach(b => b.onclick = ev => { ev.preventDefault(); fn(b); });
+          on("[data-imp]", () => PR.imprimirTodo(d));
+          on("[data-impax]", () => PR.imprimirPags(d, Math.min(...ax.map(a => a.de)), Math.max(...ax.map(a => a.a)), (d.clave || d.titulo) + " · anexos"));
+          on("[data-ax]", b => { const a = ax[+b.dataset.ax]; PR.imprimirPags(d, a.de, a.a, (d.clave || d.titulo) + " · " + a.nombre); });
+          v.querySelectorAll("[data-h]").forEach(h => {
+            const hv = h.querySelector("[data-hv]"), hd = h.querySelector("[data-hd]");
+            if (hv) hv.onclick = ev => { ev.preventDefault(); op("vigente", { id: +h.dataset.h, vigente: true }, "Esa revisión quedó como vigente."); };
+            if (hd) hd.onclick = async ev => { ev.preventDefault(); if (await B.ui.confirmar("Se borrará esa revisión anterior y su PDF.", "Borrar revisión", "Borrar", true)) op("borrar", { id: +h.dataset.h }, "Revisión borrada."); };
+          });
+        },
+        botones: [{ t: "Cerrar", c: "sec", v: null }].concat(sup ? [
+          { t: "Borrar", c: "peligro", antes: async () => { if (await B.ui.confirmar(`Se quitará <b>${esc(d.clave || d.titulo)}</b> del control${d.archivo ? " y se borrará su PDF" : ""}. Las revisiones anteriores no se borran.`, "Borrar procedimiento", "Borrar", true)) op("borrar", { id: d.id }, "Procedimiento borrado."); return false; } },
+          { t: "Nueva revisión", c: "sec", antes: () => { cerrar(); this.editar(null, d); return false; } },
+          { t: "Datos, PDF y anexos", c: "", antes: () => { cerrar(); this.editar(d); return false; } }] : [])
+      });
+    },
+    async semaforo() {
+      const u = PR.umbral();
+      const r = await B.ui.modal({
+        titulo: "Semáforo de vigencia", icono: "engrane",
+        html: `<p style="margin:0 0 12px;line-height:1.5">Días que faltan para la fecha de vigencia de cada procedimiento.</p>
+          <div class="fila"><div class="campo"><label>🟢 Vigente: faltan este número de días o más</label><input class="inp tnum" id="uV" type="number" min="1" value="${u.vig}"></div>
+            <div class="campo"><label>🔴 Urgente: faltan menos de estos días</label><input class="inp tnum" id="uP" type="number" min="0" value="${u.pv}"></div></div>
+          <p class="muted peque" style="margin:0">Entre uno y otro queda como 🟡 <b>Por vencer</b>. Pasada la fecha aparece como <b>Vencido</b>.</p>`,
+        botones: [{ t: "Cancelar", c: "sec", v: null }, { t: "Guardar", v: v => ({ vig: +v.querySelector("#uV").value, pv: +v.querySelector("#uP").value }) }]
+      });
+      if (!r) return;
+      try { await B.api.op("proc", "umbral", r); await B.api.recargar(); B.ui.toast("Semáforo actualizado.", "ok"); B.app.render(); } catch (e) { B.ui.error(e); }
     },
 
     // Subir un documento nuevo, una revision nueva (revDe) o corregir datos y anexos de uno existente (d)
     async editar(d, revDe) {
-      const base = d || (revDe ? { clave: revDe.clave, titulo: revDe.titulo, tipo: revDe.tipo, area: revDe.area } : {}), nuevo = !d;
+      const base = d || (revDe ? { clave: revDe.clave, titulo: revDe.titulo, tipo: revDe.tipo, area: revDe.area, clase: revDe.clase, frec: revDe.frec, areaResp: revDe.areaResp } : {}), nuevo = !d;
       let buf = null, textos = null, paginas = d ? d.paginas || 0 : 0, anexos = JSON.parse(JSON.stringify((d && d.anexos) || []));
       const filaAx = (a, i) => `<div class="pr-ax" data-i="${i}"><input class="inp" data-k="nombre" value="${esc(a.nombre)}" placeholder="Anexo 1 · Lista de verificación"><input class="inp" data-k="de" value="${a.de || ""}" inputmode="numeric" placeholder="de pág."><input class="inp" data-k="a" value="${a.a || ""}" inputmode="numeric" placeholder="a pág."><button class="btn fantasma btn-icono" data-q title="Quitar">${B.ico("cerrar")}</button></div>`;
       const r = await B.ui.modal({
-        titulo: d ? "Datos y anexos del documento" : revDe ? "Nueva revisión de " + esc(revDe.clave || revDe.titulo) : "Subir documento", icono: "subir", ancho: true,
-        html: `<div class="campo"><label>Archivo PDF${d && d.archivo ? " (déjalo vacío para conservar el actual)" : ""}</label><input class="inp" type="file" id="pArch" accept="application/pdf,.pdf"><span class="ayuda" id="pInfo">Al elegirlo se leen sus páginas para poder buscar por contenido y proponer los anexos.</span></div>
+        titulo: d ? "Datos, PDF y anexos · " + esc(d.clave || "") : revDe ? "Nueva revisión de " + esc(revDe.clave || revDe.titulo) : "Agregar procedimiento", icono: "subir", ancho: true,
+        html: `<div class="campo"><label>Archivo PDF${d && d.archivo ? " (déjalo vacío para conservar el actual)" : " (opcional: se puede cargar después)"}</label><input class="inp" type="file" id="pArch" accept="application/pdf,.pdf"><span class="ayuda" id="pInfo">Al elegirlo se leen sus páginas para poder buscar por contenido y proponer los anexos.</span></div>
           <div class="fila"><div class="campo" style="flex:0 0 150px"><label>Clave</label><input class="inp" id="pClave" value="${esc(base.clave || "")}" placeholder="SI-9981" style="text-transform:uppercase"></div>
             <div class="campo" style="flex:3 1 260px"><label>Título</label><input class="inp" id="pTit" value="${esc(base.titulo || "")}" placeholder="Trabajos en condiciones de alta temperatura"></div></div>
           <div class="fila"><div class="campo"><label>Tipo</label><select class="inp" id="pTipo">${TIPOS.map(t => `<option ${base.tipo === t ? "selected" : ""}>${t}</option>`).join("")}</select></div>
             <div class="campo"><label>Área</label><select class="inp" id="pArea">${AREAS.map(t => `<option ${base.area === t ? "selected" : ""}>${t}</option>`).join("")}</select></div>
             <div class="campo" style="flex:0 0 110px"><label>Revisión</label><input class="inp" id="pRev" value="${esc(d ? d.rev || "" : "")}" placeholder="5"></div>
-            <div class="campo" style="flex:0 0 170px"><label>Fecha de la revisión</label><input class="inp" type="date" id="pFecha" value="${esc(d ? d.fecha || "" : "")}"></div></div>
+            <div class="campo" style="flex:0 0 170px"><label>Fecha de emisión</label><input class="inp" type="date" id="pFecha" value="${esc(d ? d.fecha || "" : "")}"></div></div>
+          <div class="fila"><div class="campo" style="flex:0 0 90px"><label>Clase</label><input class="inp" id="pClase" value="${esc(base.clase || "")}" maxlength="4" style="text-transform:uppercase" placeholder="O"></div>
+            <div class="campo" style="flex:1 1 130px"><label>SRP</label><input class="inp" id="pSrp" value="${esc(d ? d.srp || "" : "")}" placeholder="2026-0136"></div>
+            <div class="campo" style="flex:0 0 110px"><label>No. de cambio</label><input class="inp" id="pCambio" value="${esc(d ? d.cambio || "" : "")}" placeholder="0"></div>
+            <div class="campo" style="flex:0 0 150px"><label>Frec. de revisión (años)</label><input class="inp" id="pFrec" value="${esc(base.frec || "")}" inputmode="numeric" placeholder="5"></div>
+            <div class="campo" style="flex:0 0 170px"><label>Fecha de vigencia</label><input class="inp" type="date" id="pVig" value="${esc(d ? d.vigencia || "" : "")}"><span class="ayuda">Vacía = emisión + frecuencia.</span></div></div>
           <div class="campo"><label>Nota (opcional)</label><input class="inp" id="pNota" value="${esc(d ? d.nota || "" : "")}" placeholder="Ej. copia para consulta; el original controlado está en…"></div>
           <label style="font-size:12px;font-weight:600;color:var(--texto-2)">Anexos (para imprimirlos por separado)</label>
           <p class="muted peque" style="margin:2px 0 8px">Indica en qué páginas del PDF está cada anexo. Al elegir el archivo se proponen solos; corrígelos si hace falta.</p>
@@ -4970,13 +5037,15 @@ V.hoja = {
         botones: [{ t: "Cancelar", c: "sec", v: null }, {
           t: d ? "Guardar" : "Subir", c: "verde", antes: async v => {
             const g = id => v.querySelector(id).value.trim();
-            if (nuevo && !buf) { B.ui.toast("Elige el archivo PDF.", "error"); return false; }
             if (!g("#pClave") && !g("#pTit")) { B.ui.toast("Escribe la clave o el título.", "error"); return false; }
             const ax = [...v.querySelectorAll(".pr-ax")].map(f => ({ nombre: f.querySelector('[data-k="nombre"]').value.trim(), de: parseInt(f.querySelector('[data-k="de"]').value, 10) || 0, a: parseInt(f.querySelector('[data-k="a"]').value, 10) || 0 })).filter(a => a.nombre || a.de);
             for (const a of ax) { if (!a.a) a.a = a.de; if (!a.nombre || a.de < 1 || a.a < a.de || (paginas && a.a > paginas)) { B.ui.toast(`Revisa el anexo «${esc(a.nombre || "sin nombre")}»: páginas de 1 a ${paginas || "?"}, y la final no menor que la inicial.`, "error"); return false; } }
             const bt = v.querySelector(".modal-pie .btn.verde"); bt.disabled = true;
             try {
-              const datos = { id: d ? d.id : 0, clave: g("#pClave").toUpperCase(), titulo: g("#pTit"), tipo: g("#pTipo"), area: g("#pArea"), rev: g("#pRev"), fecha: g("#pFecha"), nota: g("#pNota"), paginas, anexos: ax };
+              let vigencia = g("#pVig"); const fr = parseInt(g("#pFrec"), 10);
+              if (!vigencia && g("#pFecha") && fr > 0) { const x = U.fecha(g("#pFecha")); x.setFullYear(x.getFullYear() + fr); vigencia = U.iso(x); }      // emision + frecuencia de revision
+              const datos = { id: d ? d.id : 0, clave: g("#pClave").toUpperCase(), titulo: g("#pTit"), tipo: g("#pTipo"), area: g("#pArea"), rev: g("#pRev"), fecha: g("#pFecha"), nota: g("#pNota"), paginas, anexos: ax,
+                clase: g("#pClase").toUpperCase(), srp: g("#pSrp"), cambio: g("#pCambio"), frec: g("#pFrec"), vigencia, areaResp: base.areaResp || (d && d.areaResp) || "" };
               if (textos) datos.textos = textos;
               const res = await B.api.op("proc", "guardar", datos);
               if (buf) {
@@ -4990,7 +5059,7 @@ V.hoja = {
       if (!r) return;
       PR.textos = null;
       await B.api.recargar();
-      B.ui.toast(d ? "Documento actualizado." : "Documento subido. Ya se puede consultar.", "ok");
+      B.ui.toast(d ? "Procedimiento actualizado." : "Procedimiento agregado al control.", "ok");
       if (B.app.ruta === "procedimientos") B.app.render();
     }
   };
@@ -6630,7 +6699,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "3.8", servidorViejo: false,
+  info: {}, VERSION: "3.9", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -6801,7 +6870,7 @@ B.app = {
     const enlaces = [
       ["MI TURNO", [["inicio", "Inicio", "inicio"], ["actividades", "Mis actividades", "lista"], ["horasextra", sup ? "Horas extra (captura)" : "Mis horas extra", "calendario"], ["espacios", "Espacios confinados", "escudo"], ["monitoreo", "Monitoreo de E.C.", "reloj"],
         ["vigilancias", "Vigilancias C.I.", "fuego"], ["pendientes", sup ? "Pendientes (todos)" : "Mis pendientes", "reloj"], ["historial", sup ? "Historial por persona" : "Mi historial", "historial"], ["oficio", sup ? "Oficios de tiempo extra" : "Mi oficio de tiempo extra", "doc"]]],
-      ["CONSULTA", [["concentrados", "Concentrados", "doc"], ["poe", "Estándares POE", "buscar"]].concat(B.modoLocal ? [] : [["procedimientos", "Procedimientos", "doc"]]).concat(B.modoLocal && !B.modoMovil ? [] : [["tarjetas", "Líderes en Campo", "trofeo"]]).concat(!sup && B.modoMovil ? [["celular", "Enviar / recibir", "subir"]] : []).concat(sup ? [["registros", "Registros del personal", "usuarios"], ["celular", B.modoMovil ? "Enviar / recibir" : "Celulares", "subir"]] : [])]
+      ["CONSULTA", [["concentrados", "Concentrados", "doc"], ["poe", "Estándares POE", "buscar"]].concat([["procedimientos", "Procedimientos", "doc"]]).concat(B.modoLocal && !B.modoMovil ? [] : [["tarjetas", "Líderes en Campo", "trofeo"]]).concat(!sup && B.modoMovil ? [["celular", "Enviar / recibir", "subir"]] : []).concat(sup ? [["registros", "Registros del personal", "usuarios"], ["celular", B.modoMovil ? "Enviar / recibir" : "Celulares", "subir"]] : [])]
     ];
     if (sup) {
       enlaces.push(["SUPERVISIÓN", [["turno", "Datos del turno", "usuarios"], ["reporte", "Reporte del turno", "pdf"], ["hoja", "Hoja de asignación", "doc"], ["asistencia", "Asistencia y horas extra", "calendario"]]]);
@@ -6812,8 +6881,8 @@ B.app = {
         <aside class="lateral" data-tour="menu">
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
-            `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "3.8")}</div>
+            `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "procedimientos" ? '<span class="contador oculto" id="cntProc"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "3.9")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
@@ -6903,6 +6972,9 @@ B.app = {
     const n = B.dom.pendientesGrupos(B.dom.esSup() ? null : B.usuario.ini).length, c = document.getElementById("cntPend");
     if (c) { c.textContent = n; c.classList.toggle("oculto", !n); }
     // espacios que siguen liberados y aun no tienen monitoreo en el turno de trabajo
+    // procedimientos vencidos o por vencer en menos de los dias de "urgente" (solo supervisores)
+    const cp = document.getElementById("cntProc");
+    if (cp && B.proc) { const np = B.dom.esSup() ? B.proc.lista().filter(d => d.vigente !== false && ["urg", "ven"].includes(B.proc.estado(d))).length : 0; cp.textContent = np; cp.classList.toggle("oculto", !np); }
     const cm = document.getElementById("cntMon");
     if (cm) { const nm = B.dom.ecFilasMon(this.trabajo.f, this.trabajo.t).filter(x => !x.ok).length; cm.textContent = nm; cm.classList.toggle("oculto", !nm); }
     // tarjetas Lideres en Campo que los tecnicos registraron y el supervisor aun no confirma

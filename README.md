@@ -2,4 +2,4 @@
 
 Aplicación web sin datos: la información se carga en cada celular con el paquete de datos que genera la bitácora de la PC.
 
-Versión 3.8 · publicada 2026-10-11 01:02
+Versión 3.9 · publicada 2026-10-11 01:26
