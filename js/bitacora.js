@@ -773,7 +773,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.3", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.3.1", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -3901,7 +3901,7 @@ V.config = {
     const s = B.estado.servidor, ofc = B.oficio.cfg();
     const cf = { ...B.estado.config };
     for (const [k, d] of [["ofLinea1", ofc.linea1], ["ofLinea2", ofc.linea2], ["ofLinea3", ofc.linea3], ["ofDepto", ofc.depto], ["ofVoboNombre", ofc.voboNombre],
-      ["ofVoboCargo", ofc.voboCargo], ["ofAutNombre", ofc.autNombre], ["ofAutCargo", ofc.autCargo]]) if (cf[k] == null) cf[k] = d;
+      ["ofVoboCargo", ofc.voboCargo], ["ofAutNombre", ofc.autNombre], ["ofAutCargo", ofc.autCargo], ["ofNota", ofc.nota]]) if (cf[k] == null) cf[k] = d;
     if (cf.heJust == null || cf.heJust === "") cf.heJust = B.dom.heJust();
     const IMGS = { membrete: "Membrete (encabezado)", pie: "Pie de página", ofIzq: "Logos izquierda", ofDer: "Imagen derecha", ofPie: "Pie de página del oficio" };
     const tarjetaImg = t => `<div class="campo"><label>${IMGS[t]}${B.imgs[t] ? ' <span class="badge g">Personalizado</span>' : ' <span class="badge n">Original</span>'}</label>
@@ -3928,6 +3928,8 @@ V.config = {
         ${cab("doc", "g", "Oficio semanal de tiempo extra", "Encabezado y firmas del formato oficial. Cada trabajador captura su categoría y título.", "", "cfg-oficio")}
         <div class="grid2">${campo("ofVoboNombre", "Vo. Bo. - nombre")}${campo("ofAutNombre", "Autoriza - nombre")}${campo("ofVoboCargo", "Vo. Bo. - cargo")}${campo("ofAutCargo", "Autoriza - cargo")}
           ${campo("ofLinea1", "Encabezado - línea 1")}${campo("ofLinea2", "Encabezado - línea 2")}${campo("ofLinea3", "Encabezado - línea 3")}${campo("ofDepto", "Departamento (por omisión)")}</div>
+        <div class="campo"><label>Nota en recuadro, debajo de la fecha (vacío = sin recuadro)</label><textarea class="inp" data-k="ofNota" rows="3">${U.esc(cf.ofNota ?? "")}</textarea></div>
+        <div class="campo"><label>Imagen de pie de página del oficio</label><select class="inp" data-k="ofPie"><option value="">Mostrar la imagen de pie de página</option><option value="no" ${cf.ofPie === "no" ? "selected" : ""}>Sin imagen de pie (solo las notas)</option></select></div>
         <div style="display:flex;justify-content:flex-end"><button class="btn verde" id="gCfg">${B.ico("ok")} Guardar configuración</button></div></div>
       <div class="c5">
         <div class="tarjeta" data-tour="cfg-membrete">${cab("doc", "g", "Membrete y pie de página", "Se usan en la pantalla de acceso y en todos los reportes y PDF.")}
@@ -4269,7 +4271,10 @@ B.oficio = {
       voboNombre: c.ofVoboNombre ?? "",
       voboCargo: c.ofVoboCargo ?? "ENCARGADO DE LA JEFATURA DE LA OFICINA DE SEGURIDAD INDUSTRIAL",
       autNombre: c.ofAutNombre ?? "",
-      autCargo: c.ofAutCargo ?? "ENCARGADO DE LA SUBGERENCIA DE SEGURIDAD NUCLEAR"
+      autCargo: c.ofAutCargo ?? "ENCARGADO DE LA SUBGERENCIA DE SEGURIDAD NUCLEAR",
+      // recuadro de nota bajo la fecha (vacio = sin recuadro) y pie de pagina del oficio (el administrador lo activa o desactiva)
+      nota: c.ofNota ?? "En la columna de Justificación se deberá explicar con detalle las razones que justifican el tiempo extraordinario y particularmente, las horas triples, en apego a la Circular Núm. CN/UAF/DTSA/009/2026.",
+      pie: c.ofPie !== "no"
     };
   },
   // semana ISO (la del formato: L/39 = lunes de la semana 39)
@@ -4353,6 +4358,8 @@ B.oficio = {
     .enc { display: flex; justify-content: space-between; align-items: flex-start; margin: 0.02in 0 0.1in 0.05in; }
     .enc .fe { display: flex; gap: 0.3in; align-items: baseline; font-weight: 700; font-size: 9.5pt; }
     .enc .fe span { display: inline-block; min-width: 2.6in; border-bottom: 1px solid #000; padding-left: 0.08in; }
+    .enc .der2 { display: flex; flex-direction: column; align-items: flex-end; }
+    .enc .nota { box-sizing: border-box; width: 4.5in; margin-top: 0.07in; border: 1px solid #000; padding: 2px 0.12in 3px; font-family: Arial, Helvetica, sans-serif; font-size: 8pt; line-height: 1.22; text-align: justify; }
     .datos { font-size: 9.5pt; font-weight: 700; }
     .datos td { padding: 0 0.3in 1px 0; vertical-align: top; }
     .datos td.v { text-decoration: underline; min-width: 3.1in; max-width: 5in; }
@@ -4397,7 +4404,7 @@ B.oficio = {
         <div class="ev">${h.eventual ? "***PERSONAL EVENTUAL***" : ""}</div>
         <div class="enc"><table class="datos"><tr><td>NOMBRE:</td><td class="v">${U.esc(h.nombre)}</td></tr><tr><td>R.P.E.</td><td class="v">${U.esc(h.rpe)}</td></tr>
           <tr><td>CATEGORÍA</td><td class="v">${U.esc(h.cat.toUpperCase()) || "&nbsp;"}</td></tr><tr><td>DEPTO.</td><td class="v">${U.esc(h.depto.toUpperCase())}</td></tr></table>
-          <div class="fe">FECHA: <span>${U.esc(h.fecha.replace(/-/g, ""))}</span></div></div>
+          <div class="der2"><div class="fe">FECHA: <span>${U.esc(h.fecha.replace(/-/g, ""))}</span></div>${c.nota.trim() ? `<div class="nota"><b>Nota:</b> ${U.esc(c.nota.trim().replace(/^nota:\s*/i, ""))}</div>` : ""}</div></div>
         <table class="te"><colgroup><col style="width:37.5%"><col style="width:8.5%"><col style="width:8.5%"><col style="width:7.2%"><col style="width:7.2%"><col style="width:8.6%"><col style="width:5.8%"><col style="width:5.8%"><col style="width:5.8%"></colgroup>
           <thead><tr><th rowspan="2">***JUSTIFICACIÓN</th><th rowspan="2">MES/DIA</th><th rowspan="2">DIA/SEM</th><th colspan="2">HORARIO</th><th rowspan="2">HORAS</th><th colspan="3">ALIMENTOS</th></tr>
           <tr><th>DE</th><th>A</th><th>D</th><th>C</th><th>C</th></tr></thead>
@@ -4415,7 +4422,7 @@ B.oficio = {
           2.- DEBERÁ ANOTARSE NOMBRE DE QUIEN AUTORIZA Y DE QUIEN FIRMA EL VISTO BUENO.<br>
           3.- EL MES DEBERÁ ABREVIARSE CON LAS TRES PRIMERAS LETRAS QUE LE CORRESPONDA.<br>
           4.- EN LA COLUMNA DE JUSTIFICACIÓN SE DEBERÁ EXPLICAR CON DETALLE LAS RAZONES QUE JUSTIFICAN EL TIEMPO EXTRAORDINARIO Y PARTICULARMENTE LAS HORAS TRIPLES. SI REQUIERE UNA HOJA ADICIONAL FAVOR DE ANEXARLA.</div>
-        <div class="pie"><img src="${url("ofPie")}" alt=""></div>
+        ${c.pie ? `<div class="pie"><img src="${url("ofPie")}" alt=""></div>` : ""}
       </div>`;
     };
     return `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Oficio de tiempo extra</title><style>${css}</style></head><body>${hojas.map(pag).join("")}</body></html>`;
@@ -6933,7 +6940,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "4.3", servidorViejo: false,
+  info: {}, VERSION: "4.3.1", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -7116,7 +7123,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "procedimientos" ? '<span class="contador oculto" id="cntProc"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.3")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.3.1")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
