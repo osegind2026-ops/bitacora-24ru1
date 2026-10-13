@@ -447,7 +447,8 @@ B.dom = {
     }
     const lista = [...filas.values()].sort((a, b) => ORDEN.indexOf(a.est) - ORDEN.indexOf(b.est)).map(g => ({
       inis: this.ordenados(g.inis).join("/"), txt: g.txt, est: g.est, uni: g.uni, desde: g.ck < K ? B.t.corto(g.f, g.t) : "",
-      coms: [...g.coms.values()].map(c => ({ inis: this.ordenados(c.inis.filter(i => !g.inis.includes(i))).join("/"), txt: c.txt }))
+      // en equipo, cada comentario lleva las iniciales de quien lo escribio; en una actividad individual solo si es de otra persona
+      coms: [...g.coms.values()].map(c => ({ inis: this.ordenados(g.inis.length > 1 ? c.inis : c.inis.filter(i => !g.inis.includes(i))).join("/"), txt: c.txt }))
     }));
     const td = this.turnoDatos(f, t) || {};
     const pres = this.presentes(f, t);
@@ -488,12 +489,12 @@ B.dom = {
   comentarios(a) {
     const sup = this.esSup(), yoI = U.ini(B.usuario.ini), r = [];
     const equipo = !!a.grupo && U.ini(a.ini) === yoI && this.todas().some(x => x.grupo === a.grupo && x.id !== a.id);      // actividad compartida: cualquiera del equipo edita
-    if (String(a.com || "").trim()) { const por = U.ini(a.comPor); r.push({ tipo: "com", txt: a.com, por, cuando: "", acc: "", puede: sup || equipo || !por || por === yoI }); }
+    if (String(a.com || "").trim()) { const por = U.ini(a.comPor); r.push({ tipo: "com", txt: a.com, por, ed: U.ini(a.comEd || ""), cuando: "", acc: "", puede: sup || equipo || !por || por === yoI }); }
     for (const l of String(a.seg || "").split("\n").filter(Boolean)) {
       const m = /^(\d{2}\/\d{2} T[12]) ([^:]+): (?:(CONCLUIDA|EN PROCESO|PENDIENTE)(?: - )?)?(.*)$/.exec(l);
       if (!m) { r.push({ tipo: "seg", linea: l, txt: l, por: "", cuando: "", acc: "", puede: sup }); continue; }
       if (!m[4].trim()) continue;
-      r.push({ tipo: "seg", linea: l, txt: m[4].trim(), por: U.ini(m[2]), cuando: m[1], acc: m[3] || "", puede: sup || equipo || U.ini(m[2]) === yoI });
+      r.push({ tipo: "seg", linea: l, txt: m[4].trim(), por: U.ini(m[2]), cuando: m[1], acc: m[3] || "", ed: U.ini((a.segEd || {})[l] || ""), puede: sup || equipo || U.ini(m[2]) === yoI });
     }
     return r;
   },
@@ -798,7 +799,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.5", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.5.1", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -1273,7 +1274,7 @@ B.local = {
         if (d.tipo === "com") {
           const por = U.ini(a.comPor);
           if (!sup && !(miembro && (grp.length > 1 || !por || por === s.ini))) throw new Error(NO);
-          for (const x of grp) { x.com = nuevo; x.comPor = nuevo ? (por || s.ini) : ""; x.mod = ahora() + " " + s.ini; }
+          for (const x of grp) { x.com = nuevo; x.comPor = nuevo ? (por || s.ini) : ""; x.mod = ahora() + " " + s.ini; if (nuevo && por && por !== s.ini) x.comEd = s.ini; else delete x.comEd; }
         } else {
           const orig = String(d.linea || ""), m = /^(\d{2}\/\d{2} T[12]) ([^:]+): (?:(CONCLUIDA|EN PROCESO|PENDIENTE)(?: - )?)?(.*)$/.exec(orig);
           if (!sup && !(miembro && (grp.length > 1 || (m && U.ini(m[2]) === s.ini)))) throw new Error(NO);
@@ -1283,6 +1284,7 @@ B.local = {
             const ls = String(x.seg || "").split("\n"), i = ls.indexOf(orig); if (i < 0) continue;
             if (nl) ls[i] = nl; else ls.splice(i, 1);
             x.seg = ls.join("\n"); x.mod = ahora() + " " + s.ini; hecho = true;
+            x.segEd = x.segEd || {}; delete x.segEd[orig]; if (nl && m && U.ini(m[2]) !== s.ini) x.segEd[nl] = s.ini;
           }
           if (!hecho) throw new Error("Ese comentario ya no existe. Actualiza la página.");
         }
@@ -2473,7 +2475,7 @@ V.actividades = {
       r.innerHTML = `<div class="num"></div><div><textarea rows="1" placeholder="Describe la actividad…" ${comp ? 'readonly style="background:#FAF8F6"' : ""}>${U.esc(a ? a.txt : "")}</textarea>
         ${a && a.id ? "" : `<div class="sug-act"></div>`}
         <input class="inp com" placeholder="Comentario (opcional): sale en el reporte junto a la actividad" value="${U.esc(a ? a.com || "" : "")}" style="margin-top:6px;padding:6px 10px;font-size:12.5px${ajeno ? ";background:#FAF8F6" : ""}" ${ajeno ? `readonly title="Comentario de ${U.esc(a.comPor)}: solo lo modifica quien lo escribió o un supervisor"` : ""}>
-        ${a && a.id ? `<div class="guardado">Guardada · ID ${a.id}${nCom ? ` · <a href="#" data-coms="${a.id}">Comentarios (${nCom}): editar o eliminar</a>` : ""}${a.seg && !nCom ? " · con seguimiento" : ""}${ajeno ? " · comentario de " + U.esc(a.comPor) : ""}${comp ? (a.asig && U.ini(a.asig) !== U.ini(a.ini) ? " · asignada por " + U.esc(a.asig) : "") + (otros.length ? " · en equipo con <b>" + U.esc(otros.join("/")) + "</b>" : "") + " · el estatus y el comentario valen para todo el equipo" + (otros.length ? " (cualquiera del equipo puede comentar o corregirlo)" : "") : ""}</div>` : ""}</div>
+        ${a && a.id ? `<div class="guardado">Guardada · ID ${a.id}${nCom ? ` · <a href="#" data-coms="${a.id}">Comentarios (${nCom}): ver, agregar o editar</a>` : ` · <a href="#" data-coms="${a.id}">Agregar comentario</a>`}${a.seg && !nCom ? " · con seguimiento" : ""}${ajeno ? " · comentario de " + U.esc(a.comPor) : ""}${comp ? (a.asig && U.ini(a.asig) !== U.ini(a.ini) ? " · asignada por " + U.esc(a.asig) : "") + (otros.length ? " · en equipo con <b>" + U.esc(otros.join("/")) + "</b>" : "") + " · el estatus y el comentario valen para todo el equipo" + (otros.length ? " (cualquiera del equipo puede comentar o corregirlo)" : "") : ""}</div>` : ""}</div>
         ${ui.seg("est", ["Realizada", "En proceso", "Pendiente"], a ? (a.est === "Concluida" ? a.estOrig : a.est) : "Realizada", "estatus")}
         <button class="btn fantasma btn-icono quitar" title="Quitar">${B.ico("basura")}</button>`;
       cont.appendChild(r);
@@ -2703,10 +2705,11 @@ V.actividades = {
       const l = B.dom.comentarios(a);
       return `<p style="margin:0 0 4px"><b>${U.esc(a.txt)}</b></p><p class="muted peque" style="margin:0 0 12px">${U.esc(a.ini || "Por asignar")} · ${B.t.corto(a.fecha, a.turno)} · ID ${a.id}${B.dom.esSup() ? " · como supervisor puedes modificar los comentarios de cualquiera" : " · puedes modificar tus comentarios y, si la actividad es en equipo, también los de tus compañeros"}</p>
         ${l.length ? `<div class="lista">${l.map((c, i) => `<div class="item" style="flex-wrap:wrap;align-items:flex-start" data-c="${i}">
-          <div class="cuerpo" style="min-width:240px;flex:1"><div class="meta" style="margin:0 0 4px"><span><b>${U.esc(c.por || "—")}</b></span><span>${c.tipo === "com" ? "comentario de la actividad" : U.esc(c.cuando) + (c.acc ? " · " + U.esc(c.acc.toLowerCase()) : " · comentario de avance")}</span></div>
+          <div class="cuerpo" style="min-width:240px;flex:1"><div class="meta" style="margin:0 0 4px"><span><b>${U.esc(c.por || "—")}</b></span><span>${c.tipo === "com" ? "comentario de la actividad" : U.esc(c.cuando) + (c.acc ? " · " + U.esc(c.acc.toLowerCase()) : " · comentario")}</span>${c.ed ? `<span style="color:#8a6526">corrigió <b>${U.esc(c.ed)}</b></span>` : ""}</div>
             ${c.puede ? `<input class="inp" value="${U.esc(c.txt)}" style="padding:7px 10px">` : `<div>${U.esc(c.txt)}</div>`}</div>
           ${c.puede ? `<div style="display:flex;gap:6px;padding-top:20px"><button class="btn chico verde" data-g>${B.ico("ok")} Guardar</button><button class="btn chico fantasma" data-b title="Eliminar comentario">${B.ico("basura")} Eliminar</button></div>` : ""}</div>`).join("")}</div>`
-          : ui.vacio("Esta actividad no tiene comentarios.")}`;
+          : `<p class="muted" style="margin:6px 0">Esta actividad aún no tiene comentarios.</p>`}
+        ${B.dom.esSup() || U.ini(a.ini) === U.ini(B.usuario.ini) ? `<div style="display:flex;gap:8px;margin-top:12px;align-items:flex-end"><div class="campo" style="flex:1;margin:0"><label>Agregar mi comentario (queda con mis iniciales)</label><input class="inp" id="comNuevo" placeholder="Escribe tu comentario…"></div><button class="btn verde" id="comAgregar">${B.ico("mas")} Agregar</button></div>` : ""}`;
     };
     await ui.modal({ titulo: "Comentarios de la actividad", icono: "editar", ancho: true, html: `<div id="comLista">${html()}</div>`, botones: [{ t: "Cerrar", c: "sec", v: null }],
       alAbrir: v => {
@@ -2720,7 +2723,14 @@ V.actividades = {
           it.querySelector("[data-g]").onclick = () => { const t = it.querySelector("input").value.trim(); if (!t) { ui.toast("Escribe el comentario, o usa Eliminar para quitarlo.", "error"); return; } if (t === c.txt) { ui.toast("Sin cambios.", ""); return; } mandar(t); };
           it.querySelector("[data-b]").onclick = async () => { if (await ui.confirmar(`¿Eliminar este comentario?<br><span class="muted">${U.esc(c.txt)}</span>`, "Eliminar comentario", "Eliminar", true)) mandar(""); };
         });
-        enlazar();
+        // cada participante puede dejar su propio comentario: se guarda con sus iniciales y sale aparte en el reporte
+        const nuevo = () => { const b = caja.querySelector("#comAgregar"); if (!b) return; const i = caja.querySelector("#comNuevo");
+          const ir = async () => { const texto = i.value.trim(); if (!texto) { ui.toast("Escribe el comentario.", "error"); i.focus(); return; }
+            try { const T0 = B.app.trabajo; await B.api.op("actividades", "seguimiento", { id, accion: "", comentario: texto, fecha: T0.f, turno: T0.t }); await B.api.recargar(); cambio = true; caja.innerHTML = html(); enlazar(); nuevo(); ui.toast("Comentario agregado.", "ok", 2500); }
+            catch (e) { ui.error(e); } };
+          b.onclick = ir; i.onkeydown = e => { if (e.key === "Enter") ir(); }; };
+        enlazar(); nuevo();
+        caja.addEventListener("click", () => setTimeout(nuevo, 0));
       } });
     if (cambio) B.app.render();
   },
@@ -7021,7 +7031,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "4.5", servidorViejo: false,
+  info: {}, VERSION: "4.5.1", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -7207,7 +7217,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "procedimientos" ? '<span class="contador oculto" id="cntProc"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.5")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.5.1")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
