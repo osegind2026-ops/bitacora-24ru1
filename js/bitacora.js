@@ -773,7 +773,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.2", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.3", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -1428,6 +1428,20 @@ B.local = {
         await this.escribir("vig", L); if (catCambio) await this.escribir("catalogos", cat);
         return { ok: true, nums };
       }
+      case "vig.pasGuardar": {
+        soloSup();
+        if (!d.fecha || !["T1", "T2"].includes(d.turno)) throw new Error("Datos no válidos.");
+        const L = await this.leer("vig") || [], clave = d.fecha + "|" + d.turno; let n = 0;
+        for (const it of d.items || []) {
+          const v = L.find(x => +x.num === +it.num); if (!v) continue;
+          v.pas = v.pas || {};
+          if ("ok" in it && !it.ok) { delete v.pas[clave]; continue; }
+          for (const k of ["unidad", "inop", "edif", "nivel", "zona", "tipoVig"]) if (k in it) v[k] = String(it[k] ?? "");
+          v.pas[clave] = { de: it.de || "", a: it.a || "", quien: String(it.quien || "").toUpperCase(), fmt: d.fmt || "", modo: d.modo || "", reg: ahora(), por: s.ini }; n++;
+        }
+        await this.escribir("vig", L); return { ok: true, guardadas: n };
+      }
+      case "vig.pasCfg": throw new Error("La configuración del formato PAS-32-11 se cambia en la bitácora de la PC.");
       case "vig.retirar": {
         const L = await this.leer("vig") || [], v = L.find(x => +x.num === +d.num);
         if (!v) throw new Error("Vigilancia no encontrada.");
@@ -1540,7 +1554,7 @@ B.local = {
       }
       case "catalogos.reemplazar": soloSup(); await this.escribir("catalogos", d.catalogos || {}); return { ok: true };
       case "catalogos.agregar": { const cat = await this.leer("catalogos") || {}; if (this.agregarCatalogo(cat, d.tipo, d.texto, d.item)) await this.escribir("catalogos", cat); return { ok: true }; }
-      case "config.guardar": { soloSup(); const ant = (await this.leer("config")) || {}, c = d.config || {}; for (const k of ["recibidos", "cargas", "admins", "procVig"]) if (k in ant) c[k] = ant[k]; await this.escribir("config", c); return { ok: true }; }
+      case "config.guardar": { soloSup(); const ant = (await this.leer("config")) || {}, c = d.config || {}; for (const k of ["recibidos", "cargas", "admins", "procVig", "pasImpA", "pasHoras"]) if (k in ant) c[k] = ant[k]; await this.escribir("config", c); return { ok: true }; }
       case "intercambio.registrar": {
         const c = (await this.leer("config")) || {}; let l = (c.recibidos || []).map(String);
         for (const u of d.uids || []) { const x = String(u); if (x && x.length <= 40 && !l.includes(x)) l.push(x); }
@@ -2150,6 +2164,16 @@ B.rep.pasPeriodos = function (de, a) {
   if (f < i) f += 1440;                                   // el turno nocturno cruza la medianoche
   const per = []; for (let x = i; x < f; x += 60) per.push(hm(x) + " a " + hm(Math.min(x + 60, f)));
   return per;
+};
+/* Historial de vigilancias: lo capturado en los formatos PAS-32-11 de cada turno, con quien realizo cada vigilancia. */
+B.rep.vigHistorial = function (filas, d1, d2) {
+  const c = B.estado.config, k = v => U.esc(v ?? "");
+  const h = `<h2 class="doc">HISTORIAL DE VIGILANCIAS CONTRA INCENDIO</h2><div class="doc-sub">${U.esc(B.t.periodo().toUpperCase())}${d1 || d2 ? " &nbsp;|&nbsp; " + (d1 ? "del " + U.corta(d1) : "") + (d2 ? " al " + U.corta(d2) : "") : ""} &nbsp;|&nbsp; ${filas.length} registro(s)</div>
+    <table class="dat"><thead><tr><th style="width:9%">FECHA</th><th style="width:7%">TURNO</th><th style="width:5%">VIG.</th><th style="width:9%">No. INOP</th><th style="width:5%">UNIDAD</th><th style="width:17%">EDIFICIO / NIVEL / ZONA</th><th style="width:11%">TIPO</th><th style="width:15%">PERIODO</th><th>REALIZÓ</th></tr></thead><tbody>` +
+    (filas.length ? filas.map(x => `<tr><td>${U.corta(x.f)}</td><td>${k(x.t)} ${k(B.t.nombre(x.t))}</td><td class="b">${x.v.num}</td><td>${k(x.v.inop)}</td><td>${k(x.v.unidad)}</td><td>${k([x.v.edif, x.v.nivel, x.v.zona].filter(Boolean).join(" / ") || x.v.ubic)}</td><td>${k(x.v.tipoVig)}</td><td>${x.per.map(k).join("<br>")}</td><td class="izq" style="text-align:left">${k(x.quienTxt) || "—"}</td></tr>`).join("")
+      : `<tr><td colspan="9">Sin registros.</td></tr>`) + `</tbody></table>
+    <div style="margin-top:6px;font-size:7pt;color:#595959">Cada renglón es una vigilancia incluida en el formato PAS-32-11 del turno. «Realizó» es el personal asignado a la vigilancia en ese turno. Emitido: ${U.fh(U.ahoraISO())}</div>`;
+  return { html: B.rep.documento("Historial de vigilancias", h), nombre: `HISTORIAL VIGILANCIAS ${c.proyecto}${d1 ? " del " + U.corta(d1).replace(/\//g, ".") : ""}${d2 ? " al " + U.corta(d2).replace(/\//g, ".") : ""}`, carpeta: "VIGILANCIAS PAS-32-11", tipo: "concentrado" };
 };
 /* Periodo de una vigilancia en el formato global. Turno diurno: "09:30 a 14:30". Turno nocturno: un renglon por fecha con las
    rondas de cada hora de ese dia, p. ej. "20261012 de 21:30 a 23:30" y "20261013 de 00:30 a 06:30". Devuelve null si no es valido. */
@@ -2884,8 +2908,9 @@ V.vigilancias = {
           <span class="ayuda">Si el técnico no pudo capturarla, elígelo aquí. No se duplica una vigilancia que sigue activa.</span></div>` : ""}
         <button class="btn verde bloque" id="vGuardar">${B.ico("ok")} Registrar alta</button></div>
       ${B.dom.esSup() ? `<div class="tarjeta c12" data-tour="vig-pas">${cab("doc", "g", "Formato PAS-32-11 del turno", `Transferencia de responsabilidades de ejecución de vigilancia contra incendio entre áreas. Un solo formato con todas las vigilancias del turno de trabajo (${B.t.corto(f, t)}), una por renglón.`)}
-        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><button class="btn verde" id="vPas">${B.ico("imprimir")} Generar formatos del turno</button><button class="btn sec" id="vPasB">${B.ico("doc")} Formato en blanco</button>
-          <span class="muted peque">Sale limpio, listo para firmar: los nombres y las firmas se ponen a mano.</span></div></div>` : ""}
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><button class="btn verde" id="vPas">${B.ico("imprimir")} Generar formatos del turno</button><button class="btn sec" id="vPasH">${B.ico("historial")} Historial de vigilancias</button><button class="btn sec" id="vPasB">${B.ico("doc")} Formato en blanco</button>
+          ${B.dom.esAdmin() && !B.modoLocal ? `<button class="btn fantasma" id="vPasC">${B.ico("editar")} Configurar</button>` : ""}
+          <span class="muted peque">Sale limpio, listo para firmar. Lo capturado queda guardado y forma el historial de vigilancias.</span></div></div>` : ""}
       </div>`;
     ui.combo(c.querySelector("#vDesc"), {
       items: () => (B.estado.catalogos.vigilancias || []).map(x => ({ value: x.desc, label: x.desc, sub: [x.inop, x.ubic, x.comp].filter(Boolean).join(" · "), x })),
@@ -2918,66 +2943,120 @@ V.vigilancias = {
       });
       if (r && r.retiro && r.retiro.length >= 16) await ejecutar(() => B.api.op("vig", "retirar", { num, retiro: r.retiro, capt: r.capt && r.capt !== yo() ? r.capt : "" }), "Vigilancia retirada.");
     });
-    const bp = c.querySelector("#vPas"); if (bp) { bp.onclick = () => this.pas(); c.querySelector("#vPasB").onclick = () => B.rep.imprimir(B.rep.pas3211([{}], { rev: this.revPas(), impA: this.impA(), renglones: 12 })); }
+    const bp = c.querySelector("#vPas");
+    if (bp) {
+      bp.onclick = () => this.pas(); c.querySelector("#vPasH").onclick = () => this.historial();
+      c.querySelector("#vPasB").onclick = () => B.rep.imprimir(B.rep.pas3211([{}], { rev: this.revPas(), impA: this.impA(), renglones: 12 }));
+      const bc = c.querySelector("#vPasC"); if (bc) bc.onclick = () => this.cfgPas();
+    }
   },
   // revision vigente del PAS-32 segun el control de procedimientos (si no esta, la del formato original)
   revPas() { const p = (B.estado.procedimientos || []).find(x => U.norm(x.clave) === "PAS-32" && x.vigente !== false); return (p && String(p.rev || "").trim()) || "15"; },
-  /* Formato PAS-32-11: uno por vigilancia del turno de trabajo. Se ajustan las horas de inicio y fin; sale un renglon por hora.
-     Los datos del formato que se corrijan aqui se guardan en la vigilancia para el siguiente turno. */
-  // leyenda de copia controlada: nombre de quien imprime (por omision, quien tiene la sesion)
-  impA() { const u = B.usuario || {}, n = String(u.nombre || B.dom.nombre(u.ini) || "").trim(); return n ? n + (u.rpe ? " (" + u.rpe + ")" : "") : ""; },
-  async pas() {
-    const { f, t } = T(), S = B.t.inicio(f, t), E = B.t.fin(f, t), CAMPOS = ["unidad", "inop", "edif", "nivel", "zona", "tipoVig"];
-    const L = B.estado.vig.filter(v => String(v.inicio || "") < E && (!v.retiro || v.retiro > S)).sort((a, b) => a.num - b.num);
-    if (!L.length) { ui.toast("No hay vigilancias activas en el turno " + B.t.corto(f, t) + ". Usa «Formato en blanco» si lo necesitas.", "aviso", 6000); return; }
-    const hh = x => String(x).slice(11, 16), e = v => U.esc(v ?? "");
-    const inp = (k, v, w, extra) => `<input class="inp" data-k="${k}" value="${e(v)}" style="min-width:${w}px;padding:6px 8px" ${extra || ""}>`;
+  // leyenda de copia controlada: va precargada en la configuracion; solo el administrador la cambia
+  impA() { return String((B.estado.config || {}).pasImpA || "").trim(); },
+  // horario de las vigilancias por turno (lo cambia el administrador)
+  horasPas() { const h = (B.estado.config || {}).pasHoras || {}; return { t1de: h.t1de || "21:30", t1a: h.t1a || "06:30", t2de: h.t2de || "09:30", t2a: h.t2a || "18:30" }; },
+  async cfgPas() {
+    const h = this.horasPas(), e = v => U.esc(v ?? ""), hora = (id, v) => `<input class="inp tnum h24" id="${id}" inputmode="numeric" maxlength="5" value="${e(v)}">`;
     const r = await ui.modal({
-      titulo: "Formatos PAS-32-11 · " + B.t.corto(f, t), icono: "doc", ancho: true,
-      html: `<div class="fila" style="align-items:flex-end;margin-bottom:10px"><div class="campo" style="flex:1 1 320px;margin:0"><label>Tipo de formato</label><select class="inp" id="pModo"><option value="global">Un solo formato con todas las vigilancias (una por renglón)</option><option value="hora">Un formato por vigilancia, con un renglón por hora</option></select></div>
-          <div class="campo" style="flex:0 0 150px;margin:0"><label>Fecha del formato</label><input class="inp tnum" id="pFecha" value="${S.slice(0, 10).replace(/-/g, "")}" maxlength="10"></div></div>
-        <p style="margin:0 0 10px;line-height:1.55">Marca las vigilancias que van en el formato y ajusta su hora de inicio y de fin. En el turno nocturno el periodo sale por fecha (por ejemplo <b>20261012 de 21:30 a 23:30</b> y <b>20261013 de 00:30 a 06:30</b>). Si hay vigilancias de las dos unidades sale un formato por unidad. Lo que corrijas aquí queda guardado en la vigilancia.</p>
-        <div class="tabla-cont"><table class="tabla"><thead><tr><th></th><th>Vigilancia</th><th>Unidad</th><th>No. INOP</th><th>Edificio</th><th>Nivel</th><th>Zona de fuego</th><th>Tipo de vigilancia</th><th>De</th><th>A</th></tr></thead><tbody>
-        ${L.map(v => `<tr data-num="${v.num}"><td class="c"><input type="checkbox" data-k="ok" checked style="width:17px;height:17px"></td><td style="min-width:150px"><b>VIG #${v.num}</b><div class="peque muted">${e(v.desc)}${v.ubic ? " · " + e(v.ubic) : ""}</div></td>
-          <td><select class="inp" data-k="unidad" style="min-width:64px;padding:6px 4px"><option value=""></option>${["U1", "U2"].map(u => `<option ${v.unidad === u ? "selected" : ""}>${u}</option>`).join("")}</select></td>
-          <td>${inp("inop", v.inop, 60)}</td><td>${inp("edif", v.edif, 70)}</td><td>${inp("nivel", v.nivel, 64)}</td><td>${inp("zona", v.zona, 70)}</td><td>${inp("tipoVig", v.tipoVig || "VIG. C.I. C/HR", 130, 'list="pTipos"')}</td>
-          <td><input class="inp tnum h24" data-k="de" inputmode="numeric" maxlength="5" value="${hh(v.inicio > S ? v.inicio : S)}" style="width:66px;padding:6px 6px"></td>
-          <td><input class="inp tnum h24" data-k="a" inputmode="numeric" maxlength="5" value="${hh(v.retiro && v.retiro < E ? v.retiro : E)}" style="width:66px;padding:6px 6px"></td></tr>`).join("")}</tbody></table></div>
-        <datalist id="pTipos"><option>VIG. C.I. C/HR</option><option>Vigilancia de cada hora</option><option>Vigilancia continua</option></datalist>
-        <div class="fila" style="align-items:flex-end;margin-top:12px"><div class="campo" style="flex:0 0 130px;margin:0"><label>Revisión del PAS-32</label><input class="inp" id="pRev" value="${e(this.revPas())}"></div>
-          <div class="campo" style="flex:1 1 300px;margin:0"><label>Leyenda de arriba · Se autoriza la impresión a</label><input class="inp" id="pImpA" value="${e(this.impA())}" style="text-transform:uppercase" placeholder="Nombre (RPE) · vacío = sin leyenda"></div></div>
-        <p class="muted peque" style="margin:8px 0 0">Todo sale en <b>una sola hoja carta</b>: se agregan los renglones que hagan falta. Los nombres y firmas se ponen a mano.</p>`,
-      botones: [{ t: "Cancelar", c: "sec", v: null }, { t: "Guardar en PDF", c: "sec", antes: v => this.okPas(v), v: v => this.leePas(v, "pdf") }, { t: "Imprimir", antes: v => this.okPas(v), v: v => this.leePas(v, "imp") }]
+      titulo: "Configuración del formato PAS-32-11", icono: "editar",
+      html: `<div class="campo"><label>Leyenda de arriba · Se autoriza la impresión a</label><input class="inp" id="cImpA" value="${e(this.impA())}" style="text-transform:uppercase" placeholder="Nombre (RPE) · vacío = sin leyenda"></div>
+        <div class="grid2"><div class="campo"><label>Turno nocturno · de</label>${hora("c1d", h.t1de)}</div><div class="campo"><label>Turno nocturno · a</label>${hora("c1a", h.t1a)}</div>
+          <div class="campo"><label>Turno diurno · de</label>${hora("c2d", h.t2de)}</div><div class="campo"><label>Turno diurno · a</label>${hora("c2a", h.t2a)}</div></div>
+        <p class="muted peque" style="margin:0">Son las horas que se proponen en cada vigilancia al generar el formato; ahí mismo se pueden ajustar para un turno en particular.</p>`,
+      botones: [{ t: "Cancelar", c: "sec", v: null }, { t: "Guardar", v: v => ({ impA: v.querySelector("#cImpA").value.trim().toUpperCase(), t1de: v.querySelector("#c1d").value.trim(), t1a: v.querySelector("#c1a").value.trim(), t2de: v.querySelector("#c2d").value.trim(), t2a: v.querySelector("#c2a").value.trim() }) }]
     });
     if (!r) return;
-    const doc = B.rep.pas3211(r.hojas, { rev: r.rev, impA: r.impA, fecha: r.fecha, global: r.global, f, t });
-    r.modo === "pdf" ? B.rep.pdf(doc) : B.rep.imprimir(doc);
-    const cambios = r.filas.filter(x => { const v = L.find(y => y.num === x.num); return x.ok && CAMPOS.some(k => String(v[k] ?? "") !== x[k]); });
-    if (cambios.length) await ejecutar(async () => { for (const x of cambios) { const d = { num: x.num }; CAMPOS.forEach(k => d[k] = x[k]); await B.api.op("vig", "actualizar", d); } },
-      "Datos del formato guardados en " + cambios.length + " vigilancia(s).");
+    if (["t1de", "t1a", "t2de", "t2a"].some(k => !/^([01]\d|2[0-3]):[0-5]\d$/.test(r[k]))) { ui.toast("Escribe las horas como HH:MM (24 h).", "error"); return; }
+    await ejecutar(() => B.api.op("vig", "pasCfg", r), "Configuración del formato guardada.");
+  },
+  // quien realizo la vigilancia en el turno: el personal con una actividad asignada de esa vigilancia; si no hay, lo del ultimo formato
+  quienPas(v, f, t) {
+    const A = (B.estado.actividades || []).filter(a => a.fecha === f && a.turno === t && a.ini), n = a => U.norm(a.txt || ""), ino = U.norm(v.inop || ""), des = U.norm(v.desc || "");
+    let L = A.filter(a => /VIGILANCIA|\bVIG\b/.test(n(a)) && ((ino && n(a).includes(ino)) || (des && n(a).includes(des))));
+    if (!L.length) L = A.filter(a => /VIGILANCIA/.test(n(a)));
+    if (L.length) return [...new Set(L.map(a => U.ini(a.ini)))].join(", ");
+    const ant = Object.keys(v.pas || {}).sort().pop(); return ant ? v.pas[ant].quien || "" : "";
+  },
+  /* Formato PAS-32-11 del turno de trabajo. Lo capturado (vigilancias marcadas, horas, quien las realizo) queda guardado en cada
+     vigilancia: al volver a abrirlo aparece igual y de ahi sale el historial de vigilancias. */
+  async pas() {
+    const { f, t } = T(), S = B.t.inicio(f, t), E = B.t.fin(f, t), clave = f + "|" + t, H = this.horasPas();
+    const L = B.estado.vig.filter(v => (String(v.inicio || "") < E && (!v.retiro || v.retiro > S)) || (v.pas && v.pas[clave])).sort((a, b) => a.num - b.num);
+    if (!L.length) { ui.toast("No hay vigilancias activas en el turno " + B.t.corto(f, t) + ". Usa «Formato en blanco» si lo necesitas.", "aviso", 6000); return; }
+    const hh = x => String(x).slice(11, 16), e = v => U.esc(v ?? ""), hayG = L.some(v => v.pas && v.pas[clave]), g0 = (L.find(v => v.pas && v.pas[clave]) || { pas: {} }).pas[clave] || {};
+    const dDe = B.t.fechaHora(f, t, t === "T1" ? H.t1de : H.t2de), dA = B.t.fechaHora(f, t, t === "T1" ? H.t1a : H.t2a);
+    const inp = (k, v, w, extra) => `<input class="inp" data-k="${k}" value="${e(v)}" style="min-width:${w}px;padding:6px 8px" ${extra || ""}>`;
+    const fila = v => {
+      const g = v.pas && v.pas[clave], de = g ? g.de : hh(v.inicio > dDe && v.inicio < E ? v.inicio : dDe), a = g ? g.a : hh(v.retiro && v.retiro < dA && v.retiro > S ? v.retiro : dA);
+      return `<tr data-num="${v.num}"><td class="c"><input type="checkbox" data-k="ok" ${!hayG || g ? "checked" : ""} style="width:17px;height:17px"></td><td style="min-width:140px"><b>VIG #${v.num}</b><div class="peque muted">${e(v.desc)}${v.ubic ? " · " + e(v.ubic) : ""}</div></td>
+          <td><select class="inp" data-k="unidad" style="min-width:64px;padding:6px 4px"><option value=""></option>${["U1", "U2"].map(u => `<option ${v.unidad === u ? "selected" : ""}>${u}</option>`).join("")}</select></td>
+          <td>${inp("inop", v.inop, 60)}</td><td>${inp("edif", v.edif, 60)}</td><td>${inp("nivel", v.nivel, 56)}</td><td>${inp("zona", v.zona, 60)}</td><td>${inp("tipoVig", v.tipoVig || "VIG. C.I. C/HR", 120, 'list="pTipos"')}</td>
+          <td><input class="inp tnum h24" data-k="de" inputmode="numeric" maxlength="5" value="${e(de)}" style="width:66px;padding:6px 6px"></td>
+          <td><input class="inp tnum h24" data-k="a" inputmode="numeric" maxlength="5" value="${e(a)}" style="width:66px;padding:6px 6px"></td>
+          <td>${inp("quien", g ? g.quien : this.quienPas(v, f, t), 96, 'list="pPers" placeholder="Iniciales"')}</td></tr>`;
+    };
+    const r = await ui.modal({
+      titulo: "Formatos PAS-32-11 · " + B.t.corto(f, t), icono: "doc", ancho: true,
+      html: `${hayG ? `<div class="aviso v" style="margin-bottom:10px">${B.ico("ok")}<div>Formato de este turno <b>guardado</b> el ${U.fh(String(g0.reg || "").slice(0, 16))} por ${e(g0.por || "")}. Se muestra como se capturó.</div></div>` : ""}
+        <div class="fila" style="align-items:flex-end;margin-bottom:10px"><div class="campo" style="flex:1 1 320px;margin:0"><label>Tipo de formato</label><select class="inp" id="pModo"><option value="global">Un solo formato con todas las vigilancias (una por renglón)</option><option value="hora" ${g0.modo === "hora" ? "selected" : ""}>Un formato por vigilancia, con un renglón por hora</option></select></div>
+          <div class="campo" style="flex:0 0 150px;margin:0"><label>Fecha del formato</label><input class="inp tnum" id="pFecha" value="${e(g0.fmt || S.slice(0, 10).replace(/-/g, ""))}" maxlength="10"></div></div>
+        <p style="margin:0 0 10px;line-height:1.55">Marca las vigilancias que van en el formato, ajusta su hora de inicio y de fin y anota en <b>Realizó</b> las iniciales de quien la hizo (se proponen según las actividades asignadas en el turno). En el turno nocturno el periodo sale por fecha. Si hay vigilancias de las dos unidades sale un formato por unidad.</p>
+        <div class="tabla-cont"><table class="tabla"><thead><tr><th></th><th>Vigilancia</th><th>Unidad</th><th>No. INOP</th><th>Edificio</th><th>Nivel</th><th>Zona de fuego</th><th>Tipo de vigilancia</th><th>De</th><th>A</th><th>Realizó</th></tr></thead><tbody>
+        ${L.map(fila).join("")}</tbody></table></div>
+        <datalist id="pTipos"><option>VIG. C.I. C/HR</option><option>Vigilancia de cada hora</option><option>Vigilancia continua</option></datalist>
+        <datalist id="pPers">${(B.estado.personal || []).filter(p => String(p.activo || "").toUpperCase() !== "NO").map(p => `<option value="${e(p.ini)}">${e(p.nombre)}</option>`).join("")}</datalist>
+        <div class="fila" style="align-items:flex-end;margin-top:12px"><div class="campo" style="flex:0 0 130px;margin:0"><label>Revisión del PAS-32</label><input class="inp" id="pRev" value="${e(this.revPas())}"></div>
+          <div class="campo" style="flex:1 1 300px;margin:0"><label>Leyenda de arriba · Se autoriza la impresión a</label><input class="inp" id="pImpA" value="${e(this.impA())}" readonly style="background:var(--fondo-2, #f2f2f2)" title="Solo el administrador puede cambiarla (botón Configurar)"></div></div>
+        <p class="muted peque" style="margin:8px 0 0">Todo sale en <b>una sola hoja carta</b>. Al guardar, imprimir o generar el PDF el formato queda guardado y entra al historial de vigilancias. Los nombres y firmas se ponen a mano.</p>`,
+      botones: [{ t: "Cancelar", c: "sec", v: null }, { t: "Guardar datos", c: "sec", antes: v => this.okPas(v), v: v => this.leePas(v, "") }, { t: "Guardar en PDF", c: "sec", antes: v => this.okPas(v), v: v => this.leePas(v, "pdf") }, { t: "Imprimir", antes: v => this.okPas(v), v: v => this.leePas(v, "imp") }]
+    });
+    if (!r) return;
+    if (r.modo) { const doc = B.rep.pas3211(r.hojas, { rev: r.rev, impA: r.impA, fecha: r.fecha, global: r.global, f, t }); r.modo === "pdf" ? B.rep.pdf(doc) : B.rep.imprimir(doc); }
+    await ejecutar(() => B.api.op("vig", "pasGuardar", { fecha: f, turno: t, fmt: r.fecha, modo: r.global ? "global" : "hora", items: r.filas }), "Formato del turno guardado (" + r.filas.filter(x => x.ok).length + " vigilancia(s)).");
   },
   okPas(v) { const r = this.leePas(v); if (r.error) { ui.toast(r.error, "error", 7000); return false; } return true; },
   leePas(v, modo) {
-    const filas = [...v.querySelectorAll("tr[data-num]")].map(tr => { const o = { num: +tr.dataset.num }; tr.querySelectorAll("[data-k]").forEach(i => o[i.dataset.k] = i.type === "checkbox" ? i.checked : i.value.trim()); return o; });
+    const filas = [...v.querySelectorAll("tr[data-num]")].map(tr => { const o = { num: +tr.dataset.num }; tr.querySelectorAll("[data-k]").forEach(i => o[i.dataset.k] = i.type === "checkbox" ? i.checked : i.value.trim()); o.quien = String(o.quien || "").toUpperCase(); return o; });
     const sel = filas.filter(x => x.ok), hojas = [], global = v.querySelector("#pModo").value === "global", { f, t } = T();
     const fin = () => ({ modo, filas, hojas, global, rev: v.querySelector("#pRev").value.trim() || "15", impA: v.querySelector("#pImpA").value.trim(), fecha: v.querySelector("#pFecha").value.trim() });
     if (!sel.length) return { error: "Marca al menos una vigilancia." };
-    if (global) {
-      // un formato por unidad (el anexo solo tiene una casilla de unidad); cada vigilancia es un renglon
-      for (const x of sel) {
-        const per = B.rep.pasTramos(f, t, x.de, x.a);
-        if (!per) return { error: "VIG #" + x.num + ": escribe la hora de inicio y la de fin como HH:MM (24 h), dentro del turno y con el fin después del inicio." };
-        let h = hojas.find(y => y.unidad === x.unidad); if (!h) hojas.push(h = { unidad: x.unidad, rows: [], num: x.num });
-        h.rows.push({ inop: x.inop, edif: x.edif, nivel: x.nivel, zona: x.zona, tipo: x.tipoVig, per });
-      }
-      return fin();
-    }
     for (const x of sel) {
-      const per = B.rep.pasPeriodos(x.de, x.a);
-      if (!per) return { error: "VIG #" + x.num + ": escribe la hora de inicio y la de fin como HH:MM (24 h) y que no sean iguales." };
-      hojas.push({ unidad: x.unidad, inop: x.inop, edif: x.edif, nivel: x.nivel, zona: x.zona, tipo: x.tipoVig, per, num: x.num });
+      const tr = B.rep.pasTramos(f, t, x.de, x.a);
+      if (!tr) return { error: "VIG #" + x.num + ": escribe la hora de inicio y la de fin como HH:MM (24 h), dentro del turno y con el fin después del inicio." };
+      if (global) {
+        // un formato por unidad (el anexo solo tiene una casilla de unidad); cada vigilancia es un renglon
+        let h = hojas.find(y => y.unidad === x.unidad); if (!h) hojas.push(h = { unidad: x.unidad, rows: [], num: x.num });
+        h.rows.push({ inop: x.inop, edif: x.edif, nivel: x.nivel, zona: x.zona, tipo: x.tipoVig, per: tr });
+      } else hojas.push({ unidad: x.unidad, inop: x.inop, edif: x.edif, nivel: x.nivel, zona: x.zona, tipo: x.tipoVig, per: B.rep.pasPeriodos(x.de, x.a), num: x.num });
     }
     return fin();
+  },
+  // Historial de vigilancias: lo guardado en los formatos de cada turno, con quien realizo cada una
+  filasHist(d1, d2) {
+    const R = [];
+    for (const v of B.estado.vig) for (const [k, g] of Object.entries(v.pas || {})) {
+      const [f, t] = k.split("|"); if ((d1 && f < d1) || (d2 && f > d2)) continue;
+      const inis = String(g.quien || "").split(/[\s,;/]+/).filter(Boolean);
+      R.push({ f, t, v, g, per: B.rep.pasTramos(f, t, g.de, g.a) || [(g.de || "") + " a " + (g.a || "")], quienTxt: inis.map(i => { const n = B.dom.nombre(i); return n && n !== i ? i + " - " + n : i; }).join("; ") });
+    }
+    return R.sort((a, b) => b.f.localeCompare(a.f) || b.t.localeCompare(a.t) || a.v.num - b.v.num);
+  },
+  async historial() {
+    const e = v => U.esc(v ?? ""), H = this.hist = this.hist || { d1: "", d2: "" };
+    const tabla = () => { const F = this.filasHist(H.d1, H.d2); return F.length ? `<table class="tabla"><thead><tr><th>Fecha</th><th>Turno</th><th>VIG</th><th>No. INOP</th><th>Unidad</th><th>Edificio / nivel / zona</th><th>Periodo</th><th>Realizó</th></tr></thead><tbody>
+      ${F.map(x => `<tr><td class="tnum">${U.corta(x.f)}</td><td>${e(x.t)} ${e(B.t.nombre(x.t))}</td><td class="c"><b>${x.v.num}</b></td><td>${e(x.v.inop)}</td><td class="c">${e(x.v.unidad)}</td><td>${e([x.v.edif, x.v.nivel, x.v.zona].filter(Boolean).join(" / ") || x.v.ubic)}</td><td class="tnum">${x.per.map(e).join("<br>")}</td><td>${e(x.quienTxt) || '<span class="muted">sin capturar</span>'}</td></tr>`).join("")}</tbody></table>` : ui.vacio("Aún no hay formatos guardados" + (H.d1 || H.d2 ? " en ese rango." : "."), "fuego"); };
+    const r = await ui.modal({
+      titulo: "Historial de vigilancias", icono: "historial", ancho: true,
+      html: `<div class="fila" style="align-items:flex-end;margin-bottom:10px"><div class="campo" style="flex:0 0 160px;margin:0"><label>Desde</label><input class="inp" type="date" id="hD1" value="${H.d1}"></div><div class="campo" style="flex:0 0 160px;margin:0"><label>Hasta</label><input class="inp" type="date" id="hD2" value="${H.d2}"></div>
+          <p class="muted peque" style="flex:1;margin:0">Cada renglón es una vigilancia incluida en el formato PAS-32-11 de un turno, con el personal que la realizó.</p></div>
+        <div class="tabla-cont" id="hTab" style="max-height:52vh;overflow:auto">${tabla()}</div>`,
+      alAbrir: v => ["#hD1", "#hD2"].forEach(id => v.querySelector(id).onchange = () => { H.d1 = v.querySelector("#hD1").value; H.d2 = v.querySelector("#hD2").value; v.querySelector("#hTab").innerHTML = tabla(); }),
+      botones: [{ t: "Cerrar", c: "sec", v: null }, { t: "Guardar en PDF", c: "sec", v: "pdf" }, { t: "Imprimir", v: "imp" }]
+    });
+    if (!r) return;
+    const doc = B.rep.vigHistorial(this.filasHist(H.d1, H.d2), H.d1, H.d2);
+    r === "pdf" ? B.rep.pdf(doc) : B.rep.imprimir(doc);
   }
 };
 
@@ -6469,7 +6548,7 @@ B.inter = {
       "ec.crear": () => "Espacio confinado: " + (d.items || []).map(i => i.esp).join(", "), "ec.sumarme": () => "Agregarme a espacio confinado", "ec.monitoreo": () => "Monitoreo de EC #" + d.num + ": " + (d.items || []).map(i => String(i.fh || "").replace("T", " ")).join(", "),
       "ec.monEditar": () => "Corrección de monitoreo de EC #" + d.num, "ec.liberar": () => "Liberación de espacio que estaba NO LIBERADO", "ec.estatus": () => "Cambio de estatus de espacio confinado a " + (d.noLib ? "NO LIBERADO" : "LIBERADO"), "ec.cerrar": () => "Cierre de espacio(s) confinado(s) " + (d.nums || []).join(", "), "ec.reabrir": () => "Reabrir EC #" + d.num, "vig.crear": () => "Vigilancia: " + (d.desc || ""), "vig.retirar": () => "Retiro de vigilancia",
       "he.guardar": () => "Horas extra " + (d.de ? d.de + " a " + d.a : (d.he === "" ? "(quitar)" : d.he + " h")), "he.justificar": () => "Justificación de horas extra", "perfil.guardar": () => "Datos del oficio",
-      "turnos.guardar": () => "Datos del turno", "hojas.guardar": () => "Hoja de asignación",
+      "turnos.guardar": () => "Datos del turno", "hojas.guardar": () => "Hoja de asignación", "vig.pasGuardar": () => "Formato PAS-32-11 del turno",
       "tarjetas.declarar": () => "Tarjeta Líderes en Campo" + (d.ini ? " de " + d.ini : "") + (d.nota ? ": " + d.nota : ""), "tarjetas.declEstado": () => "Tarjetas " + ({ C: "confirmadas", R: "marcadas como no válidas", P: "regresadas a por confirmar" }[d.est] || "") + " (" + ((d.uids || d.ids || []).length) + ")",
       "tarjetas.declBorrar": () => "Tarjeta Líderes en Campo eliminada", "tarjetas.marcar": () => "Tarjeta #" + d.id + ({ A: " marcada como acto inseguro", C: " marcada como condición insegura", D: " descartada" }[d.m] || " sin marca"),
       "tarjetas.semGuardar": () => "Datos de la E+1 de la semana " + d.sem, "tarjetas.importar": () => "Excel de tarjetas de la semana " + d.sem + " (" + (d.tarjetas || []).length + ")", "tarjetas.cfgGuardar": () => "Ajustes del marcador", "tarjetas.rolEsp": () => (d.on ? "Rol de técnico especializado para " : "Se quita el rol de técnico especializado a ") + d.ini, "tarjetas.semBorrar": () => "Semana " + d.sem + " de tarjetas borrada" }[op.col + "." + op.accion];
@@ -6854,7 +6933,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "4.2", servidorViejo: false,
+  info: {}, VERSION: "4.3", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -7037,7 +7116,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "procedimientos" ? '<span class="contador oculto" id="cntProc"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.2")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.3")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
