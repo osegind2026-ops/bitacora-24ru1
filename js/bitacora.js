@@ -799,7 +799,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.6", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.6.1", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -5737,7 +5737,7 @@ V.hoja = {
   const modalMsg = (titulo, nota, texto) => B.ui.modal({
     titulo, icono: "subir", ancho: true,
     html: `<p class="muted peque" style="margin:0 0 8px">${nota}</p><textarea class="inp" id="msTxt" style="min-height:min(380px,48vh);font-family:inherit">${esc(texto)}</textarea>`,
-    botones: [{ t: "Cerrar", c: "sec", v: null }].concat(navigator.share ? [{ t: "Compartir", c: "dorado", antes: async v => { try { await navigator.share({ text: v.querySelector("#msTxt").value }); } catch (e) { } return false; } }] : [])
+    botones: [{ t: "Cerrar", c: "sec", v: null }].concat(navigator.share ? [{ t: "Compartir", c: "dorado", antes: v => { const txt = v.querySelector("#msTxt").value; navigator.share({ text: txt }).catch(e => { if (e.name !== "AbortError") copiar(txt, "No se pudo abrir Compartir (" + esc(e.name) + "). El mensaje quedó copiado: pégalo en WhatsApp."); }); return false; } }] : [])
       .concat([{ t: "Copiar mensaje", c: "verde", antes: async v => { await copiar(v.querySelector("#msTxt").value); return false; } }])
   });
   /* Resalta en el texto de una tarjeta lo que el supervisor debe mirar: la desviacion o el riesgo (rojo), el EPP (ambar),
@@ -7065,19 +7065,38 @@ B.inter = {
     });
   },
   /* ---------- celular: archivo con las capturas pendientes (se comparte por WhatsApp) */
-  async exportarCapturas(soloDescargar) {
-    const ops = await this.pendientes();
-    if (!ops.length) throw new Error("No tienes capturas pendientes de enviar.");
+  /* El archivo se arma al abrir la pantalla (prepararCapturas) para que, al tocar el boton, lo PRIMERO que se haga sea compartir:
+     si antes se espera a leer datos, el celular (sobre todo iPhone) rechaza el envio por no venir directo del toque.
+     Se comparte SOLO el archivo, sin texto ni titulo: con texto adjunto WhatsApp falla o descarta el archivo. */
+  async prepararCapturas() {
+    const ops = await this.pendientes(); if (!ops.length) return null;
     const u = B.usuario, obj = { tipo: "b24-capturas", version: B.app.VERSION, generado: U.ahoraISO(), ini: u.ini, nombre: u.nombre, ops };
     // extension .txt: es la que los celulares permiten compartir directo a WhatsApp
     const nombre = "Bitacora24RU1 CAPTURAS " + u.ini + " " + U.ahoraISO().replace("T", " ").replace(":", "") + ".txt", texto = JSON.stringify(obj);
-    await B.local.escribir("ultimoEnvio", { fecha: U.ahoraISO(), n: ops.length });
-    if (!soloDescargar) try {
-      const file = new File([texto], nombre, { type: "text/plain" });
-      if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: nombre, text: "Capturas de la Bitácora 24RU1 · " + u.ini }); return { modo: "compartido", nombre, n: ops.length }; }
-    } catch (e) { if (e.name === "AbortError") return { modo: "cancelado", nombre, n: ops.length }; }
-    U.descargar(nombre, texto, "text/plain");
-    return { modo: "descargado", nombre, n: ops.length };
+    let file = null; try { file = new File([texto], nombre, { type: "text/plain" }); } catch (e) { }
+    return { nombre, texto, file, n: ops.length };
+  },
+  // modo: "" = compartir el archivo; "descargar" = guardarlo en el celular; "texto" = mandarlo como mensaje de texto (ultimo recurso)
+  async exportarCapturas(modo, prep) {
+    if (modo === true) modo = "descargar";
+    const p = prep || await this.prepararCapturas();
+    if (!p) throw new Error("No tienes capturas pendientes de enviar.");
+    const fin = async (m, error) => { try { await B.local.escribir("ultimoEnvio", { fecha: U.ahoraISO(), n: p.n }); } catch (e) { } return { modo: m, nombre: p.nombre, n: p.n, error: error || "" }; };
+    let error = "";
+    if (modo === "texto") {
+      const msg = "Capturas de la Bitácora 24RU1 · " + B.usuario.ini + " (en la PC: Celulares → Pegar capturas)\n" + p.texto;
+      if (navigator.share) try { await navigator.share({ text: msg }); return fin("texto"); } catch (e) { if (e.name === "AbortError") return fin("cancelado"); error = e.name + ": " + e.message; }
+      try { await navigator.clipboard.writeText(msg); return fin("copiado", error); } catch (e) { return fin("fallo", (error ? error + " · " : "") + e.name + ": " + e.message); }
+    }
+    if (!modo) {
+      if (!p.file) error = "este celular no puede crear el archivo para compartir";
+      else if (!navigator.share) error = "este navegador no tiene la función de compartir";
+      else if (navigator.canShare && !navigator.canShare({ files: [p.file] })) error = "este navegador no permite compartir archivos";
+      else try { await navigator.share({ files: [p.file] }); return fin("compartido"); }
+        catch (e) { if (e.name === "AbortError") return fin("cancelado"); error = e.name + ": " + e.message; }
+    }
+    U.descargar(p.nombre, p.texto, "text/plain");
+    return fin("descargado", error);
   }
 };
 
@@ -7099,6 +7118,9 @@ V.celular = {
         <label class="btn verde bloque" style="cursor:pointer">${B.ico("subir")} Elegir archivo(s) de capturas…<input type="file" id="celImp" accept=".txt,.json,text/plain,application/json" multiple hidden></label>
         <p class="muted peque" style="margin:10px 0 0">Las capturas entran con el nombre de quien las hizo y con las reglas de siempre: no se duplican actividades ni espacios confinados, y el número de espacio confinado lo asigna la PC.
           Si el mismo archivo se importa dos veces no pasa nada: lo ya recibido se ignora. ${sup ? "" : "Solo puedes importar tus propias capturas."}</p>
+        <details style="margin-top:10px"><summary class="peque" style="cursor:pointer;font-weight:600">¿Llegaron como mensaje de texto? Pégalas aquí</summary>
+          <textarea class="inp" id="celTxt" rows="4" style="margin-top:8px;font-size:12px" placeholder="Copia el mensaje completo de WhatsApp (empieza con «Capturas de la Bitácora 24RU1 …») y pégalo aquí"></textarea>
+          <button class="btn sec chico" id="celPegar" style="margin-top:6px">${B.ico("subir")} Importar el texto pegado</button></details>
         <div id="celRes"></div>
       </div>
       <div class="tarjeta c6" data-tour="cel-paquete">${cab("subir", "d", "Paquete de datos para los celulares", "Lleva al celular el personal, las asignaciones, pendientes, espacios, vigilancias, la hoja de asignación y las tarjetas Líderes en Campo.")}
@@ -7121,6 +7143,16 @@ V.celular = {
       }
       caja.innerHTML = h; e.target.value = "";
     };
+    c.querySelector("#celPegar").onclick = async () => {
+      const caja = c.querySelector("#celRes"), t = c.querySelector("#celTxt").value, a = t.indexOf("{"), z = t.lastIndexOf("}");
+      if (a < 0 || z <= a) { ui.toast("Pega el mensaje completo: debe incluir todo el texto entre llaves { … }. Si WhatsApp lo cortó, toca «Leer más» antes de copiarlo.", "error", 9000); return; }
+      try {
+        const r = await B.inter.importarCapturas(t.slice(a, z + 1));
+        caja.innerHTML = `<div class="aviso ${r.fallas.length ? "d" : "v"}" style="margin-top:10px">${B.ico("ok")}<div><b>${U.esc(r.de || "")} ${U.esc(r.nombre)}</b> · texto pegado<br>
+          ${r.ok} captura(s) aplicadas${r.unidas ? " (" + r.unidas + " se unieron a registros que ya existían, sin duplicar)" : ""}${r.repetidas ? " · " + r.repetidas + " ya se habían recibido antes" : ""}.</div></div>` + this.fallasHtml(r.fallas);
+        c.querySelector("#celTxt").value = "";
+      } catch (err) { caja.innerHTML = `<div class="aviso r" style="margin-top:10px">${B.ico("alerta")}<div><b>Texto pegado</b><br>${U.esc(err.message)}${/JSON|leer/i.test(err.message) ? "<br>Parece incompleto: en WhatsApp toca «Leer más» y copia el mensaje entero." : ""}</div></div>`; }
+    };
     const bp = c.querySelector("#celPaq");
     if (bp) bp.onclick = async () => { bp.disabled = true; try { const n = await B.inter.generarPaquete(); ui.toast("Paquete generado: <b>" + U.esc(n) + "</b>. Está en Descargas; mándalo al grupo de WhatsApp.", "ok", 9000); } catch (e) { ui.error(e); } bp.disabled = false; };
   },
@@ -7131,7 +7163,9 @@ V.celular = {
       <div class="cuadricula">
       <div class="tarjeta c6" data-tour="cel-enviar">${cab("subir", "v", "Enviar mis capturas a la PC", pend.length ? `<b>${pend.length}</b> captura(s) guardadas en este celular que la PC todavía no confirma.` : "No hay capturas pendientes: la PC ya tiene todo lo de este celular.")}
         <button class="btn verde bloque" id="mEnviar" ${pend.length ? "" : "disabled"} style="min-height:52px;font-size:15px">${B.ico("subir")} Enviar por WhatsApp (${pend.length})</button>
-        ${pend.length ? `<button class="btn sec bloque" id="mDescargar" style="margin-top:8px">${B.ico("descargar")} Guardar el archivo en el celular</button>` : ""}
+        ${pend.length ? `<button class="btn sec bloque" id="mDescargar" style="margin-top:8px">${B.ico("descargar")} Guardar el archivo en el celular</button>
+          <button class="btn fantasma bloque" id="mTexto" style="margin-top:8px">Si el archivo no se envía: mandar como mensaje de texto</button>` : ""}
+        <div id="mAviso"></div>
         <p class="muted peque" style="margin:10px 0 0">Se genera un archivo «Bitacora24RU1 CAPTURAS ${U.esc(B.usuario.ini)} …»: elige <b>WhatsApp</b> y mándalo al grupo del turno o a tu propio chat. En la PC se importa en <b>Celulares → Importar capturas</b>.
           Puedes enviarlo varias veces: la PC ignora lo que ya recibió.${ult ? `<br>Último envío: ${U.fh(ult.fecha)} (${ult.n} capturas).` : ""}</p>
         ${pend.length ? `<details style="margin-top:10px"><summary class="peque" style="cursor:pointer;color:var(--azul);font-weight:600">Ver lo pendiente de enviar</summary><div class="lista" style="margin-top:8px">${pend.slice(-60).reverse().map(o => `<div class="item"><div class="cuerpo"><div class="tit" style="font-weight:500">${U.esc(B.inter.describir(o))}</div><div class="meta"><span>${U.esc(o.ini)}</span><span>capturado ${U.fh(o.t)}</span></div></div></div>`).join("")}</div></details>` : ""}
@@ -7149,13 +7183,21 @@ V.celular = {
         <div id="mPwa"></div>
       </div>`;
     B.pwa.poner(c.querySelector("#mPwa"));
-    c.querySelector("#mEnviar").onclick = async () => {
-      try { const r = await B.inter.exportarCapturas();
-        ui.toast(r.modo === "compartido" ? "Archivo compartido. Cuando se importe en la PC y cargues el siguiente paquete, estas capturas dejarán de aparecer como pendientes." : r.modo === "descargado" ? "Tu celular no permite compartir directo: el archivo <b>" + U.esc(r.nombre) + "</b> quedó en Descargas. Adjúntalo en WhatsApp como Documento." : "Envío cancelado.", r.modo === "cancelado" ? "" : "ok", 10000);
-        B.app.render(); } catch (e) { ui.error(e); }
+    // el archivo queda listo desde ahora: al tocar el boton se comparte de inmediato
+    let prep = null; B.inter.prepararCapturas().then(p => { prep = p; }).catch(() => { });
+    const aviso = (r) => {
+      const caja = c.querySelector("#mAviso"); if (!caja) return;
+      caja.innerHTML = r.modo === "compartido" ? `<div class="aviso v" style="margin-top:10px">${B.ico("ok")}<div><b>Archivo compartido.</b> Cuando se importe en la PC y cargues el siguiente paquete, estas capturas dejarán de aparecer como pendientes.</div></div>`
+        : r.modo === "texto" ? `<div class="aviso v" style="margin-top:10px">${B.ico("ok")}<div><b>Enviado como mensaje de texto.</b> En la PC se importa en Celulares → «¿Llegaron como mensaje de texto? Pégalas aquí».</div></div>`
+        : r.modo === "copiado" ? `<div class="aviso a" style="margin-top:10px">${B.ico("info")}<div><b>Texto copiado.</b> Abre WhatsApp, pégalo en el chat y envíalo.</div></div>`
+        : r.modo === "descargado" ? `<div class="aviso ${r.error ? "d" : "v"}" style="margin-top:10px">${B.ico(r.error ? "alerta" : "ok")}<div>${r.error ? "<b>No se pudo compartir directo</b> (" + U.esc(r.error) + ").<br>" : ""}El archivo <b>${U.esc(r.nombre)}</b> quedó en <b>Descargas</b>: en WhatsApp toca el clip → <b>Documento</b> y elígelo.${r.error ? " Si tampoco funciona, usa «mandar como mensaje de texto»." : ""}</div></div>`
+        : r.modo === "fallo" ? `<div class="aviso r" style="margin-top:10px">${B.ico("alerta")}<div><b>No se pudo enviar ni copiar</b> (${U.esc(r.error)}). Usa «Guardar el archivo en el celular» y adjúntalo como Documento.</div></div>` : "";
+      if (r.modo === "cancelado") ui.toast("Envío cancelado.", "", 3000);
     };
-    const bd = c.querySelector("#mDescargar");
-    if (bd) bd.onclick = async () => { try { const r = await B.inter.exportarCapturas(true); ui.toast("Archivo <b>" + U.esc(r.nombre) + "</b> guardado en Descargas. Adjúntalo en WhatsApp como Documento o mándalo por correo.", "ok", 9000); B.app.render(); } catch (e) { ui.error(e); } };
+    const enviar = async modo => { try { aviso(await B.inter.exportarCapturas(modo, prep)); } catch (e) { ui.error(e); } };
+    c.querySelector("#mEnviar").onclick = () => enviar("");
+    const bd = c.querySelector("#mDescargar"); if (bd) bd.onclick = () => enviar("descargar");
+    const bt = c.querySelector("#mTexto"); if (bt) bt.onclick = () => enviar("texto");
     const cargar = async (texto, forzar) => {
       const caja = c.querySelector("#mRes");
       try {
@@ -7331,7 +7373,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "4.6", servidorViejo: false,
+  info: {}, VERSION: "4.6.1", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -7517,7 +7559,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "procedimientos" ? '<span class="contador oculto" id="cntProc"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.6")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.6.1")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
