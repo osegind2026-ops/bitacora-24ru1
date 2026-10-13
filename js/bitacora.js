@@ -773,7 +773,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.0", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.1", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -2142,7 +2142,7 @@ B.rep.concVig = function (lista, d1, d2) {
 
 /* ---------------------------------------------------------------- Anexo PAS-32-11 (transferencia de vigilancia contra incendio)
    Reproduce el formato del procedimiento tal cual (sin membrete): un formato por vigilancia y un renglon por hora. Cada hoja lleva
-   7 renglones como el original; si hay mas horas, continua en otra hoja identica. Nombres y firmas se ponen a mano. */
+   todo el turno en una sola hoja carta. Nombres y firmas se ponen a mano. */
 B.rep.pasPeriodos = function (de, a) {
   const m = x => { const r = /^(\d{1,2}):(\d{2})$/.exec(String(x || "").trim()); return r && +r[1] < 24 && +r[2] < 60 ? +r[1] * 60 + +r[2] : null; };
   const hm = x => String(Math.floor(x / 60) % 24).padStart(2, "0") + ":" + String(x % 60).padStart(2, "0");
@@ -2153,47 +2153,59 @@ B.rep.pasPeriodos = function (de, a) {
 };
 B.rep.pas3211 = function (lista, opc) {
   opc = opc || {};
-  const k = v => U.esc(v ?? ""), REN = 7, rev = k(opc.rev || "15"), hojas = [];
-  for (const v of lista) { const per = v.per || []; for (let i = 0; i === 0 || i < per.length; i += REN) hojas.push({ v, per: per.slice(i, i + REN) }); }
+  // Medidas en puntos tomadas del PDF original del anexo (hoja carta 612 x 792). Todo el turno va en UNA hoja: el original trae 7
+  // renglones; si hay mas horas se agregan los renglones que falten y se reduce su altura para que la hoja no pase de una pagina.
+  const k = v => U.esc(v ?? ""), MAX = 16, rev = k(opc.rev || "15"), hojas = [];
+  for (const v of lista) { const per = v.per || []; for (let i = 0; i === 0 || i < per.length; i += MAX) hojas.push({ v, per: per.slice(i, i + MAX) }); }
+  const ley = String(opc.impA || "").trim();
   const css = `
   @page { size: letter portrait; margin: 0; }
   html, body { margin: 0; padding: 0; }
   body { font-family: Arial, Helvetica, sans-serif; color: #000; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  .hoja { position: relative; box-sizing: border-box; width: 8.5in; height: 10.95in; padding: 0.95in 1.2in 0 1.25in; overflow: hidden; page-break-after: always; break-after: page; }
+  .hoja { position: relative; box-sizing: border-box; width: 612pt; height: 790pt; overflow: hidden; page-break-after: always; break-after: page; }
   .hoja:last-child { page-break-after: auto; break-after: auto; }
-  .barra { position: absolute; top: 0.92in; bottom: 1.25in; right: 0.92in; border-right: 1.6px solid #000; }
-  .rev { text-align: right; font-weight: bold; font-size: 10pt; padding-right: 0.28in; }
-  .anexo { text-align: center; font-weight: bold; font-size: 10pt; margin-top: -2px; }
-  .tit { text-align: center; font-weight: bold; font-size: 10.5pt; line-height: 1.3; margin-top: 9px; }
-  .loc { font-weight: bold; text-decoration: underline; font-size: 9.5pt; margin-top: 0.24in; }
-  .uni { display: flex; align-items: center; font-size: 9pt; margin-top: 0.15in; }
-  .uni .u1 { margin-left: 0.62in; } .uni .u2 { margin-left: 0.1in; }
-  .cas { display: inline-block; box-sizing: border-box; width: 0.17in; height: 0.17in; border: 1.6px solid #000; margin-left: 0.2in; text-align: center; font: bold 10pt/0.14in Arial, sans-serif; }
-  .cas.c2 { margin-left: 0.42in; }
-  table.pas { width: 100%; border-collapse: collapse; table-layout: fixed; margin-top: 0.3in; }
-  table.pas th, table.pas td { border: 1px solid #000; text-align: center; vertical-align: middle; padding: 2px 3px; word-wrap: break-word; }
-  table.pas th { font-size: 8.3pt; font-weight: bold; height: 0.38in; line-height: 1.25; padding: 2px 6px; }
-  table.pas td { font-size: 10pt; height: 0.37in; }
-  .firmas { display: flex; justify-content: space-between; margin-top: 0.5in; text-align: center; font-size: 9.5pt; }
-  .firmas > div { width: 46%; } .firmas > div + div { width: 42%; }
-  .firmas .linea { border-bottom: 1px solid #000; height: 0.78in; margin-bottom: 0.14in; }
-  .firmas .nf { font-size: 8pt; margin-top: 0.1in; }
-  .nota { margin: 0.82in -0.22in 0 0; padding-left: 0.5in; text-indent: -0.5in; font-size: 7pt; font-weight: bold; line-height: 1.5; }
-  .nota b { font-size: 11pt; }
-  .rc { text-align: right; font-size: 6.6pt; margin-top: 0.08in; padding-right: 0.02in; }
+  .hoja > div { position: absolute; }
+  .ley { left: 73.5pt; top: 10pt; font-size: 8pt; font-weight: bold; line-height: 9.4pt; white-space: nowrap; color: #BDBDBD; }
+  .ley u { color: #8C8C8C; }
+  .barra { left: 554.4pt; top: 68pt; border-left: 1pt solid #000; }
+  .anexo { left: 0; width: 627pt; top: 67.6pt; text-align: center; font-weight: bold; font-size: 10pt; }
+  .rev { left: 501.6pt; top: 67.6pt; font-weight: bold; font-size: 10pt; }
+  .tit { left: 72.6pt; width: 484pt; top: 90.4pt; text-align: center; font-weight: bold; font-size: 10.9pt; line-height: 12.5pt; white-space: nowrap; }
+  .loc { left: 78.6pt; top: 136pt; font-weight: bold; text-decoration: underline; font-size: 10pt; }
+  .uni { left: 78.6pt; top: 156.6pt; font-size: 10pt; }
+  .u1 { left: 143.6pt; top: 156.6pt; font-size: 10pt; } .u2 { left: 240.2pt; top: 156.6pt; font-size: 10pt; }
+  .cas { box-sizing: border-box; width: 14.4pt; height: 13.8pt; border: 1.5pt solid #000; text-align: center; font: bold 10.5pt/11pt Arial, sans-serif; }
+  .cuerpo { left: 72.6pt; top: 195.7pt; width: 474pt; }
+  table.pas { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  table.pas th, table.pas td { border: 0.6pt solid #000; text-align: center; padding: 0 2pt; word-wrap: break-word; }
+  table.pas th { font: bold 9.8pt/12.4pt Calibri, Carlito, Arial, sans-serif; height: 30.6pt; vertical-align: top; padding-top: 2pt; box-sizing: border-box; }
+  table.pas td { vertical-align: middle; line-height: 1.1; }
+  .firmas { position: relative; font-size: 10pt; text-align: center; }
+  .firmas > div { position: absolute; top: 0; }
+  .firmas .linea { border-bottom: 1pt solid #000; }
+  .firmas .nf { font-size: 8pt; position: absolute; left: 0; right: 0; }
+  .nota { margin: 0 -6pt 0 6pt; padding-left: 32pt; text-indent: -32pt; font-size: 7.4pt; line-height: 9.6pt; white-space: nowrap; }
+  .nota .n { font-size: 9.6pt; font-weight: bold; }
+  .rc { text-align: right; font-size: 6pt; font-weight: bold; margin: 9pt -5.4pt 0 0; }
   @media screen { body { background: #8a8a8a; padding: 14px 0; } .hoja { background: #fff; margin: 0 auto 14px; box-shadow: 0 2px 10px rgba(0,0,0,.35); } }`;
-  const una = ({ v, per }) => `<div class="hoja"><div class="barra"></div>
-    <div class="rev">Rev. ${rev}</div><div class="anexo">Anexo PAS-32-11</div>
+  const una = ({ v, per }) => {
+    const n = Math.max(7, per.length, opc.renglones || 0), mas = n > 7;
+    const h = Math.min(29.63, 312 / n), sep = mas ? 28 : 40.6, esp = mas ? 52 : 68, extra = n * h - 207.4 - (mas ? 28.6 : 0);
+    return `<div class="hoja">${ley ? `<div class="ley"><u>COPIA CONTROLADA TEMPORAL ELECTRÓNICA</u> (PAS-32 Rev. ${rev})<br>SE AUTORIZA LA IMPRESIÓN A: ${k(ley.toUpperCase())}</div>` : ""}
+    <div class="barra" style="height:${(630 + extra).toFixed(1)}pt"></div>
+    <div class="anexo">Anexo PAS-32-11</div><div class="rev">Rev. ${rev}</div>
     <div class="tit">TRANSFERENCIA DE RESPONSABILIDADES DE EJECUCIÓN DE VIGILANCIA CONTRA<br>INCENDIO ENTRE ÁREAS.</div>
     <div class="loc">LOCALIZACIÓN</div>
-    <div class="uni"><span>Unidad:</span><span class="u1">U1</span><span class="cas">${v.unidad === "U1" ? "X" : ""}</span><span class="cas c2">${v.unidad === "U2" ? "X" : ""}</span><span class="u2">U2</span></div>
-    <table class="pas"><colgroup><col style="width:9.6%"><col style="width:12%"><col style="width:10%"><col style="width:10.4%"><col style="width:20.6%"><col></colgroup>
-      <tr><th>No.<br>INOP</th><th>Edificio</th><th>Nivel</th><th>Zona de<br>Fuego</th><th>Tipo de Vigilancia</th><th>Período de transferencia de la acción de Vigilancia</th></tr>` +
-      Array.from({ length: REN }, (_, i) => i < per.length ? `<tr><td>${k(v.inop)}</td><td>${k(v.edif)}</td><td>${k(v.nivel)}</td><td>${k(v.zona)}</td><td>${k(v.tipo)}</td><td>${k(per[i])}</td></tr>` : `<tr>${"<td></td>".repeat(6)}</tr>`).join("") + `</table>
-    <div class="firmas"><div>ÁREA EJECUTORA DE VIGILANCIA<div class="linea"></div>JEFE DE LA OFICINA DE SEG. INDUSTRIAL/<br>OFICIAL DE SEGURIDAD FÍSICA<div class="nf">(NOMBRE, FIRMA)</div></div>
-      <div>ENTERADO<div class="linea"></div>JEFE DE TURNO (U-1 o U-2)<div class="nf" style="margin-top:0.27in">(NOMBRE, FIRMA)</div></div></div>
-    <div class="nota"><b>NOTA:</b> Este anexo no se considera registro de calidad, únicamente se considera informativo para control del Jefe de Turno/Ingeniero de Turno/SRO CENAT.</div>
-    <div class="rc">(RC-146569, AC 2)</div></div>`;
+    <div class="uni">Unidad:</div><div class="u1">U1</div><div class="cas" style="left:169.6pt;top:156.6pt">${v.unidad === "U1" ? "X" : ""}</div><div class="cas" style="left:216.2pt;top:157.3pt">${v.unidad === "U2" ? "X" : ""}</div><div class="u2">U2</div>
+    <div class="cuerpo"><table class="pas"><colgroup><col style="width:46.9pt"><col style="width:55.3pt"><col style="width:46.6pt"><col style="width:49.2pt"><col style="width:100.4pt"><col></colgroup>
+      <tr><th>No.<br>INOP</th><th>Edificio</th><th>Nivel</th><th>Zona de<br>Fuego</th><th>Tipo de Vigilancia</th><th>Período de transferencia de la acción de<br>Vigilancia</th></tr>` +
+      Array.from({ length: n }, (_, i) => `<tr style="height:${h.toFixed(2)}pt;font-size:${mas ? 9 : 10}pt">` + (i < per.length ? `<td>${k(v.inop)}</td><td>${k(v.edif)}</td><td>${k(v.nivel)}</td><td>${k(v.zona)}</td><td>${k(v.tipo)}</td><td>${k(per[i])}</td>` : "<td></td>".repeat(6)) + "</tr>").join("") + `</table>
+      <div class="firmas" style="margin-top:${sep}pt;height:${esp + 46}pt">
+        <div style="left:11.9pt;width:185.6pt">ÁREA EJECUTORA DE VIGILANCIA<div class="linea" style="height:${esp - 11}pt"></div><div style="margin:9.4pt -41pt 0 -19pt;line-height:12.3pt;white-space:nowrap">JEFE DE LA OFICINA DE SEG. INDUSTRIAL/<br>OFICIAL DE SEGURIDAD FÍSICA</div><div class="nf" style="top:${esp + 35}pt">(NOMBRE, FIRMA)</div></div>
+        <div style="left:261pt;width:187pt">ENTERADO<div class="linea" style="height:${esp - 11}pt"></div><div style="margin-top:9.4pt;line-height:12.3pt">JEFE DE TURNO (U-1 o U-2)</div><div class="nf" style="top:${esp + 35}pt">(NOMBRE, FIRMA)</div></div></div>
+      <div class="nota" style="margin-top:${mas ? 40 : 60}pt"><span class="n">NOTA:</span> Este anexo no se considera registro de calidad, <b>únicamente se considera informativo para control del Jefe de Turno/Ingeniero de<br>Turno/SRO CENAT.</b></div>
+      <div class="rc">(RC-146569, AC 2)</div></div></div>`;
+  };
   const html = `<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>Anexo PAS-32-11</title><style>${css}</style></head><body>${hojas.map(una).join("")}</body></html>`;
   const vigs = lista.filter(v => v.num).map(v => v.num);
   return { html, nombre: opc.f ? `PAS-32-11 ${opc.t} ${U.corta(opc.f).replace(/\//g, ".")} VIG ${vigs.join("-")}`.slice(0, 90) : "PAS-32-11 EN BLANCO", carpeta: "VIGILANCIAS PAS-32-11", tipo: "concentrado" };
@@ -2890,12 +2902,14 @@ V.vigilancias = {
       });
       if (r && r.retiro && r.retiro.length >= 16) await ejecutar(() => B.api.op("vig", "retirar", { num, retiro: r.retiro, capt: r.capt && r.capt !== yo() ? r.capt : "" }), "Vigilancia retirada.");
     });
-    const bp = c.querySelector("#vPas"); if (bp) { bp.onclick = () => this.pas(); c.querySelector("#vPasB").onclick = () => B.rep.imprimir(B.rep.pas3211([{}], { rev: this.revPas() })); }
+    const bp = c.querySelector("#vPas"); if (bp) { bp.onclick = () => this.pas(); c.querySelector("#vPasB").onclick = () => B.rep.imprimir(B.rep.pas3211([{}], { rev: this.revPas(), impA: this.impA(), renglones: 12 })); }
   },
   // revision vigente del PAS-32 segun el control de procedimientos (si no esta, la del formato original)
   revPas() { const p = (B.estado.procedimientos || []).find(x => U.norm(x.clave) === "PAS-32" && x.vigente !== false); return (p && String(p.rev || "").trim()) || "15"; },
   /* Formato PAS-32-11: uno por vigilancia del turno de trabajo. Se ajustan las horas de inicio y fin; sale un renglon por hora.
      Los datos del formato que se corrijan aqui se guardan en la vigilancia para el siguiente turno. */
+  // leyenda de copia controlada: nombre de quien imprime (por omision, quien tiene la sesion)
+  impA() { const u = B.usuario || {}, n = String(u.nombre || B.dom.nombre(u.ini) || "").trim(); return n ? n + (u.rpe ? " (" + u.rpe + ")" : "") : ""; },
   async pas() {
     const { f, t } = T(), S = B.t.inicio(f, t), E = B.t.fin(f, t), CAMPOS = ["unidad", "inop", "edif", "nivel", "zona", "tipoVig"];
     const L = B.estado.vig.filter(v => String(v.inicio || "") < E && (!v.retiro || v.retiro > S)).sort((a, b) => a.num - b.num);
@@ -2913,11 +2927,12 @@ V.vigilancias = {
           <td><input class="inp tnum h24" data-k="a" inputmode="numeric" maxlength="5" value="${hh(v.retiro && v.retiro < E ? v.retiro : E)}" style="width:66px;padding:6px 6px"></td></tr>`).join("")}</tbody></table></div>
         <datalist id="pTipos"><option>Vigilancia de cada hora</option><option>Vigilancia continua</option></datalist>
         <div class="fila" style="align-items:flex-end;margin-top:12px"><div class="campo" style="flex:0 0 130px;margin:0"><label>Revisión del PAS-32</label><input class="inp" id="pRev" value="${e(this.revPas())}"></div>
-          <p class="muted peque" style="flex:1;margin:0">Cada hoja lleva 7 renglones como el original; si las horas no caben, el formato continúa en otra hoja igual. Los nombres y firmas se ponen a mano.</p></div>`,
+          <div class="campo" style="flex:1 1 300px;margin:0"><label>Leyenda de arriba · Se autoriza la impresión a</label><input class="inp" id="pImpA" value="${e(this.impA())}" style="text-transform:uppercase" placeholder="Nombre (RPE) · vacío = sin leyenda"></div></div>
+        <p class="muted peque" style="margin:8px 0 0">Todo el turno sale en <b>una sola hoja carta</b>: se agregan los renglones que hagan falta. Los nombres y firmas se ponen a mano.</p>`,
       botones: [{ t: "Cancelar", c: "sec", v: null }, { t: "Guardar en PDF", c: "sec", antes: v => this.okPas(v), v: v => this.leePas(v, "pdf") }, { t: "Imprimir", antes: v => this.okPas(v), v: v => this.leePas(v, "imp") }]
     });
     if (!r) return;
-    const doc = B.rep.pas3211(r.hojas, { rev: r.rev, f, t });
+    const doc = B.rep.pas3211(r.hojas, { rev: r.rev, impA: r.impA, f, t });
     r.modo === "pdf" ? B.rep.pdf(doc) : B.rep.imprimir(doc);
     const cambios = r.filas.filter(x => { const v = L.find(y => y.num === x.num); return x.ok && CAMPOS.some(k => String(v[k] ?? "") !== x[k]); });
     if (cambios.length) await ejecutar(async () => { for (const x of cambios) { const d = { num: x.num }; CAMPOS.forEach(k => d[k] = x[k]); await B.api.op("vig", "actualizar", d); } },
@@ -2933,7 +2948,7 @@ V.vigilancias = {
       if (!per) return { error: "VIG #" + x.num + ": escribe la hora de inicio y la de fin como HH:MM (24 h) y que no sean iguales." };
       hojas.push({ unidad: x.unidad, inop: x.inop, edif: x.edif, nivel: x.nivel, zona: x.zona, tipo: x.tipoVig, per, num: x.num });
     }
-    return { modo, filas, hojas, rev: v.querySelector("#pRev").value.trim() || "15" };
+    return { modo, filas, hojas, rev: v.querySelector("#pRev").value.trim() || "15", impA: v.querySelector("#pImpA").value.trim() };
   }
 };
 
@@ -6810,7 +6825,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "4.0", servidorViejo: false,
+  info: {}, VERSION: "4.1", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -6993,7 +7008,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "procedimientos" ? '<span class="contador oculto" id="cntProc"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.0")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.1")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
