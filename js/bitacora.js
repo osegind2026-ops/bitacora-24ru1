@@ -773,7 +773,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "3.9", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.0", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -1386,7 +1386,7 @@ B.local = {
         soloSup();
         const n = col, L = await this.leer(n) || [], x = L.find(y => +y.num === +d.num);
         if (!x) throw new Error("Registro no encontrado.");
-        const campos = n === "ec" ? ["esp", "o2", "hr", "temp", "lel", "co", "h2s", "lib", "pers", "obs", "fecha", "turno", "cierre", "edif", "elev", "equipo", "cuarto", "ilum", "ruido", "otros", "epp", "tLig", "tMod", "tPes", "tDesc"] : ["desc", "inicio", "inop", "ubic", "comp", "retiro", "obs", "fecha", "turno"];
+        const campos = n === "ec" ? ["esp", "o2", "hr", "temp", "lel", "co", "h2s", "lib", "pers", "obs", "fecha", "turno", "cierre", "edif", "elev", "equipo", "cuarto", "ilum", "ruido", "otros", "epp", "tLig", "tMod", "tPes", "tDesc"] : ["desc", "inicio", "inop", "ubic", "comp", "retiro", "obs", "fecha", "turno", "unidad", "edif", "nivel", "zona", "tipoVig"];
         for (const k of campos) if (k in d) x[k] = d[k];
         if (n === "ec" && "pre" in d) x.pre = String(d.pre || "").toUpperCase();
         if (n === "ec" && d.numNuevo && String(d.numNuevo) !== String(x.num)) {
@@ -1418,11 +1418,11 @@ B.local = {
         for (const it of d.items || []) {
           if (!it.desc) continue;
           const v = { num: sig(L, "num") };
-          for (const k of ["desc", "inicio", "inop", "ubic", "comp", "obs"]) v[k] = String(it[k] ?? "");
+          for (const k of ["desc", "inicio", "inop", "ubic", "comp", "obs", "unidad", "edif", "nivel", "zona", "tipoVig"]) v[k] = String(it[k] ?? "");
           Object.assign(v, { retiro: "", est: "ACTIVA", capAlta: capt, capRet: "", fecha: d.fecha, turno: d.turno, reg: ahora() });
           if (capt !== s.ini) v.regPor = s.ini;
           L.push(v); nums.push(v.num);
-          catCambio = this.agregarCatalogo(cat, "vigilancias", it.desc, { desc: it.desc, inop: it.inop || "", ubic: it.ubic || "", comp: it.comp || "" }) || catCambio;
+          catCambio = this.agregarCatalogo(cat, "vigilancias", it.desc, { desc: it.desc, inop: it.inop || "", ubic: it.ubic || "", comp: it.comp || "", unidad: it.unidad || "", edif: it.edif || "", nivel: it.nivel || "", zona: it.zona || "", tipoVig: it.tipoVig || "" }) || catCambio;
         }
         if (!nums.length) throw new Error("No hay vigilancias para registrar.");
         await this.escribir("vig", L); if (catCambio) await this.escribir("catalogos", cat);
@@ -2140,6 +2140,65 @@ B.rep.concVig = function (lista, d1, d2) {
   return { html: B.rep.documento("Concentrado vigilancias", h), nombre: `CONCENTRADO VIGILANCIAS ${c.proyecto}${d1 ? " del " + U.corta(d1).replace(/\//g, ".") + " al " + U.corta(d2).replace(/\//g, ".") : ""}`, carpeta: "", tipo: "concentrado" };
 };
 
+/* ---------------------------------------------------------------- Anexo PAS-32-11 (transferencia de vigilancia contra incendio)
+   Reproduce el formato del procedimiento tal cual (sin membrete): un formato por vigilancia y un renglon por hora. Cada hoja lleva
+   7 renglones como el original; si hay mas horas, continua en otra hoja identica. Nombres y firmas se ponen a mano. */
+B.rep.pasPeriodos = function (de, a) {
+  const m = x => { const r = /^(\d{1,2}):(\d{2})$/.exec(String(x || "").trim()); return r && +r[1] < 24 && +r[2] < 60 ? +r[1] * 60 + +r[2] : null; };
+  const hm = x => String(Math.floor(x / 60) % 24).padStart(2, "0") + ":" + String(x % 60).padStart(2, "0");
+  let i = m(de), f = m(a); if (i == null || f == null || i === f) return null;
+  if (f < i) f += 1440;                                   // el turno nocturno cruza la medianoche
+  const per = []; for (let x = i; x < f; x += 60) per.push(hm(x) + " a " + hm(Math.min(x + 60, f)));
+  return per;
+};
+B.rep.pas3211 = function (lista, opc) {
+  opc = opc || {};
+  const k = v => U.esc(v ?? ""), REN = 7, rev = k(opc.rev || "15"), hojas = [];
+  for (const v of lista) { const per = v.per || []; for (let i = 0; i === 0 || i < per.length; i += REN) hojas.push({ v, per: per.slice(i, i + REN) }); }
+  const css = `
+  @page { size: letter portrait; margin: 0; }
+  html, body { margin: 0; padding: 0; }
+  body { font-family: Arial, Helvetica, sans-serif; color: #000; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .hoja { position: relative; box-sizing: border-box; width: 8.5in; height: 10.95in; padding: 0.95in 1.2in 0 1.25in; overflow: hidden; page-break-after: always; break-after: page; }
+  .hoja:last-child { page-break-after: auto; break-after: auto; }
+  .barra { position: absolute; top: 0.92in; bottom: 1.25in; right: 0.92in; border-right: 1.6px solid #000; }
+  .rev { text-align: right; font-weight: bold; font-size: 10pt; padding-right: 0.28in; }
+  .anexo { text-align: center; font-weight: bold; font-size: 10pt; margin-top: -2px; }
+  .tit { text-align: center; font-weight: bold; font-size: 10.5pt; line-height: 1.3; margin-top: 9px; }
+  .loc { font-weight: bold; text-decoration: underline; font-size: 9.5pt; margin-top: 0.24in; }
+  .uni { display: flex; align-items: center; font-size: 9pt; margin-top: 0.15in; }
+  .uni .u1 { margin-left: 0.62in; } .uni .u2 { margin-left: 0.1in; }
+  .cas { display: inline-block; box-sizing: border-box; width: 0.17in; height: 0.17in; border: 1.6px solid #000; margin-left: 0.2in; text-align: center; font: bold 10pt/0.14in Arial, sans-serif; }
+  .cas.c2 { margin-left: 0.42in; }
+  table.pas { width: 100%; border-collapse: collapse; table-layout: fixed; margin-top: 0.3in; }
+  table.pas th, table.pas td { border: 1px solid #000; text-align: center; vertical-align: middle; padding: 2px 3px; word-wrap: break-word; }
+  table.pas th { font-size: 8.3pt; font-weight: bold; height: 0.38in; line-height: 1.25; padding: 2px 6px; }
+  table.pas td { font-size: 10pt; height: 0.37in; }
+  .firmas { display: flex; justify-content: space-between; margin-top: 0.5in; text-align: center; font-size: 9.5pt; }
+  .firmas > div { width: 46%; } .firmas > div + div { width: 42%; }
+  .firmas .linea { border-bottom: 1px solid #000; height: 0.78in; margin-bottom: 0.14in; }
+  .firmas .nf { font-size: 8pt; margin-top: 0.1in; }
+  .nota { margin: 0.82in -0.22in 0 0; padding-left: 0.5in; text-indent: -0.5in; font-size: 7pt; font-weight: bold; line-height: 1.5; }
+  .nota b { font-size: 11pt; }
+  .rc { text-align: right; font-size: 6.6pt; margin-top: 0.08in; padding-right: 0.02in; }
+  @media screen { body { background: #8a8a8a; padding: 14px 0; } .hoja { background: #fff; margin: 0 auto 14px; box-shadow: 0 2px 10px rgba(0,0,0,.35); } }`;
+  const una = ({ v, per }) => `<div class="hoja"><div class="barra"></div>
+    <div class="rev">Rev. ${rev}</div><div class="anexo">Anexo PAS-32-11</div>
+    <div class="tit">TRANSFERENCIA DE RESPONSABILIDADES DE EJECUCIÓN DE VIGILANCIA CONTRA<br>INCENDIO ENTRE ÁREAS.</div>
+    <div class="loc">LOCALIZACIÓN</div>
+    <div class="uni"><span>Unidad:</span><span class="u1">U1</span><span class="cas">${v.unidad === "U1" ? "X" : ""}</span><span class="cas c2">${v.unidad === "U2" ? "X" : ""}</span><span class="u2">U2</span></div>
+    <table class="pas"><colgroup><col style="width:9.6%"><col style="width:12%"><col style="width:10%"><col style="width:10.4%"><col style="width:20.6%"><col></colgroup>
+      <tr><th>No.<br>INOP</th><th>Edificio</th><th>Nivel</th><th>Zona de<br>Fuego</th><th>Tipo de Vigilancia</th><th>Período de transferencia de la acción de Vigilancia</th></tr>` +
+      Array.from({ length: REN }, (_, i) => i < per.length ? `<tr><td>${k(v.inop)}</td><td>${k(v.edif)}</td><td>${k(v.nivel)}</td><td>${k(v.zona)}</td><td>${k(v.tipo)}</td><td>${k(per[i])}</td></tr>` : `<tr>${"<td></td>".repeat(6)}</tr>`).join("") + `</table>
+    <div class="firmas"><div>ÁREA EJECUTORA DE VIGILANCIA<div class="linea"></div>JEFE DE LA OFICINA DE SEG. INDUSTRIAL/<br>OFICIAL DE SEGURIDAD FÍSICA<div class="nf">(NOMBRE, FIRMA)</div></div>
+      <div>ENTERADO<div class="linea"></div>JEFE DE TURNO (U-1 o U-2)<div class="nf" style="margin-top:0.27in">(NOMBRE, FIRMA)</div></div></div>
+    <div class="nota"><b>NOTA:</b> Este anexo no se considera registro de calidad, únicamente se considera informativo para control del Jefe de Turno/Ingeniero de Turno/SRO CENAT.</div>
+    <div class="rc">(RC-146569, AC 2)</div></div>`;
+  const html = `<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>Anexo PAS-32-11</title><style>${css}</style></head><body>${hojas.map(una).join("")}</body></html>`;
+  const vigs = lista.filter(v => v.num).map(v => v.num);
+  return { html, nombre: opc.f ? `PAS-32-11 ${opc.t} ${U.corta(opc.f).replace(/\//g, ".")} VIG ${vigs.join("-")}`.slice(0, 90) : "PAS-32-11 EN BLANCO", carpeta: "VIGILANCIAS PAS-32-11", tipo: "concentrado" };
+};
+
 /* ---------------------------------------------------------------- asistencia / horas extra semanal */
 B.rep.semana = function (lunes) {
   const c = B.estado.config, filas = B.dom.semana(lunes);
@@ -2787,16 +2846,23 @@ V.vigilancias = {
         <div class="campo"><label>Descripción / vigilancia</label><input class="inp" id="vDesc" placeholder="Busca o escribe la vigilancia"></div>
         <div class="grid2"><div class="campo"><label># de INOP</label><input class="inp" id="vInop"></div><div class="campo"><label>Componente</label><input class="inp" id="vComp"></div></div>
         <div class="campo"><label>Ubicación</label><input class="inp" id="vUbic"></div>
+        <div class="grid2"><div class="campo"><label>Unidad</label><select class="inp" id="vUnidad"><option value=""></option><option>U1</option><option>U2</option></select></div><div class="campo"><label>Edificio</label><input class="inp" id="vEdif"></div></div>
+        <div class="grid2"><div class="campo"><label>Nivel</label><input class="inp" id="vNivel"></div><div class="campo"><label>Zona de fuego</label><input class="inp" id="vZona"></div></div>
+        <div class="campo"><label>Tipo de vigilancia</label><input class="inp" id="vTipoVig" list="vTipos" placeholder="Vigilancia de cada hora"><datalist id="vTipos"><option>Vigilancia de cada hora</option><option>Vigilancia continua</option></datalist>
+          <span class="ayuda">Unidad, edificio, nivel, zona de fuego y tipo son los datos del formato PAS-32-11.</span></div>
         <div class="grid2"><div class="campo"><label>Fecha de inicio</label><input class="inp" type="date" id="vFecha"></div><div class="campo"><label>Hora de inicio</label><input class="inp tnum h24" type="text" inputmode="numeric" maxlength="5" placeholder="HH:MM (24 h)" autocomplete="off" id="vHora"></div></div>
         <div class="campo"><label>Observaciones</label><input class="inp" id="vObs"></div>
         ${B.dom.esSup() ? `<div class="campo" data-tour="vig-asignar"><label>Asignar a (técnico que dio el alta)</label><input class="inp" id="vCapt" value="${U.esc(yo() + " - " + B.dom.nombre(yo()))}">
           <span class="ayuda">Si el técnico no pudo capturarla, elígelo aquí. No se duplica una vigilancia que sigue activa.</span></div>` : ""}
         <button class="btn verde bloque" id="vGuardar">${B.ico("ok")} Registrar alta</button></div>
+      ${B.dom.esSup() ? `<div class="tarjeta c12" data-tour="vig-pas">${cab("doc", "g", "Formato PAS-32-11 del turno", `Transferencia de responsabilidades de ejecución de vigilancia contra incendio entre áreas. Un formato por vigilancia, con un renglón por cada hora del turno de trabajo (${B.t.corto(f, t)}).`)}
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><button class="btn verde" id="vPas">${B.ico("imprimir")} Generar formatos del turno</button><button class="btn sec" id="vPasB">${B.ico("doc")} Formato en blanco</button>
+          <span class="muted peque">Sale limpio, listo para firmar: los nombres y las firmas se ponen a mano.</span></div></div>` : ""}
       </div>`;
     ui.combo(c.querySelector("#vDesc"), {
       items: () => (B.estado.catalogos.vigilancias || []).map(x => ({ value: x.desc, label: x.desc, sub: [x.inop, x.ubic, x.comp].filter(Boolean).join(" · "), x })),
       estricto: false, nuevo: true,
-      alElegir: (v, it) => { if (it && it.x) { for (const k of ["inop", "ubic", "comp"]) { const i = c.querySelector("#v" + k[0].toUpperCase() + k.slice(1)); if (!i.value) i.value = it.x[k] || ""; } } }
+      alElegir: (v, it) => { if (it && it.x) { for (const k of ["inop", "ubic", "comp", "unidad", "edif", "nivel", "zona", "tipoVig"]) { const i = c.querySelector("#v" + k[0].toUpperCase() + k.slice(1)); if (!i.value) i.value = it.x[k] || ""; } } }
     });
     let vCapt = yo();
     if (B.dom.esSup()) ui.combo(c.querySelector("#vCapt"), { items: () => ui.personas(), alElegir: v => { if (v) vCapt = U.ini(v); } });
@@ -2808,7 +2874,7 @@ V.vigilancias = {
       const inicio = (g("#vFecha") || B.t.fechaHora(f, t, g("#vHora")).slice(0, 10)) + "T" + g("#vHora");
       const dup = B.estado.vig.find(v => !v.retiro && U.norm(v.desc) === U.norm(g("#vDesc")) && U.norm(v.inop || "") === U.norm(g("#vInop")));
       if (dup) { ui.toast(`Esa vigilancia ya está <b>activa</b>: VIG #${dup.num} (alta de ${U.esc(dup.capAlta)}). No se duplica.`, "error", 8000); return; }
-      await ejecutar(() => B.api.op("vig", "crear", { fecha: f, turno: t, capt: vCapt === yo() ? "" : vCapt, items: [{ desc: g("#vDesc"), inop: g("#vInop"), ubic: g("#vUbic"), comp: g("#vComp"), obs: g("#vObs"), inicio }] }),
+      await ejecutar(() => B.api.op("vig", "crear", { fecha: f, turno: t, capt: vCapt === yo() ? "" : vCapt, items: [{ desc: g("#vDesc"), inop: g("#vInop"), ubic: g("#vUbic"), comp: g("#vComp"), obs: g("#vObs"), unidad: g("#vUnidad"), edif: g("#vEdif"), nivel: g("#vNivel"), zona: g("#vZona"), tipoVig: g("#vTipoVig"), inicio }] }),
         r => "Vigilancia registrada: VIG #" + r.nums[0] + (vCapt !== yo() ? " · asignada a " + vCapt : ""));
     };
     c.querySelectorAll("[data-ret]").forEach(b => b.onclick = async () => {
@@ -2824,6 +2890,50 @@ V.vigilancias = {
       });
       if (r && r.retiro && r.retiro.length >= 16) await ejecutar(() => B.api.op("vig", "retirar", { num, retiro: r.retiro, capt: r.capt && r.capt !== yo() ? r.capt : "" }), "Vigilancia retirada.");
     });
+    const bp = c.querySelector("#vPas"); if (bp) { bp.onclick = () => this.pas(); c.querySelector("#vPasB").onclick = () => B.rep.imprimir(B.rep.pas3211([{}], { rev: this.revPas() })); }
+  },
+  // revision vigente del PAS-32 segun el control de procedimientos (si no esta, la del formato original)
+  revPas() { const p = (B.estado.procedimientos || []).find(x => U.norm(x.clave) === "PAS-32" && x.vigente !== false); return (p && String(p.rev || "").trim()) || "15"; },
+  /* Formato PAS-32-11: uno por vigilancia del turno de trabajo. Se ajustan las horas de inicio y fin; sale un renglon por hora.
+     Los datos del formato que se corrijan aqui se guardan en la vigilancia para el siguiente turno. */
+  async pas() {
+    const { f, t } = T(), S = B.t.inicio(f, t), E = B.t.fin(f, t), CAMPOS = ["unidad", "inop", "edif", "nivel", "zona", "tipoVig"];
+    const L = B.estado.vig.filter(v => String(v.inicio || "") < E && (!v.retiro || v.retiro > S)).sort((a, b) => a.num - b.num);
+    if (!L.length) { ui.toast("No hay vigilancias activas en el turno " + B.t.corto(f, t) + ". Usa «Formato en blanco» si lo necesitas.", "aviso", 6000); return; }
+    const hh = x => String(x).slice(11, 16), e = v => U.esc(v ?? "");
+    const inp = (k, v, w, extra) => `<input class="inp" data-k="${k}" value="${e(v)}" style="min-width:${w}px;padding:6px 8px" ${extra || ""}>`;
+    const r = await ui.modal({
+      titulo: "Formatos PAS-32-11 · " + B.t.corto(f, t), icono: "doc", ancho: true,
+      html: `<p style="margin:0 0 10px;line-height:1.55">Se genera <b>un formato por cada vigilancia marcada</b>, con <b>un renglón por hora</b> entre la hora de inicio y la de fin. Ajusta las horas si la transferencia no cubre todo el turno. Lo que corrijas aquí queda guardado en la vigilancia.</p>
+        <div class="tabla-cont"><table class="tabla"><thead><tr><th></th><th>Vigilancia</th><th>Unidad</th><th>No. INOP</th><th>Edificio</th><th>Nivel</th><th>Zona de fuego</th><th>Tipo de vigilancia</th><th>De</th><th>A</th></tr></thead><tbody>
+        ${L.map(v => `<tr data-num="${v.num}"><td class="c"><input type="checkbox" data-k="ok" checked style="width:17px;height:17px"></td><td style="min-width:150px"><b>VIG #${v.num}</b><div class="peque muted">${e(v.desc)}${v.ubic ? " · " + e(v.ubic) : ""}</div></td>
+          <td><select class="inp" data-k="unidad" style="min-width:64px;padding:6px 4px"><option value=""></option>${["U1", "U2"].map(u => `<option ${v.unidad === u ? "selected" : ""}>${u}</option>`).join("")}</select></td>
+          <td>${inp("inop", v.inop, 60)}</td><td>${inp("edif", v.edif, 70)}</td><td>${inp("nivel", v.nivel, 64)}</td><td>${inp("zona", v.zona, 70)}</td><td>${inp("tipoVig", v.tipoVig || "Vigilancia de cada hora", 150, 'list="pTipos"')}</td>
+          <td><input class="inp tnum h24" data-k="de" inputmode="numeric" maxlength="5" value="${hh(v.inicio > S ? v.inicio : S)}" style="width:66px;padding:6px 6px"></td>
+          <td><input class="inp tnum h24" data-k="a" inputmode="numeric" maxlength="5" value="${hh(v.retiro && v.retiro < E ? v.retiro : E)}" style="width:66px;padding:6px 6px"></td></tr>`).join("")}</tbody></table></div>
+        <datalist id="pTipos"><option>Vigilancia de cada hora</option><option>Vigilancia continua</option></datalist>
+        <div class="fila" style="align-items:flex-end;margin-top:12px"><div class="campo" style="flex:0 0 130px;margin:0"><label>Revisión del PAS-32</label><input class="inp" id="pRev" value="${e(this.revPas())}"></div>
+          <p class="muted peque" style="flex:1;margin:0">Cada hoja lleva 7 renglones como el original; si las horas no caben, el formato continúa en otra hoja igual. Los nombres y firmas se ponen a mano.</p></div>`,
+      botones: [{ t: "Cancelar", c: "sec", v: null }, { t: "Guardar en PDF", c: "sec", antes: v => this.okPas(v), v: v => this.leePas(v, "pdf") }, { t: "Imprimir", antes: v => this.okPas(v), v: v => this.leePas(v, "imp") }]
+    });
+    if (!r) return;
+    const doc = B.rep.pas3211(r.hojas, { rev: r.rev, f, t });
+    r.modo === "pdf" ? B.rep.pdf(doc) : B.rep.imprimir(doc);
+    const cambios = r.filas.filter(x => { const v = L.find(y => y.num === x.num); return x.ok && CAMPOS.some(k => String(v[k] ?? "") !== x[k]); });
+    if (cambios.length) await ejecutar(async () => { for (const x of cambios) { const d = { num: x.num }; CAMPOS.forEach(k => d[k] = x[k]); await B.api.op("vig", "actualizar", d); } },
+      "Datos del formato guardados en " + cambios.length + " vigilancia(s).");
+  },
+  okPas(v) { const r = this.leePas(v); if (r.error) { ui.toast(r.error, "error", 7000); return false; } return true; },
+  leePas(v, modo) {
+    const filas = [...v.querySelectorAll("tr[data-num]")].map(tr => { const o = { num: +tr.dataset.num }; tr.querySelectorAll("[data-k]").forEach(i => o[i.dataset.k] = i.type === "checkbox" ? i.checked : i.value.trim()); return o; });
+    const sel = filas.filter(x => x.ok), hojas = [];
+    if (!sel.length) return { error: "Marca al menos una vigilancia." };
+    for (const x of sel) {
+      const per = B.rep.pasPeriodos(x.de, x.a);
+      if (!per) return { error: "VIG #" + x.num + ": escribe la hora de inicio y la de fin como HH:MM (24 h) y que no sean iguales." };
+      hojas.push({ unidad: x.unidad, inop: x.inop, edif: x.edif, nivel: x.nivel, zona: x.zona, tipo: x.tipoVig, per, num: x.num });
+    }
+    return { modo, filas, hojas, rev: v.querySelector("#pRev").value.trim() || "15" };
   }
 };
 
@@ -3010,7 +3120,8 @@ V.concentrados = {
     const campos = col === "ec" ? [["esp", "Espacio"], ["o2", "O2 %"], ["hr", "HR %"], ["temp", "Temp °C"], ["lel", "LEL %"], ["co", "CO ppm"], ["h2s", "H2S ppm"], ["lib", "Liberación o 1ª prueba (AAAA-MM-DDTHH:MM)"], ["fecha", "Fecha del reporte (AAAA-MM-DD)"], ["turno", "Turno del reporte (T1 o T2)"], ["cierre", "Cierre (AAAA-MM-DDTHH:MM; vacío = sigue liberado)"], ["pers", "Personal TSI"], ["obs", "Observaciones"],
         ["edif", "Edificio"], ["elev", "Elevación"], ["equipo", "Equipo"], ["cuarto", "Cuarto"], ["ilum", "Iluminación"], ["ruido", "Ruido (dB)"], ["otros", "Otros"], ["epp", "Equipo de protección"],
         ["tLig", "Estancia trabajo ligero"], ["tMod", "Estancia trabajo moderado"], ["tPes", "Estancia trabajo pesado"], ["tDesc", "Descanso"]]
-      : [["desc", "Descripción"], ["inicio", "Inicio (AAAA-MM-DDTHH:MM)"], ["inop", "# INOP"], ["ubic", "Ubicación"], ["comp", "Componente"], ["retiro", "Retiro (AAAA-MM-DDTHH:MM, vacío = activa)"], ["obs", "Observaciones"]];
+      : [["desc", "Descripción"], ["inicio", "Inicio (AAAA-MM-DDTHH:MM)"], ["inop", "# INOP"], ["ubic", "Ubicación"], ["comp", "Componente"], ["retiro", "Retiro (AAAA-MM-DDTHH:MM, vacío = activa)"], ["obs", "Observaciones"],
+        ["unidad", "Unidad (U1 o U2)"], ["edif", "Edificio"], ["nivel", "Nivel"], ["zona", "Zona de fuego"], ["tipoVig", "Tipo de vigilancia"]];
     const extra = col === "ec" ? `<div class="campo"><label>Estatus del espacio</label>${ui.seg("ecEst", ["Liberado", "NO liberado"], x.noLib ? "NO liberado" : "Liberado")}
           <span class="ayuda">Corrige aquí un espacio que se marcó mal. <b>NO liberado</b>: deja de contar y de salir en el reporte de liberados (queda en Monitoreo de E.C.). <b>Liberado</b>: toma las lecturas y la hora de este registro.</span></div>
       <div class="grid2" style="background:var(--dorado-claro);border-radius:10px;padding:10px 12px 0;margin-bottom:12px${x.noLib ? ";display:none" : ""}">
@@ -3594,7 +3705,7 @@ V.catalogos = {
   render(c) {
     const cat = B.estado.catalogos;
     const tabs = [["espacios", "Espacios confinados"], ["vigilancias", "Vigilancias C.I."], ["difusion", "Mensajes de difusión"]];
-    const cols = { espacios: [["txt", "Espacio confinado"]], vigilancias: [["desc", "Descripción"], ["inop", "# INOP"], ["ubic", "Ubicación"], ["comp", "Componente"]], difusion: [["txt", "Mensaje"], ["tema", "Tema"]] }[this.tab];
+    const cols = { espacios: [["txt", "Espacio confinado"]], vigilancias: [["desc", "Descripción"], ["inop", "# INOP"], ["ubic", "Ubicación"], ["comp", "Componente"], ["unidad", "Unidad (U1 / U2)"], ["edif", "Edificio"], ["nivel", "Nivel"], ["zona", "Zona de fuego"], ["tipoVig", "Tipo de vigilancia"]], difusion: [["txt", "Mensaje"], ["tema", "Tema"]] }[this.tab];
     c.innerHTML = `<div class="tarjeta"><div class="pestanas">${tabs.map(([k, e]) => `<button data-tab="${k}" class="${this.tab === k ? "on" : ""}">${e} (${(cat[k] || []).length})</button>`).join("")}</div>
       <p class="muted peque">Listas que aparecen al escribir en la captura. Lo nuevo que capturen los técnicos se agrega aquí automáticamente.</p>
       <div class="tabla-cont"><table class="tabla"><thead><tr>${cols.map(x => `<th>${x[1]}</th>`).join("")}<th></th></tr></thead><tbody id="kT"></tbody></table></div>
@@ -6699,7 +6810,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "3.9", servidorViejo: false,
+  info: {}, VERSION: "4.0", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -6882,7 +6993,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "procedimientos" ? '<span class="contador oculto" id="cntProc"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "3.9")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.0")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
