@@ -152,7 +152,21 @@ B.dom = {
     this.idx.cambios = (e.cambios || []).filter(c => c.ini && c.desde && c.turno);
   },
   esSup() { return B.usuario && B.usuario.rol === "supervisor"; },
-  esAdmin() { return this.esSup() && !!B.usuario.admin; },      // supervisor administrador: unico que cambia plantilla, catalogos, configuracion y roles
+  esAdmin() { return this.esSup() && !!B.usuario.admin; },
+  /* PERMISOS POR ROL Y POR PERSONA (config.permisos, lo define el administrador en "Roles y permisos"): que secciones del menu ve cada
+     quien. Solo puede OCULTAR o mostrar lo que el rol ya tiene permitido: lo reservado a supervisores o al administrador no se abre
+     a otros roles. El administrador siempre ve todo. Por omision los tecnicos no ven los apartados de Consulta. */
+  PERM_DEF: { tecnico: { concentrados: false, poe: false, procedimientos: false, tarjetas: false } },
+  rolClave(u) { u = u || B.usuario || {}; return u.rol === "supervisor" ? "supervisor" : u.esp ? "esp" : "tecnico"; },
+  permRol(rol, ruta) { const p = ((B.estado.config || {}).permisos || {}).roles || {}, r = p[rol] || {}; return ruta in r ? !!r[ruta] : !((this.PERM_DEF[rol] || {})[ruta] === false); },
+  puedeVer(ruta) {
+    const v = B.vistas[ruta], u = B.usuario; if (!v || !u) return false;
+    if (ruta === "celular" && B.modoMovil) return true;                         // en el celular todos envian y reciben
+    if ((v.sup && !this.esSup()) || (v.admin && !this.esAdmin())) return false;
+    if (ruta === "inicio" || this.esAdmin()) return true;
+    const pp = (((B.estado.config || {}).permisos || {}).personas || {})[U.ini(u.ini)] || {};
+    return ruta in pp ? !!pp[ruta] : this.permRol(this.rolClave(u), ruta);
+  },      // supervisor administrador: unico que cambia plantilla, catalogos, configuracion y roles
   persona(ini) { return this.idx.personal.get(U.ini(ini)); },
   nombre(ini) { const p = this.persona(ini); return p ? p.nombre : ini; },
   catOrden(cat) {
@@ -367,7 +381,13 @@ B.dom = {
     return l.length > 1 ? l.filter(Boolean).concat(l.includes("") && this.ecMons(e).some(x => !x.lib && !String(x.elev || "").trim()) ? [""] : []) : l;
   },
   ecUltimoMon(e, hasta) { const l = this.ecMons(e).filter(m => !hasta || m.fh <= hasta); return l.length ? l[l.length - 1] : null; },
-  ecMonEnTurno(e, f, t) { const a = B.t.inicio(f, t), b = B.t.fin(f, t); return this.ecMons(e).some(m => m.fh >= a && m.fh <= b); },
+  /* Un espacio esta "sin monitoreo" cuando no tiene ninguno en los ultimos N dias (config.ecDiasSinMon, 1 por omision), contados por
+     dia calendario desde el dia en que INICIA el turno: para el turno de noche valen los monitoreos del dia anterior y del actual
+     (los del turno de dia cuentan); para el de dia, los del mismo dia. Con N = 2 se agrega un dia mas hacia atras, etc. */
+  ecDias() { const n = Math.round(+((B.estado.config || {}).ecDiasSinMon)); return n >= 1 ? Math.min(n, 60) : 1; },
+  ecDesde(f, t) { return U.sumar(B.t.inicio(f, t).slice(0, 10), -(this.ecDias() - 1)) + "T00:00"; },
+  ecPlazoTxt(t) { const n = this.ecDias(); return n > 1 ? "en " + n + " días" : t === "T1" ? "entre ayer y hoy" : "en el día"; },
+  ecMonEnTurno(e, f, t) { const a = this.ecDesde(f, t), b = B.t.fin(f, t); return this.ecMons(e).some(m => m.fh >= a && m.fh <= b); },
   ecAbiertoEn(e, fh) { return !e.cierre || e.cierre > fh; },
   ecAbiertos() { return B.estado.ec.filter(e => !e.cierre && !e.noLib).sort((a, b) => a.num - b.num); },
   // espacios que siguen liberados al cierre del turno (f, t), liberados en ese turno o antes, con su ultimo monitoreo hasta entonces
@@ -376,7 +396,7 @@ B.dom = {
     return B.estado.ec.filter(e => !e.noLib && e.fecha && (soloAnteriores ? B.t.clave(e.fecha, e.turno) < K : B.t.clave(e.fecha, e.turno) <= K) && this.ecAbiertoEn(e, fin))
       .sort((a, b) => a.num - b.num).map(e => {
         // pozo seco: un renglon por elevacion, cada una con su ultimo monitoreo y su aviso del turno
-        const ini = B.t.inicio(f, t), els = this.ecElevs(e).map(el => {
+        const ini = this.ecDesde(f, t), els = this.ecElevs(e).map(el => {
           const l = this.ecMons(e).filter(m => U.norm(m.elev || "") === U.norm(el) && m.fh <= fin);
           return l.length ? { elev: el, u: l[l.length - 1], ok: l.some(m => m.fh >= ini) } : null; }).filter(Boolean);
         return { e, u: this.ecUltimoMon(e, fin), ok: els.length > 1 ? els.every(x => x.ok) : this.ecMonEnTurno(e, f, t), elevs: els.length > 1 || (els.length === 1 && els[0].elev) ? els : [] };
@@ -773,7 +793,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.3.1", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.4", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -1914,7 +1934,7 @@ B.rep.turno = function (f, t) {
   const d = B.dom.reporte(f, t), c = B.estado.config;
   let h = `<div class="titulo">NOTAS DEL TURNO <span class="rojo">${t} ${U.esc(B.t.nombre(t))}</span></div>
   <div class="sub"><span class="izq">${U.esc(B.t.periodo())} &nbsp;|&nbsp; Horario: ${U.esc(B.t.horario(t))}</span><span class="fecha">${U.larga(f)}</span></div>
-  <div class="resumen">RESUMEN: &nbsp;Esp. confinados liberados: ${d.ec.length} (acumulado: ${d.acum})${d.ecMon.length ? ` &nbsp;|&nbsp; Siguen liberados: ${d.ecMon.length}${d.ecMon.some(x => !x.ok) ? " (sin monitoreo en el turno: " + d.ecMon.filter(x => !x.ok).length + ")" : ""}` : ""} &nbsp;|&nbsp; Vigilancias C.I.: ${d.vig.length}
+  <div class="resumen">RESUMEN: &nbsp;Esp. confinados liberados: ${d.ec.length} (acumulado: ${d.acum})${d.ecMon.length ? ` &nbsp;|&nbsp; Siguen liberados: ${d.ecMon.length}${d.ecMon.some(x => !x.ok) ? " (sin monitoreo " + B.dom.ecPlazoTxt(t) + ": " + d.ecMon.filter(x => !x.ok).length + ")" : ""}` : ""} &nbsp;|&nbsp; Vigilancias C.I.: ${d.vig.length}
    &nbsp;|&nbsp; Realizadas: ${d.nReal} &nbsp;|&nbsp; En proceso: ${d.nProc} &nbsp;|&nbsp; Pendientes: ${d.nPend} &nbsp;|&nbsp; Personal: ${d.nPers}</div>`;
   let algo = false, hMon = "";
   if (d.vig.length) {
@@ -1957,7 +1977,7 @@ B.rep.turno = function (f, t) {
         : `<tr><td class="lbl" rowspan="${d.ecMon.length + 1}">ESPACIOS<br>CONFINADOS<br>QUE SIGUEN<br>LIBERADOS<br><span style="font-weight:normal;font-size:7pt">(último monitoreo)</span></td>`}
       <th>#</th><th>ESPACIO CONFINADO</th><th>O2<br>(%)</th><th>HR<br>(%)</th><th>TEMP<br>(°C)</th><th>LEL<br>(%)</th><th>CO<br>(ppm)</th><th>H2S<br>(ppm)</th>
       <th>ÚLTIMO MONITOREO</th><th>PERSONAL TSI / OBSERVACIONES</th></tr>` +
-      d.ecMon.map(({ e, u, ok, elev }) => `<tr class="${ok ? "" : "falta"}"><td class="c b">${U.esc(B.dom.ecNum(e))}</td><td class="c">${U.esc(e.esp)}${elev ? `<div class="b">ELEV. ${U.esc(elev)}</div>` : ""}${ok ? "" : `<div class="faltan">SIN MONITOREO EN EL TURNO</div>`}</td>` +
+      d.ecMon.map(({ e, u, ok, elev }) => `<tr class="${ok ? "" : "falta"}"><td class="c b">${U.esc(B.dom.ecNum(e))}</td><td class="c">${U.esc(e.esp)}${elev ? `<div class="b">ELEV. ${U.esc(elev)}</div>` : ""}${ok ? "" : `<div class="faltan">SIN MONITOREO ${B.dom.ecPlazoTxt(t).toUpperCase()}</div>`}</td>` +
         ["o2", "hr", "temp", "lel", "co", "h2s"].map(k => `<td class="c ${B.dom.rango(k, u[k]) ? "fuera" : ""}">${U.esc(u[k])}</td>`).join("") +
         `<td class="c">${U.fh(u.fh)}${u.lib ? `<div class="com obs">liberación</div>` : ""}</td><td class="c">${U.esc(u.pers)}${u.obs && !u.lib ? `<div class="com obs">${U.esc(u.obs)}</div>` : ""}</td></tr>`).join("") + `</table></div>`;
   }
@@ -3317,7 +3337,7 @@ V.monitoreo = {
     const cerrados = B.estado.ec.filter(e => e.cierre && !e.noLib).sort((a, b) => String(b.cierre).localeCompare(String(a.cierre))).slice(0, 12);
     c.innerHTML = `
       <div class="tarjeta" data-tour="mon-resumen">${cab("reloj", faltan.length ? "r" : "v", `Espacios que siguen liberados (${seg.length})`,
-        seg.length ? (faltan.length ? `<b style="color:var(--rojo)">${faltan.length} sin monitoreo</b> en ${B.t.corto(f, t)} · ${seg.length - faltan.length} ya monitoreados en el turno.` : `Todos tienen monitoreo en ${B.t.corto(f, t)}.`)
+        seg.length ? (faltan.length ? `<b style="color:var(--rojo)">${faltan.length} sin monitoreo</b> ${D.ecPlazoTxt(t)} · ${seg.length - faltan.length} al corriente.` : `Todos tienen monitoreo ${D.ecPlazoTxt(t)}.`)
           : "No hay espacios confinados abiertos a esta fecha.",
         `${sup && seg.length ? `<button class="btn sec" id="mnBitTodas" title="Hojas en blanco para anotar a mano en campo">${B.ico("imprimir")} Bitácoras para llenar (${seg.length})</button>` : ""}
          ${sup && seg.length ? `<button class="btn sec" id="mnCerrarVarios">${B.ico("ok")} Cerrar varios…</button>` : ""}`)}
@@ -3331,7 +3351,7 @@ V.monitoreo = {
               ${elevs.length ? elevs.map(x => `<div class="meta" style="color:var(--texto);margin-top:5px;gap:6px;flex-wrap:wrap"><span class="badge ${x.ok ? "v" : "r"}">Elev. ${U.esc(x.elev || "sin anotar")}${x.ok ? "" : " · falta"}</span><span>${U.fh(x.u.fh)}${x.u.lib ? " (liberación)" : ""} · ${U.esc(x.u.pers)}</span>${this.valores(x.u)}</div>`).join("")
                 : `<div class="meta" style="color:var(--texto);margin-top:5px;gap:6px;flex-wrap:wrap"><span><b>Último:</b> ${U.fh(u.fh)}${u.lib ? " (liberación)" : ""} · ${U.esc(u.pers)}</span>${this.valores(u)}</div>`}
             </div>
-            <span class="badge ${ok ? "v" : "r"}" style="margin-top:2px">${ok ? "Monitoreado en " + B.t.corto(f, t) : "Falta en " + B.t.corto(f, t)}</span>
+            <span class="badge ${ok ? "v" : "r"}" style="margin-top:2px">${ok ? "Con monitoreo " + D.ecPlazoTxt(t) : "Sin monitoreo " + D.ecPlazoTxt(t)}</span>
             <div style="display:flex;gap:6px;flex-wrap:wrap;width:100%;margin-top:8px">
               <button class="btn chico verde" data-a="cap">${B.ico("mas")} Capturar monitoreos</button>
               <button class="btn chico sec" data-a="his">${B.ico("historial")} Historial (${D.ecMons(e).length})</button>
@@ -3854,6 +3874,54 @@ V.catalogos = {
 };
 
 /* ===================================================================== USUARIOS */
+/* ===================================================================== ROLES Y PERMISOS (solo administrador) */
+V.roles = {
+  titulo: "Roles y permisos", sup: true, admin: true,
+  SECC: [["MI TURNO", [["actividades", "Mis actividades"], ["horasextra", "Horas extra"], ["espacios", "Espacios confinados"], ["monitoreo", "Monitoreo de E.C."], ["vigilancias", "Vigilancias C.I."], ["pendientes", "Pendientes"], ["historial", "Historial"], ["oficio", "Oficio de tiempo extra"]]],
+    ["CONSULTA", [["concentrados", "Concentrados"], ["poe", "Estándares POE"], ["procedimientos", "Procedimientos"], ["tarjetas", "Líderes en Campo"], ["registros", "Registros del personal"], ["celular", "Celulares"]]],
+    ["SUPERVISIÓN", [["turno", "Datos del turno"], ["reporte", "Reporte del turno"], ["hoja", "Hoja de asignación"], ["asistencia", "Asistencia y horas extra"]]],
+    ["ADMINISTRACIÓN", [["personal", "Cambios de turno"], ["usuarios", "Usuarios"]]]],
+  ROLES: [["tecnico", "Técnico"], ["esp", "Técnico especializado"], ["supervisor", "Supervisor"]],
+  // lo que el rol puede tener: las secciones de supervisor no se abren a tecnicos
+  cabe(rol, ruta) { const v = B.vistas[ruta]; return !!v && !v.admin && (rol === "supervisor" || !v.sup); },
+  render(c) {
+    const D = B.dom, e = v => U.esc(v ?? ""), P = this.p = this.p || JSON.parse(JSON.stringify((B.estado.config || {}).permisos || {}));
+    P.roles = P.roles || {}; P.personas = P.personas || {};
+    const rutas = this.SECC.flatMap(g => g[1]), nomRuta = Object.fromEntries(rutas);
+    const esp = new Set((B.estado.especializados || []).map(U.ini));
+    const pers = (B.estado.personal || []).filter(p => String(p.activo || "").toUpperCase() !== "NO");
+    const rolP = ini => { const p = pers.find(x => U.ini(x.ini) === ini) || {}; return /SUPERV/.test(String(p.cat || "").toUpperCase()) ? "supervisor" : esp.has(ini) ? "esp" : "tecnico"; };
+    const val = (rol, r) => r in (P.roles[rol] || {}) ? !!P.roles[rol][r] : !((D.PERM_DEF[rol] || {})[r] === false);
+    const sel = this.sel || "";
+    c.innerHTML = `
+      <div class="tarjeta">${cab("escudo", "g", "Qué ve cada rol", "Marca las secciones del menú que puede ver cada rol. El administrador siempre ve todo. Las secciones de supervisión no pueden abrirse a los técnicos.")}
+        <div class="tabla-cont"><table class="tabla"><thead><tr><th>Sección</th>${this.ROLES.map(r => `<th class="c">${r[1]}</th>`).join("")}</tr></thead><tbody>
+          ${this.SECC.map(([g, ls]) => `<tr><td colspan="4" style="background:var(--fondo-2,#f3f3f3);font-weight:700;font-size:12px;letter-spacing:.04em">${g}</td></tr>` + ls.map(([r, n]) => `<tr><td>${e(n)}</td>${this.ROLES.map(([rol]) =>
+            `<td class="c">${this.cabe(rol, r) ? `<input type="checkbox" data-rol="${rol}" data-r="${r}" ${val(rol, r) ? "checked" : ""} style="width:18px;height:18px">` : `<span class="muted peque" title="Reservada a supervisores">—</span>`}</td>`).join("")}</tr>`).join("")).join("")}</tbody></table></div>
+        <p class="muted peque" style="margin:10px 0 0">Inicio siempre está visible. Catálogos, Roles y permisos y Configuración son solo del administrador. En el celular, «Enviar / recibir» siempre está disponible.</p></div>
+      <div class="tarjeta">${cab("usuario", "a", "Excepciones por persona", "Para que una persona vea algo distinto a lo de su rol. Lo que no se cambie aquí sigue lo de su rol.")}
+        <div class="fila" style="align-items:flex-end"><div class="campo" style="flex:1 1 320px"><label>Persona</label><input class="inp" id="rPers" placeholder="Busca por nombre o iniciales" value="${sel ? e(sel + " - " + D.nombre(sel)) : ""}"></div>
+          ${sel ? `<span class="badge g" style="margin-bottom:14px">${e(Object.fromEntries(this.ROLES)[rolP(sel)])}</span>` : ""}</div>
+        ${sel ? `<div class="tabla-cont"><table class="tabla"><thead><tr><th>Sección</th><th>Por su rol</th><th>Para esta persona</th></tr></thead><tbody>
+          ${rutas.filter(([r]) => this.cabe(rolP(sel), r)).map(([r, n]) => { const x = (P.personas[sel] || {})[r]; return `<tr><td>${e(n)}</td><td>${val(rolP(sel), r) ? "Visible" : '<span class="muted">Oculta</span>'}</td>
+            <td><select class="inp" data-pr="${r}" style="padding:6px 8px;min-width:170px"><option value="">Según su rol</option><option value="1" ${x === true ? "selected" : ""}>Mostrar</option><option value="0" ${x === false ? "selected" : ""}>Ocultar</option></select></td></tr>`; }).join("")}</tbody></table></div>` : ""}
+        ${Object.keys(P.personas).length ? `<div style="margin-top:12px"><label style="font-size:12px;font-weight:700;color:var(--texto-2)">PERSONAS CON EXCEPCIONES</label><div class="lista">${Object.entries(P.personas).map(([ini, o]) => `<div class="item"><div class="cuerpo"><div class="tit">${e(ini)} · ${e(D.nombre(ini))}</div>
+          <div class="meta"><span>${Object.entries(o).map(([r, v]) => (v ? "Ve " : "No ve ") + e(nomRuta[r] || r)).join(" · ")}</span></div></div><button class="btn chico sec" data-edp="${e(ini)}">Editar</button><button class="btn chico fantasma" data-delp="${e(ini)}">Quitar</button></div>`).join("")}</div></div>` : ""}</div>
+      <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap"><button class="btn sec" id="rDef">Volver a los permisos originales</button><button class="btn verde" id="rG">${B.ico("ok")} Guardar permisos</button></div>`;
+    c.querySelectorAll("[data-rol]").forEach(ch => ch.onchange = () => { (P.roles[ch.dataset.rol] = P.roles[ch.dataset.rol] || {})[ch.dataset.r] = ch.checked; if (sel) B.app.render(); });
+    ui.combo(c.querySelector("#rPers"), { items: () => ui.personas(), alElegir: v => { this.sel = v ? U.ini(String(v).split(" - ")[0]) : ""; B.app.render(); } });
+    c.querySelectorAll("[data-pr]").forEach(s => s.onchange = () => { const o = P.personas[sel] = P.personas[sel] || {}; if (s.value === "") delete o[s.dataset.pr]; else o[s.dataset.pr] = s.value === "1"; if (!Object.keys(o).length) delete P.personas[sel]; B.app.render(); });
+    c.querySelectorAll("[data-edp]").forEach(b => b.onclick = () => { this.sel = b.dataset.edp; B.app.render(); });
+    c.querySelectorAll("[data-delp]").forEach(b => b.onclick = () => { delete P.personas[b.dataset.delp]; if (this.sel === b.dataset.delp) this.sel = ""; B.app.render(); });
+    c.querySelector("#rDef").onclick = async () => { if (await ui.confirmar("Se quitarán los cambios por rol y todas las excepciones por persona. Los técnicos quedarán sin los apartados de Consulta, como al inicio. Se aplica hasta que presiones <b>Guardar permisos</b>.", "Permisos originales", "Restablecer")) { this.p = { roles: {}, personas: {} }; this.sel = ""; B.app.render(); } };
+    c.querySelector("#rG").onclick = async () => {
+      const lim = { roles: {}, personas: P.personas };
+      for (const [rol] of this.ROLES) for (const [r] of rutas) if (this.cabe(rol, r) && r in (P.roles[rol] || {}) && P.roles[rol][r] !== !((D.PERM_DEF[rol] || {})[r] === false)) (lim.roles[rol] = lim.roles[rol] || {})[r] = P.roles[rol][r];
+      await ejecutar(async () => { const x = await B.api.op("config", "guardar", { config: { ...B.estado.config, permisos: lim } }); this.p = null; return x; }, "Permisos guardados. Cada persona los verá al entrar o al actualizar la página.");
+    };
+  }
+};
+
 V.usuarios = {
   titulo: "Usuarios", sup: true,
   render(c) {
@@ -3901,7 +3969,7 @@ V.config = {
     const s = B.estado.servidor, ofc = B.oficio.cfg();
     const cf = { ...B.estado.config };
     for (const [k, d] of [["ofLinea1", ofc.linea1], ["ofLinea2", ofc.linea2], ["ofLinea3", ofc.linea3], ["ofDepto", ofc.depto], ["ofVoboNombre", ofc.voboNombre],
-      ["ofVoboCargo", ofc.voboCargo], ["ofAutNombre", ofc.autNombre], ["ofAutCargo", ofc.autCargo], ["ofNota", ofc.nota]]) if (cf[k] == null) cf[k] = d;
+      ["ofVoboCargo", ofc.voboCargo], ["ofAutNombre", ofc.autNombre], ["ofAutCargo", ofc.autCargo], ["ofNota", ofc.nota], ["ecDiasSinMon", 1]]) if (cf[k] == null) cf[k] = d;
     if (cf.heJust == null || cf.heJust === "") cf.heJust = B.dom.heJust();
     const IMGS = { membrete: "Membrete (encabezado)", pie: "Pie de página", ofIzq: "Logos izquierda", ofDer: "Imagen derecha", ofPie: "Pie de página del oficio" };
     const tarjetaImg = t => `<div class="campo"><label>${IMGS[t]}${B.imgs[t] ? ' <span class="badge g">Personalizado</span>' : ' <span class="badge n">Original</span>'}</label>
@@ -3922,6 +3990,7 @@ V.config = {
         <div class="grid3">${campo("o2Min", "O2 mínimo (%)", "number")}${campo("o2Max", "O2 máximo (%)", "number")}${campo("lelMax", "LEL máximo (%)", "number")}${campo("coMax", "CO máximo (ppm)", "number")}${campo("h2sMax", "H2S máximo (ppm)", "number")}</div>
         ${cab("reloj", "d", "Horas extra - referencia del conteo automático")}
         <div class="grid2">${campo("heTurno", "Horas extra esperadas por turno", "number", "Valor inicial: 12 h de turno − 8 h de jornada")}${campo("heDescanso", "Horas extra por turno en día de DESCANSO", "number")}</div>
+        ${campo("ecDiasSinMon", "Espacios confinados: días sin monitoreo para que aparezca la nota «SIN MONITOREO»", "number", "1 = turno de noche: valen los monitoreos del día anterior y del actual; turno de día: los del mismo día. 2 o más = se avisa hasta que pasen esos días sin monitoreo.")}
         ${campo("ecInicio", "Espacios confinados: número con el que inicia el consecutivo del periodo", "number", "Ej. 123 si continúa la numeración de pre-recarga. Los registros nuevos toman el número más alto + 1.")}
         ${campo("heJust", "Justificación general del tiempo extra (se propone al capturar y en el oficio)", "text", "Los técnicos pueden usarla tal cual o escribir otra.")}
         ${campo("carpetaPDF", "Carpeta para los PDF (vacío = carpeta REPORTES junto al sistema)", "text", "Se aplica al reiniciar el servidor.")}
@@ -6940,7 +7009,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "4.3.1", servidorViejo: false,
+  info: {}, VERSION: "4.4", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -7115,15 +7184,18 @@ B.app = {
     ];
     if (sup) {
       enlaces.push(["SUPERVISIÓN", [["turno", "Datos del turno", "usuarios"], ["reporte", "Reporte del turno", "pdf"], ["hoja", "Hoja de asignación", "doc"], ["asistencia", "Asistencia y horas extra", "calendario"]]]);
-      if (!B.modoMovil) enlaces.push(["ADMINISTRACIÓN", [["personal", B.dom.esAdmin() ? "Personal y turnos" : "Cambios de turno", "usuario"]].concat(B.dom.esAdmin() ? [["catalogos", "Catálogos", "lista"]] : []).concat([["usuarios", "Usuarios", "llave"]]).concat(B.dom.esAdmin() ? [["config", "Configuración y respaldos", "engrane"]] : [])]);
+      if (!B.modoMovil) enlaces.push(["ADMINISTRACIÓN", [["personal", B.dom.esAdmin() ? "Personal y turnos" : "Cambios de turno", "usuario"]].concat(B.dom.esAdmin() ? [["catalogos", "Catálogos", "lista"]] : []).concat([["usuarios", "Usuarios", "llave"]]).concat(B.dom.esAdmin() ? [["roles", "Roles y permisos", "escudo"], ["config", "Configuración y respaldos", "engrane"]] : [])]);
     }
+    // cada quien ve solo las secciones que su rol (o su excepcion personal) tiene permitidas
+    for (const g of enlaces) g[1] = g[1].filter(l => B.dom.puedeVer(l[0]));
+    for (let i = enlaces.length - 1; i >= 0; i--) if (!enlaces[i][1].length) enlaces.splice(i, 1);
     document.getElementById("raiz").innerHTML = `
       <div class="app">
         <aside class="lateral" data-tour="menu">
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "procedimientos" ? '<span class="contador oculto" id="cntProc"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.3.1")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.4")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
@@ -7189,7 +7261,7 @@ B.app = {
   navegar() {
     let r = (location.hash || "#/inicio").replace("#/", "").split("?")[0] || "inicio";
     const v = B.vistas[r];
-    if (!v || (v.sup && !B.dom.esSup() && !(r === "celular" && B.modoMovil)) || (v.admin && !B.dom.esAdmin())) r = "inicio";     // en el celular todos envian y reciben
+    if (!v || !B.dom.puedeVer(r)) r = "inicio";
     this.ruta = r;
     document.body.classList.remove("nav-abierto");
     document.querySelectorAll(".nav a").forEach(a => a.classList.toggle("activo", a.dataset.r === r));
@@ -7202,10 +7274,14 @@ B.app = {
     if (!v || !cont) return;
     document.getElementById("tituloVista").textContent = v.titulo;
     document.getElementById("subVista").textContent = (v.sub ? v.sub() : this.textoTurno());
+    // al actualizar la MISMA seccion (guardar, agregar, cambiar un filtro) la pagina se queda donde estaba; solo sube al cambiar de seccion
+    const misma = this._pintada === this.ruta, y0 = window.scrollY, alto = cont.offsetHeight;
+    this._pintada = this.ruta;
+    if (misma) cont.style.minHeight = alto + "px";
     cont.innerHTML = "";
     try { v.render(cont); } catch (e) { console.error(e); cont.innerHTML = `<div class="aviso r">${B.ico("alerta")}<div>Error al mostrar la vista: ${U.esc(e.message)}</div></div>`; }
     this.contadores();
-    window.scrollTo(0, 0);
+    if (misma) { window.scrollTo(0, y0); setTimeout(() => { cont.style.minHeight = ""; }, 400); } else window.scrollTo(0, 0);
   },
   async refrescar() { await B.api.recargar(); this.render(); },
   textoTurno() { const { f, t } = this.trabajo; return `${t} ${B.t.nombre(t)} · ${B.t.horario(t)} · ${U.larga(f)}`; },
