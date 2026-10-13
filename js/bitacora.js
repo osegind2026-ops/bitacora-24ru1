@@ -773,7 +773,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.1", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.2", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -2151,12 +2151,25 @@ B.rep.pasPeriodos = function (de, a) {
   const per = []; for (let x = i; x < f; x += 60) per.push(hm(x) + " a " + hm(Math.min(x + 60, f)));
   return per;
 };
+/* Periodo de una vigilancia en el formato global. Turno diurno: "09:30 a 14:30". Turno nocturno: un renglon por fecha con las
+   rondas de cada hora de ese dia, p. ej. "20261012 de 21:30 a 23:30" y "20261013 de 00:30 a 06:30". Devuelve null si no es valido. */
+B.rep.pasTramos = function (f, t, de, a) {
+  const m = x => { const r = /^(\d{1,2}):(\d{2})$/.exec(String(x || "").trim()); return r && +r[1] < 24 && +r[2] < 60 ? +r[1] * 60 + +r[2] : null; };
+  const hm = x => String(Math.floor(x / 60)).padStart(2, "0") + ":" + String(x % 60).padStart(2, "0"), i = m(de), z = m(a);
+  if (i == null || z == null) return null;
+  const A = B.t.fechaHora(f, t, hm(i)), Z = B.t.fechaHora(f, t, hm(z)); if (Z <= A) return null;
+  const ymd = s => s.slice(0, 10).replace(/-/g, ""), tramo = (d, x, y) => d + (x === y ? " " + hm(x) : " de " + hm(x) + " a " + hm(y));
+  if (A.slice(0, 10) === Z.slice(0, 10)) return [t === "T1" ? tramo(ymd(A), i, z) : hm(i) + " a " + hm(z)];
+  const ult = i + 60 * Math.floor((1439 - i) / 60), sig = Math.min(ult + 60 - 1440, z);      // ultima ronda antes de medianoche y primera del dia siguiente
+  return [tramo(ymd(A), i, ult), tramo(ymd(Z), sig, z)];
+};
 B.rep.pas3211 = function (lista, opc) {
   opc = opc || {};
   // Medidas en puntos tomadas del PDF original del anexo (hoja carta 612 x 792). Todo el turno va en UNA hoja: el original trae 7
   // renglones; si hay mas horas se agregan los renglones que falten y se reduce su altura para que la hoja no pase de una pagina.
   const k = v => U.esc(v ?? ""), MAX = 16, rev = k(opc.rev || "15"), hojas = [];
-  for (const v of lista) { const per = v.per || []; for (let i = 0; i === 0 || i < per.length; i += MAX) hojas.push({ v, per: per.slice(i, i + MAX) }); }
+  for (const v of lista) { const R = v.rows || (v.per || []).map(p => ({ inop: v.inop, edif: v.edif, nivel: v.nivel, zona: v.zona, tipo: v.tipo, per: [p] }));
+    for (let i = 0; i === 0 || i < R.length; i += MAX) hojas.push({ v, per: R.slice(i, i + MAX) }); }
   const ley = String(opc.impA || "").trim();
   const css = `
   @page { size: letter portrait; margin: 0; }
@@ -2174,6 +2187,9 @@ B.rep.pas3211 = function (lista, opc) {
   .loc { left: 78.6pt; top: 136pt; font-weight: bold; text-decoration: underline; font-size: 10pt; }
   .uni { left: 78.6pt; top: 156.6pt; font-size: 10pt; }
   .u1 { left: 143.6pt; top: 156.6pt; font-size: 10pt; } .u2 { left: 240.2pt; top: 156.6pt; font-size: 10pt; }
+  .fec { left: 394.6pt; width: 152pt; top: 170pt; text-align: center; font: bold 14pt "Times New Roman", Times, serif; text-decoration: underline; }
+  .cas.on { background: #000; }
+  table.neg td { font-family: Calibri, Carlito, Arial, sans-serif; font-weight: bold; }
   .cas { box-sizing: border-box; width: 14.4pt; height: 13.8pt; border: 1.5pt solid #000; text-align: center; font: bold 10.5pt/11pt Arial, sans-serif; }
   .cuerpo { left: 72.6pt; top: 195.7pt; width: 474pt; }
   table.pas { width: 100%; border-collapse: collapse; table-layout: fixed; }
@@ -2189,17 +2205,17 @@ B.rep.pas3211 = function (lista, opc) {
   .rc { text-align: right; font-size: 6pt; font-weight: bold; margin: 9pt -5.4pt 0 0; }
   @media screen { body { background: #8a8a8a; padding: 14px 0; } .hoja { background: #fff; margin: 0 auto 14px; box-shadow: 0 2px 10px rgba(0,0,0,.35); } }`;
   const una = ({ v, per }) => {
-    const n = Math.max(7, per.length, opc.renglones || 0), mas = n > 7;
+    const glob = !!v.rows, n = Math.max(glob ? 1 : 7, per.length, opc.renglones || 0), mas = n > 7, fs = n > 14 ? 8 : mas ? 9 : 10;
     const h = Math.min(29.63, 312 / n), sep = mas ? 28 : 40.6, esp = mas ? 52 : 68, extra = n * h - 207.4 - (mas ? 28.6 : 0);
     return `<div class="hoja">${ley ? `<div class="ley"><u>COPIA CONTROLADA TEMPORAL ELECTRÓNICA</u> (PAS-32 Rev. ${rev})<br>SE AUTORIZA LA IMPRESIÓN A: ${k(ley.toUpperCase())}</div>` : ""}
     <div class="barra" style="height:${(630 + extra).toFixed(1)}pt"></div>
     <div class="anexo">Anexo PAS-32-11</div><div class="rev">Rev. ${rev}</div>
     <div class="tit">TRANSFERENCIA DE RESPONSABILIDADES DE EJECUCIÓN DE VIGILANCIA CONTRA<br>INCENDIO ENTRE ÁREAS.</div>
     <div class="loc">LOCALIZACIÓN</div>
-    <div class="uni">Unidad:</div><div class="u1">U1</div><div class="cas" style="left:169.6pt;top:156.6pt">${v.unidad === "U1" ? "X" : ""}</div><div class="cas" style="left:216.2pt;top:157.3pt">${v.unidad === "U2" ? "X" : ""}</div><div class="u2">U2</div>
-    <div class="cuerpo"><table class="pas"><colgroup><col style="width:46.9pt"><col style="width:55.3pt"><col style="width:46.6pt"><col style="width:49.2pt"><col style="width:100.4pt"><col></colgroup>
-      <tr><th>No.<br>INOP</th><th>Edificio</th><th>Nivel</th><th>Zona de<br>Fuego</th><th>Tipo de Vigilancia</th><th>Período de transferencia de la acción de<br>Vigilancia</th></tr>` +
-      Array.from({ length: n }, (_, i) => `<tr style="height:${h.toFixed(2)}pt;font-size:${mas ? 9 : 10}pt">` + (i < per.length ? `<td>${k(v.inop)}</td><td>${k(v.edif)}</td><td>${k(v.nivel)}</td><td>${k(v.zona)}</td><td>${k(v.tipo)}</td><td>${k(per[i])}</td>` : "<td></td>".repeat(6)) + "</tr>").join("") + `</table>
+    <div class="uni">Unidad:</div><div class="u1">U1</div><div class="cas${v.unidad === "U1" ? " on" : ""}" style="left:169.6pt;top:156.6pt"></div><div class="cas${v.unidad === "U2" ? " on" : ""}" style="left:216.2pt;top:157.3pt"></div><div class="u2">U2</div>${opc.fecha ? `<div class="fec">${k(opc.fecha)}</div>` : ""}
+    <div class="cuerpo"><table class="pas${glob ? " neg" : ""}"><colgroup>${(glob ? [62, 54, 50, 56, 100] : [46.9, 55.3, 46.6, 49.2, 100.4]).map(w => `<col style="width:${w}pt">`).join("")}<col></colgroup>
+      <tr><th>${glob ? "No. INOP" : "No.<br>INOP"}</th><th>Edificio</th><th>Nivel</th><th>Zona de<br>Fuego</th><th>Tipo de Vigilancia</th><th style="white-space:nowrap${glob ? ";font-size:9.3pt" : ""}">${glob ? "Periodo de transferencia de la acción<br>de Vigilancia" : "Período de transferencia de la acción de<br>Vigilancia"}</th></tr>` +
+      Array.from({ length: n }, (_, i) => `<tr style="height:${h.toFixed(2)}pt;font-size:${fs}pt">` + (i < per.length ? `<td>${k(per[i].inop)}</td><td>${k(per[i].edif)}</td><td>${k(per[i].nivel)}</td><td>${k(per[i].zona)}</td><td>${k(per[i].tipo)}</td><td>${per[i].per.map(k).join("<br>")}</td>` : "<td></td>".repeat(6)) + "</tr>").join("") + `</table>
       <div class="firmas" style="margin-top:${sep}pt;height:${esp + 46}pt">
         <div style="left:11.9pt;width:185.6pt">ÁREA EJECUTORA DE VIGILANCIA<div class="linea" style="height:${esp - 11}pt"></div><div style="margin:9.4pt -41pt 0 -19pt;line-height:12.3pt;white-space:nowrap">JEFE DE LA OFICINA DE SEG. INDUSTRIAL/<br>OFICIAL DE SEGURIDAD FÍSICA</div><div class="nf" style="top:${esp + 35}pt">(NOMBRE, FIRMA)</div></div>
         <div style="left:261pt;width:187pt">ENTERADO<div class="linea" style="height:${esp - 11}pt"></div><div style="margin-top:9.4pt;line-height:12.3pt">JEFE DE TURNO (U-1 o U-2)</div><div class="nf" style="top:${esp + 35}pt">(NOMBRE, FIRMA)</div></div></div>
@@ -2208,7 +2224,7 @@ B.rep.pas3211 = function (lista, opc) {
   };
   const html = `<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>Anexo PAS-32-11</title><style>${css}</style></head><body>${hojas.map(una).join("")}</body></html>`;
   const vigs = lista.filter(v => v.num).map(v => v.num);
-  return { html, nombre: opc.f ? `PAS-32-11 ${opc.t} ${U.corta(opc.f).replace(/\//g, ".")} VIG ${vigs.join("-")}`.slice(0, 90) : "PAS-32-11 EN BLANCO", carpeta: "VIGILANCIAS PAS-32-11", tipo: "concentrado" };
+  return { html, nombre: opc.f ? `PAS-32-11 ${opc.t} ${U.corta(opc.f).replace(/\//g, ".")} ${opc.global ? "VIGILANCIAS" : "VIG " + vigs.join("-")}`.slice(0, 90) : "PAS-32-11 EN BLANCO", carpeta: "VIGILANCIAS PAS-32-11", tipo: "concentrado" };
 };
 
 /* ---------------------------------------------------------------- asistencia / horas extra semanal */
@@ -2860,14 +2876,14 @@ V.vigilancias = {
         <div class="campo"><label>Ubicación</label><input class="inp" id="vUbic"></div>
         <div class="grid2"><div class="campo"><label>Unidad</label><select class="inp" id="vUnidad"><option value=""></option><option>U1</option><option>U2</option></select></div><div class="campo"><label>Edificio</label><input class="inp" id="vEdif"></div></div>
         <div class="grid2"><div class="campo"><label>Nivel</label><input class="inp" id="vNivel"></div><div class="campo"><label>Zona de fuego</label><input class="inp" id="vZona"></div></div>
-        <div class="campo"><label>Tipo de vigilancia</label><input class="inp" id="vTipoVig" list="vTipos" placeholder="Vigilancia de cada hora"><datalist id="vTipos"><option>Vigilancia de cada hora</option><option>Vigilancia continua</option></datalist>
+        <div class="campo"><label>Tipo de vigilancia</label><input class="inp" id="vTipoVig" list="vTipos" placeholder="VIG. C.I. C/HR"><datalist id="vTipos"><option>VIG. C.I. C/HR</option><option>Vigilancia de cada hora</option><option>Vigilancia continua</option></datalist>
           <span class="ayuda">Unidad, edificio, nivel, zona de fuego y tipo son los datos del formato PAS-32-11.</span></div>
         <div class="grid2"><div class="campo"><label>Fecha de inicio</label><input class="inp" type="date" id="vFecha"></div><div class="campo"><label>Hora de inicio</label><input class="inp tnum h24" type="text" inputmode="numeric" maxlength="5" placeholder="HH:MM (24 h)" autocomplete="off" id="vHora"></div></div>
         <div class="campo"><label>Observaciones</label><input class="inp" id="vObs"></div>
         ${B.dom.esSup() ? `<div class="campo" data-tour="vig-asignar"><label>Asignar a (técnico que dio el alta)</label><input class="inp" id="vCapt" value="${U.esc(yo() + " - " + B.dom.nombre(yo()))}">
           <span class="ayuda">Si el técnico no pudo capturarla, elígelo aquí. No se duplica una vigilancia que sigue activa.</span></div>` : ""}
         <button class="btn verde bloque" id="vGuardar">${B.ico("ok")} Registrar alta</button></div>
-      ${B.dom.esSup() ? `<div class="tarjeta c12" data-tour="vig-pas">${cab("doc", "g", "Formato PAS-32-11 del turno", `Transferencia de responsabilidades de ejecución de vigilancia contra incendio entre áreas. Un formato por vigilancia, con un renglón por cada hora del turno de trabajo (${B.t.corto(f, t)}).`)}
+      ${B.dom.esSup() ? `<div class="tarjeta c12" data-tour="vig-pas">${cab("doc", "g", "Formato PAS-32-11 del turno", `Transferencia de responsabilidades de ejecución de vigilancia contra incendio entre áreas. Un solo formato con todas las vigilancias del turno de trabajo (${B.t.corto(f, t)}), una por renglón.`)}
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><button class="btn verde" id="vPas">${B.ico("imprimir")} Generar formatos del turno</button><button class="btn sec" id="vPasB">${B.ico("doc")} Formato en blanco</button>
           <span class="muted peque">Sale limpio, listo para firmar: los nombres y las firmas se ponen a mano.</span></div></div>` : ""}
       </div>`;
@@ -2918,21 +2934,23 @@ V.vigilancias = {
     const inp = (k, v, w, extra) => `<input class="inp" data-k="${k}" value="${e(v)}" style="min-width:${w}px;padding:6px 8px" ${extra || ""}>`;
     const r = await ui.modal({
       titulo: "Formatos PAS-32-11 · " + B.t.corto(f, t), icono: "doc", ancho: true,
-      html: `<p style="margin:0 0 10px;line-height:1.55">Se genera <b>un formato por cada vigilancia marcada</b>, con <b>un renglón por hora</b> entre la hora de inicio y la de fin. Ajusta las horas si la transferencia no cubre todo el turno. Lo que corrijas aquí queda guardado en la vigilancia.</p>
+      html: `<div class="fila" style="align-items:flex-end;margin-bottom:10px"><div class="campo" style="flex:1 1 320px;margin:0"><label>Tipo de formato</label><select class="inp" id="pModo"><option value="global">Un solo formato con todas las vigilancias (una por renglón)</option><option value="hora">Un formato por vigilancia, con un renglón por hora</option></select></div>
+          <div class="campo" style="flex:0 0 150px;margin:0"><label>Fecha del formato</label><input class="inp tnum" id="pFecha" value="${S.slice(0, 10).replace(/-/g, "")}" maxlength="10"></div></div>
+        <p style="margin:0 0 10px;line-height:1.55">Marca las vigilancias que van en el formato y ajusta su hora de inicio y de fin. En el turno nocturno el periodo sale por fecha (por ejemplo <b>20261012 de 21:30 a 23:30</b> y <b>20261013 de 00:30 a 06:30</b>). Si hay vigilancias de las dos unidades sale un formato por unidad. Lo que corrijas aquí queda guardado en la vigilancia.</p>
         <div class="tabla-cont"><table class="tabla"><thead><tr><th></th><th>Vigilancia</th><th>Unidad</th><th>No. INOP</th><th>Edificio</th><th>Nivel</th><th>Zona de fuego</th><th>Tipo de vigilancia</th><th>De</th><th>A</th></tr></thead><tbody>
         ${L.map(v => `<tr data-num="${v.num}"><td class="c"><input type="checkbox" data-k="ok" checked style="width:17px;height:17px"></td><td style="min-width:150px"><b>VIG #${v.num}</b><div class="peque muted">${e(v.desc)}${v.ubic ? " · " + e(v.ubic) : ""}</div></td>
           <td><select class="inp" data-k="unidad" style="min-width:64px;padding:6px 4px"><option value=""></option>${["U1", "U2"].map(u => `<option ${v.unidad === u ? "selected" : ""}>${u}</option>`).join("")}</select></td>
-          <td>${inp("inop", v.inop, 60)}</td><td>${inp("edif", v.edif, 70)}</td><td>${inp("nivel", v.nivel, 64)}</td><td>${inp("zona", v.zona, 70)}</td><td>${inp("tipoVig", v.tipoVig || "Vigilancia de cada hora", 150, 'list="pTipos"')}</td>
+          <td>${inp("inop", v.inop, 60)}</td><td>${inp("edif", v.edif, 70)}</td><td>${inp("nivel", v.nivel, 64)}</td><td>${inp("zona", v.zona, 70)}</td><td>${inp("tipoVig", v.tipoVig || "VIG. C.I. C/HR", 130, 'list="pTipos"')}</td>
           <td><input class="inp tnum h24" data-k="de" inputmode="numeric" maxlength="5" value="${hh(v.inicio > S ? v.inicio : S)}" style="width:66px;padding:6px 6px"></td>
           <td><input class="inp tnum h24" data-k="a" inputmode="numeric" maxlength="5" value="${hh(v.retiro && v.retiro < E ? v.retiro : E)}" style="width:66px;padding:6px 6px"></td></tr>`).join("")}</tbody></table></div>
-        <datalist id="pTipos"><option>Vigilancia de cada hora</option><option>Vigilancia continua</option></datalist>
+        <datalist id="pTipos"><option>VIG. C.I. C/HR</option><option>Vigilancia de cada hora</option><option>Vigilancia continua</option></datalist>
         <div class="fila" style="align-items:flex-end;margin-top:12px"><div class="campo" style="flex:0 0 130px;margin:0"><label>Revisión del PAS-32</label><input class="inp" id="pRev" value="${e(this.revPas())}"></div>
           <div class="campo" style="flex:1 1 300px;margin:0"><label>Leyenda de arriba · Se autoriza la impresión a</label><input class="inp" id="pImpA" value="${e(this.impA())}" style="text-transform:uppercase" placeholder="Nombre (RPE) · vacío = sin leyenda"></div></div>
-        <p class="muted peque" style="margin:8px 0 0">Todo el turno sale en <b>una sola hoja carta</b>: se agregan los renglones que hagan falta. Los nombres y firmas se ponen a mano.</p>`,
+        <p class="muted peque" style="margin:8px 0 0">Todo sale en <b>una sola hoja carta</b>: se agregan los renglones que hagan falta. Los nombres y firmas se ponen a mano.</p>`,
       botones: [{ t: "Cancelar", c: "sec", v: null }, { t: "Guardar en PDF", c: "sec", antes: v => this.okPas(v), v: v => this.leePas(v, "pdf") }, { t: "Imprimir", antes: v => this.okPas(v), v: v => this.leePas(v, "imp") }]
     });
     if (!r) return;
-    const doc = B.rep.pas3211(r.hojas, { rev: r.rev, impA: r.impA, f, t });
+    const doc = B.rep.pas3211(r.hojas, { rev: r.rev, impA: r.impA, fecha: r.fecha, global: r.global, f, t });
     r.modo === "pdf" ? B.rep.pdf(doc) : B.rep.imprimir(doc);
     const cambios = r.filas.filter(x => { const v = L.find(y => y.num === x.num); return x.ok && CAMPOS.some(k => String(v[k] ?? "") !== x[k]); });
     if (cambios.length) await ejecutar(async () => { for (const x of cambios) { const d = { num: x.num }; CAMPOS.forEach(k => d[k] = x[k]); await B.api.op("vig", "actualizar", d); } },
@@ -2941,14 +2959,25 @@ V.vigilancias = {
   okPas(v) { const r = this.leePas(v); if (r.error) { ui.toast(r.error, "error", 7000); return false; } return true; },
   leePas(v, modo) {
     const filas = [...v.querySelectorAll("tr[data-num]")].map(tr => { const o = { num: +tr.dataset.num }; tr.querySelectorAll("[data-k]").forEach(i => o[i.dataset.k] = i.type === "checkbox" ? i.checked : i.value.trim()); return o; });
-    const sel = filas.filter(x => x.ok), hojas = [];
+    const sel = filas.filter(x => x.ok), hojas = [], global = v.querySelector("#pModo").value === "global", { f, t } = T();
+    const fin = () => ({ modo, filas, hojas, global, rev: v.querySelector("#pRev").value.trim() || "15", impA: v.querySelector("#pImpA").value.trim(), fecha: v.querySelector("#pFecha").value.trim() });
     if (!sel.length) return { error: "Marca al menos una vigilancia." };
+    if (global) {
+      // un formato por unidad (el anexo solo tiene una casilla de unidad); cada vigilancia es un renglon
+      for (const x of sel) {
+        const per = B.rep.pasTramos(f, t, x.de, x.a);
+        if (!per) return { error: "VIG #" + x.num + ": escribe la hora de inicio y la de fin como HH:MM (24 h), dentro del turno y con el fin después del inicio." };
+        let h = hojas.find(y => y.unidad === x.unidad); if (!h) hojas.push(h = { unidad: x.unidad, rows: [], num: x.num });
+        h.rows.push({ inop: x.inop, edif: x.edif, nivel: x.nivel, zona: x.zona, tipo: x.tipoVig, per });
+      }
+      return fin();
+    }
     for (const x of sel) {
       const per = B.rep.pasPeriodos(x.de, x.a);
       if (!per) return { error: "VIG #" + x.num + ": escribe la hora de inicio y la de fin como HH:MM (24 h) y que no sean iguales." };
       hojas.push({ unidad: x.unidad, inop: x.inop, edif: x.edif, nivel: x.nivel, zona: x.zona, tipo: x.tipoVig, per, num: x.num });
     }
-    return { modo, filas, hojas, rev: v.querySelector("#pRev").value.trim() || "15", impA: v.querySelector("#pImpA").value.trim() };
+    return fin();
   }
 };
 
@@ -6825,7 +6854,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "4.1", servidorViejo: false,
+  info: {}, VERSION: "4.2", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -7008,7 +7037,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "procedimientos" ? '<span class="contador oculto" id="cntProc"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.1")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.2")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
