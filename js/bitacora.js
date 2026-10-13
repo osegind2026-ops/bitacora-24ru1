@@ -799,7 +799,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.5.1", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.6", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -823,7 +823,7 @@ B.local = {
      En el celular los datos llegan en el paquete de la PC; lo que se hace aqui se anota en pendientes y viaja a la PC. */
   async tarjLeer() {
     const T = (await this.leer("tarjetas")) || {};
-    for (const k of ["marcas", "sem", "hist", "cfg", "semanas"]) if (!T[k] || typeof T[k] !== "object") T[k] = {};
+    for (const k of ["marcas", "sem", "hist", "cfg", "semanas", "graf"]) if (!T[k] || typeof T[k] !== "object") T[k] = {};
     T.decl = Array.isArray(T.decl) ? T.decl : [];
     for (const d of T.decl) if (!d.uid) d.uid = "d" + d.id;
     return T;
@@ -852,7 +852,7 @@ B.local = {
     switch (acc) {
       case "ver": {
         const r = { ok: true, editor: ed, esp: ed && !sup, editores: eds, cfg: T.cfg };
-        if (ed) Object.assign(r, { decl: T.decl, marcas: T.marcas, sem: T.sem, hist: T.hist, semanas: T.semanas });
+        if (ed) Object.assign(r, { decl: T.decl, marcas: T.marcas, sem: T.sem, hist: T.hist, semanas: T.semanas, graf: T.graf });
         else r.decl = T.decl.filter(x => U.ini(x.ini) === s.ini || x.est === "C").map(x => U.ini(x.ini) === s.ini ? x : { ini: x.ini, f: x.f, t: x.t, est: "C" });
         return r;
       }
@@ -933,6 +933,13 @@ B.local = {
         if (!m) delete T.marcas[id];
         else if (["A", "C", "D"].includes(m)) T.marcas[id] = { m, nota: String(b.nota || ""), sem, por: s.ini, fh: ahora() };
         else throw new Error("Marca no válida.");
+        return fin();
+      }
+      case "grafGuardar": {
+        soloEd();
+        const gk = String(b.clave || "");
+        if (gk !== "cfg" && !/^\d{4}-\d{2}$/.test(gk)) throw new Error("Clave no válida.");
+        T.graf[gk] = Object.assign({}, b.datos, { por: s.ini, fh: ahora() });
         return fin();
       }
       case "semGuardar": {
@@ -5793,8 +5800,8 @@ V.hoja = {
     pinta() {
       const c = this.c, D = TJ.datos, sup = B.dom.esSup(), comp = this.completa(), y0 = window.scrollY;
       c.style.minHeight = c.offsetHeight + "px";
-      const tabs = [["marcador", "Marcador"], ["mias", "Mis tarjetas"]].concat(!D.editor ? [] : comp ? [["tend", "Tarjetas y tendencias"], ["e1", "Presentación E+1"]] : [["res", "Resumen"]]).concat(sup ? [["ajustes", "Ajustes"]] : D.editor && comp ? [["ajustes", "Semanas cargadas"]] : []);
-      if (!tabs.some(x => x[0] === this.tab)) this.tab = this.tab === "tend" || this.tab === "e1" ? "res" : this.tab === "res" ? "tend" : "marcador";
+      const tabs = [["marcador", "Marcador"], ["mias", "Mis tarjetas"]].concat(!D.editor ? [] : comp ? [["tend", "Tarjetas y tendencias"], ["graf", "Gráficas y reportes"], ["e1", "Presentación E+1"]] : [["res", "Resumen"]]).concat(sup ? [["ajustes", "Ajustes"]] : D.editor && comp ? [["ajustes", "Semanas cargadas"]] : []);
+      if (!tabs.some(x => x[0] === this.tab)) this.tab = this.tab === "tend" || this.tab === "e1" || this.tab === "graf" ? "res" : this.tab === "res" ? "tend" : "marcador";
       c.innerHTML = `${B.modoMovil && D.editor ? `<div class="tj-modo"><span>${comp ? "<b>Vista completa</b>: trabajo remoto con todas las funciones." : "<b>Vista resumida</b> para celular."}</span><a href="#" id="tjModo">${comp ? "Cambiar a la vista resumida" : "Usar la vista completa (trabajo remoto)"}</a></div>` : ""}
         <div class="pestanas">${tabs.map(([k, t]) => `<button data-t="${k}" class="${k === this.tab ? "on" : ""}">${t}</button>`).join("")}</div><div id="tjCuerpo"></div>`;
       const mo = c.querySelector("#tjModo"); if (mo) mo.onclick = e => { e.preventDefault(); try { localStorage.setItem("b_tj_completa", comp ? "0" : "1"); } catch (x) { } this.pinta(); };
@@ -6075,6 +6082,7 @@ V.hoja = {
 
     /* ------------------------------------------------------------ PRESENTACION E+1 (en e1.js) */
     t_e1(c) { return B.e1.vista(this, c); },
+    t_graf(c) { return B.tend.vista(this, c); },
 
     /* ------------------------------------------------------------ AJUSTES (supervisor) */
     t_ajustes(c) {
@@ -6254,8 +6262,44 @@ V.hoja = {
     span(r) {
       return `<span style="font-family:${this.FAM[r.f] || this.FAM.Arial};font-size:${r.sz}pt;${r.b ? "font-weight:700;" : ""}${r.i ? "font-style:italic;" : ""}${r.u ? "text-decoration:underline;" : ""}${r.col ? "color:#" + r.col + ";" : ""}">${esc(r.t)}</span>`;
     },
+    // grafica de pastel (debilidades por estandar, etc.): rebanadas desde arriba en el sentido del reloj, con su porcentaje
+    svgPie(g) {
+      const W = g.w, H = g.h, cx = W / 2, cy = H / 2, r = Math.min(W, H) / 2 - 24, v = g.series[0].v, cols = g.series[0].cols || [], tot = v.reduce((a, b) => a + b, 0) || 1;
+      let s = `<svg style="left:${g.x}pt;top:${g.y}pt;width:${W}pt;height:${H}pt" viewBox="0 0 ${W} ${H}" font-family="'Noto Sans','Segoe UI',Arial,sans-serif">`, a0 = -Math.PI / 2;
+      const pt = (a, rr) => [(cx + rr * Math.cos(a)).toFixed(2), (cy + rr * Math.sin(a)).toFixed(2)], et = [];
+      v.forEach((n, i) => {
+        if (!n) return;
+        const a1 = a0 + n / tot * Math.PI * 2, [x0, y0] = pt(a0, r), [x1, y1] = pt(a1, r), col = "#" + (cols[i] || "888888");
+        s += n === tot ? `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${col}"/>` : `<path d="M${cx},${cy} L${x0},${y0} A${r},${r} 0 ${a1 - a0 > Math.PI ? 1 : 0} 1 ${x1},${y1} Z" fill="${col}" stroke="#fff" stroke-width="1.2"/>`;
+        et.push({ i, n, m: (a0 + a1) / 2, p: n / tot * 100 }); a0 = a1;
+      });
+      const claro = c => { const x = parseInt(c || "888888", 16); return ((x >> 16) * 299 + ((x >> 8) & 255) * 587 + (x & 255) * 114) / 1000 > 150; };
+      let fuera = 0;      // las rebanadas chicas llevan su porcentaje por fuera, alternando la distancia para que no se encimen
+      for (const e of et) {
+        const dentro = e.p >= (g.nombres ? 4 : 3.4), [x, y] = pt(e.m, dentro ? r * (e.p > 30 ? 0.55 : 0.68) : r + 8 + (fuera++ % 2) * 11), fz = g.nombres ? (e.p >= 9 ? 13 : 10.5) : (e.p >= 9 ? 11 : 9.5), fill = dentro ? (claro(cols[e.i]) ? "#1b1b1b" : "#fff") : "#1b1b1b";
+        const nom = g.nombres && dentro && e.p >= 8 ? String(g.cats[e.i] || "") : "", pal = nom.split(" "), lin = [];
+        for (const p of pal) { if (lin.length && (lin[lin.length - 1] + " " + p).length <= (e.p >= 20 ? 14 : 11)) lin[lin.length - 1] += " " + p; else if (p) lin.push(p); }
+        const alto = fz * 0.95, y0 = +y - (lin.length * alto) / 2 + (nom ? 0 : fz * 0.35);
+        s += `<text x="${x}" y="${nom ? y0.toFixed(2) : y0.toFixed(2)}" text-anchor="middle" font-size="${fz}" font-weight="700" fill="${fill}">${e.p.toFixed(1)}%</text>`;
+        lin.forEach((t, k) => { s += `<text x="${x}" y="${(y0 + (k + 1) * alto).toFixed(2)}" text-anchor="middle" font-size="${(fz * 0.72).toFixed(1)}" font-weight="600" fill="${fill}">${esc(t)}</text>`; });
+      }
+      return s + "</svg>";
+    },
+    pieXml(g) {
+      const n = g.cats.length, se = g.series[0], cols = se.cols || [];
+      return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><c:date1904 val="0"/><c:roundedCorners val="0"/>
+<c:chart><c:autoTitleDeleted val="1"/><c:plotArea><c:layout/><c:pieChart><c:varyColors val="1"/><c:ser><c:idx val="0"/><c:order val="0"/><c:tx><c:strRef><c:f>Hoja1!$B$1</c:f><c:strCache><c:ptCount val="1"/><c:pt idx="0"><c:v>${esc(se.n)}</c:v></c:pt></c:strCache></c:strRef></c:tx>
+${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><a:solidFill><a:srgbClr val="${cols[i] || "888888"}"/></a:solidFill><a:ln w="12700"><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill></a:ln></c:spPr></c:dPt>`).join("")}
+<c:dLbls><c:numFmt formatCode="0.0%" sourceLinked="0"/><c:spPr><a:noFill/><a:ln><a:noFill/></a:ln></c:spPr><c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="1100" b="1"><a:solidFill><a:srgbClr val="1B1B1B"/></a:solidFill></a:defRPr></a:pPr><a:endParaRPr lang="es-MX"/></a:p></c:txPr><c:showLegendKey val="0"/><c:showVal val="0"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="1"/><c:showBubbleSize val="0"/><c:showLeaderLines val="1"/></c:dLbls>
+<c:cat><c:strRef><c:f>Hoja1!$A$2:$A$${n + 1}</c:f><c:strCache><c:ptCount val="${n}"/>${g.cats.map((c, i) => `<c:pt idx="${i}"><c:v>${esc(c)}</c:v></c:pt>`).join("")}</c:strCache></c:strRef></c:cat>
+<c:val><c:numRef><c:f>Hoja1!$B$2:$B$${n + 1}</c:f><c:numCache><c:formatCode>General</c:formatCode><c:ptCount val="${n}"/>${se.v.map((v, i) => `<c:pt idx="${i}"><c:v>${v || 0}</c:v></c:pt>`).join("")}</c:numCache></c:numRef></c:val></c:ser><c:firstSliceAng val="0"/></c:pieChart>
+<c:spPr><a:noFill/></c:spPr></c:plotArea><c:plotVisOnly val="1"/><c:dispBlanksAs val="gap"/></c:chart>
+<c:spPr><a:noFill/><a:ln><a:noFill/></a:ln></c:spPr><c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr/></a:pPr><a:endParaRPr lang="es-MX"/></a:p></c:txPr><c:externalData r:id="rId1"><c:autoUpdate val="0"/></c:externalData></c:chartSpace>`;
+    },
     svg(g) {
-      const W = g.w, H = g.h, L = 30, Rm = 8, T = 30, Bm = 66, pw = W - L - Rm, ph = H - T - Bm, n = g.cats.length || 1, k = g.series.length;
+      if (g.tipo === "pie") return this.svgPie(g);
+      const W = g.w, H = g.h, L = 30, Rm = 8, T = 30, Bm = g.bm || 66, pw = W - L - Rm, ph = H - T - Bm, n = g.cats.length || 1, k = g.series.length;
       const max = Math.max(1, ...g.series.flatMap(s => s.v)), paso = [0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500].find(p => max / p <= 7) || 1000, tope = Math.ceil(max / paso + 0.4) * paso;
       const y = v => T + ph - v / tope * ph, gw = pw / n, bw = gw * 0.8 / k, fe = n > 60 ? 6.2 : 7.2;
       let s = `<svg style="left:${g.x}pt;top:${g.y}pt;width:${W}pt;height:${H}pt" viewBox="0 0 ${W} ${H}" font-family="Calibri,Carlito,Arial,sans-serif"><text x="${W / 2}" y="17" text-anchor="middle" font-size="14" fill="#595959">${esc(g.titulo)}</text>`;
@@ -6264,11 +6308,11 @@ V.hoja = {
         const x0 = L + i * gw + gw * 0.1;
         g.series.forEach((se, j) => {
           const v = se.v[i] || 0, x = x0 + j * bw, yy = y(v);
-          if (v) s += `<rect x="${x.toFixed(2)}" y="${yy.toFixed(2)}" width="${Math.max(bw - 0.4, 0.8).toFixed(2)}" height="${(T + ph - yy).toFixed(2)}" fill="#${se.col}"/>`;
+          if (v) s += `<rect x="${x.toFixed(2)}" y="${yy.toFixed(2)}" width="${Math.max(bw - 0.4, 0.8).toFixed(2)}" height="${(T + ph - yy).toFixed(2)}" fill="#${(se.cols && se.cols[i]) || se.col}"/>`;
           if (g.etq) s += `<text x="${(x + bw / 2).toFixed(2)}" y="${(yy - 2).toFixed(2)}" text-anchor="middle" font-size="${fe}" fill="#404040">${v}</text>`;
         });
         const cx = L + i * gw + gw / 2 + 2.4;
-        s += `<text transform="translate(${cx.toFixed(2)},${T + ph + 5}) rotate(-90)" text-anchor="end" font-size="${n > 60 ? 7 : 8}" fill="#595959">${esc(c)}</text>`;
+        s += `<text transform="translate(${cx.toFixed(2)},${T + ph + 5}) rotate(-90)" text-anchor="end" font-size="${n > 60 ? 7 : 8}" fill="#595959">${esc(String(c).length > (Bm - 10) / 4.1 ? String(c).slice(0, Math.floor((Bm - 10) / 4.1) - 1) + "…" : c)}</text>`;
       });
       const anch = g.series.map(se => se.n.length * 4.7 + 22), tot = anch.reduce((a, b) => a + b, 0); let lx = (W - tot) / 2;
       g.series.forEach((se, j) => { s += `<rect x="${lx}" y="${H - 12}" width="5" height="5" fill="#${se.col}"/><text x="${lx + 8}" y="${H - 7}" font-size="8.5" fill="#595959">${esc(se.n)}</text>`; lx += anch[j]; });
@@ -6280,8 +6324,9 @@ V.hoja = {
         const w = e.cols.reduce((a, b) => a + b, 0);
         return `<table style="left:${e.x}pt;top:${e.y}pt;width:${w}pt"><colgroup>${e.cols.map(c => `<col style="width:${c}pt">`).join("")}</colgroup>${e.celdas.map((f, i) => `<tr style="height:${e.filas[i]}pt">${f.map(c => c ? `<td${c.rs ? ` rowspan="${c.rs}"` : ""}${c.cs ? ` colspan="${c.cs}"` : ""} style="font-size:${c.sz}pt;${c.fill ? "background:#" + c.fill + ";" : "background:#fff;"}${c.u ? "text-decoration:underline;" : ""}">${esc(c.t)}</td>` : "").join("")}</tr>`).join("")}</table>`;
       }
+      if (e.k === "im") return `<img class="e" src="${esc(e.src)}" alt="" style="left:${e.x}pt;top:${e.y}pt;width:${e.w}pt;height:${e.h}pt;object-fit:contain">`;
       const p = e.pad || [0, 0, 0, 0];
-      return `<div class="e" style="left:${e.x}pt;top:${e.y}pt;width:${e.w}pt;height:${e.h}pt;padding:${p[1]}pt ${p[2]}pt ${p[3]}pt ${p[0]}pt;${e.fill ? "background:#" + e.fill + ";" : ""}${e.borde ? "border:.75pt dashed #" + e.borde + ";" : ""}">${e.pars.map(pa =>
+      return `<div class="e" style="left:${e.x}pt;top:${e.y}pt;width:${e.w}pt;height:${e.h}pt;padding:${p[1]}pt ${p[2]}pt ${p[3]}pt ${p[0]}pt;${e.fill ? "background:#" + e.fill + ";" : ""}${e.borde ? "border:.75pt dashed #" + e.borde + ";" : ""}${e.bs ? "border:1pt solid #" + e.bs + ";" : ""}${e.rad === "o" ? "border-radius:50%;" : e.rad ? "border-radius:" + e.rad + "pt;" : ""}${e.anc === "m" ? "display:flex;flex-direction:column;justify-content:center;" : ""}">${e.pars.map(pa =>
         `<p style="text-align:${{ l: "left", c: "center", j: "justify", r: "right" }[pa.al]}">${pa.runs.map(r => this.span(r)).join("")}</p>`).join("")}</div>`;
     },
     fondo(n) { return new URL("img/e1_" + n + ".jpg", location.href).href; },
@@ -6330,7 +6375,7 @@ V.hoja = {
       const lin = `<c:spPr><a:ln w="9525"><a:solidFill><a:srgbClr val="D9D9D9"/></a:solidFill></a:ln></c:spPr>`;
       const cats = `<c:cat><c:strRef><c:f>Hoja1!$A$2:$A$${n + 1}</c:f><c:strCache><c:ptCount val="${n}"/>${g.cats.map((c, i) => `<c:pt idx="${i}"><c:v>${esc(c)}</c:v></c:pt>`).join("")}</c:strCache></c:strRef></c:cat>`;
       const ser = g.series.map((s, j) => `<c:ser><c:idx val="${j}"/><c:order val="${j}"/><c:tx><c:strRef><c:f>Hoja1!$${col(j)}$1</c:f><c:strCache><c:ptCount val="1"/><c:pt idx="0"><c:v>${esc(s.n)}</c:v></c:pt></c:strCache></c:strRef></c:tx>
-        <c:spPr><a:solidFill><a:srgbClr val="${s.col}"/></a:solidFill></c:spPr><c:invertIfNegative val="0"/>
+        <c:spPr><a:solidFill><a:srgbClr val="${s.col}"/></a:solidFill></c:spPr><c:invertIfNegative val="0"/>${s.cols ? s.cols.map((c, i) => c && c !== s.col ? `<c:dPt><c:idx val="${i}"/><c:invertIfNegative val="0"/><c:bubble3D val="0"/><c:spPr><a:solidFill><a:srgbClr val="${c}"/></a:solidFill></c:spPr></c:dPt>` : "").join("") : ""}
         <c:dLbls>${g.etq ? `<c:spPr><a:noFill/><a:ln><a:noFill/></a:ln></c:spPr>${tx(n > 60 ? 700 : 800, "404040")}` : ""}<c:showLegendKey val="0"/><c:showVal val="${g.etq ? 1 : 0}"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="0"/><c:showBubbleSize val="0"/></c:dLbls>
         ${cats}<c:val><c:numRef><c:f>Hoja1!$${col(j)}$2:$${col(j)}$${n + 1}</c:f><c:numCache><c:formatCode>General</c:formatCode><c:ptCount val="${n}"/>${s.v.map((v, i) => `<c:pt idx="${i}"><c:v>${v || 0}</c:v></c:pt>`).join("")}</c:numCache></c:numRef></c:val></c:ser>`).join("");
       return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -6342,7 +6387,7 @@ V.hoja = {
 <c:spPr><a:noFill/></c:spPr></c:plotArea><c:legend><c:legendPos val="b"/><c:overlay val="0"/>${tx(800, "595959")}</c:legend><c:plotVisOnly val="1"/><c:dispBlanksAs val="gap"/></c:chart>
 <c:spPr><a:noFill/><a:ln><a:noFill/></a:ln></c:spPr><c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr/></a:pPr><a:endParaRPr lang="es-MX"/></a:p></c:txPr><c:externalData r:id="rId1"><c:autoUpdate val="0"/></c:externalData></c:chartSpace>`;
     },
-    async pptx(M) {
+    async pptx(M, lam) {
       const EMU = v => Math.round(v * 12700), X = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
       const NS = 'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"';
       const REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships", PK = "http://schemas.openxmlformats.org/package/2006";
@@ -6354,11 +6399,12 @@ V.hoja = {
       const lado = t => `<a:${t} w="9525"><a:solidFill><a:srgbClr val="000000"/></a:solidFill></a:${t}>`;
       const arch = [], charts = [], slides = [];
       let nId = 1;
-      const laminas = this.laminas(M);
+      const laminas = lam || this.laminas(M);
       for (let i = 0; i < laminas.length; i++) {
         const l = laminas[i], rl = [["rId1", "slideLayout", "../slideLayouts/slideLayout1.xml"], ["rId2", "image", `../media/${l.fondo}.jpg`]];
         let sp = "";
         for (const e of l.els) {
+          if (e.k === "im") continue;
           const id = ++nId, xf = (w, h) => `<a:off x="${EMU(e.x)}" y="${EMU(e.y)}"/><a:ext cx="${EMU(w)}" cy="${EMU(h)}"/>`;
           if (e.k === "g") {
             charts.push(e); const rid = "rId" + (rl.length + 1); rl.push([rid, "chart", `../charts/chart${charts.length}.xml`]);
@@ -6376,8 +6422,8 @@ V.hoja = {
             sp += `<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="${id}" name="Tabla resumen"/><p:cNvGraphicFramePr><a:graphicFrameLocks noGrp="1"/></p:cNvGraphicFramePr><p:nvPr/></p:nvGraphicFramePr><p:xfrm>${xf(W, H)}</p:xfrm><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/table"><a:tbl><a:tblPr/><a:tblGrid>${e.cols.map(c => `<a:gridCol w="${EMU(c)}"/>`).join("")}</a:tblGrid>${e.celdas.map((fila, f) => `<a:tr h="${EMU(e.filas[f])}">${fila.map((c, k) => tc(c, f, k)).join("")}</a:tr>`).join("")}</a:tbl></a:graphicData></a:graphic></p:graphicFrame>`;
           } else {
             const p = e.pad || [0, 0, 0, 0], fin = e.pars.length ? e.pars.map(par).join("") : `<a:p><a:endParaRPr lang="es-MX"/></a:p>`;
-            sp += `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="Texto ${id}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm>${xf(e.w, e.h)}</a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom>${e.fill ? `<a:solidFill><a:srgbClr val="${e.fill}"/></a:solidFill>` : "<a:noFill/>"}${e.borde ? `<a:ln w="9525"><a:solidFill><a:srgbClr val="${e.borde}"/></a:solidFill><a:prstDash val="dash"/></a:ln>` : "<a:ln><a:noFill/></a:ln>"}</p:spPr>
-              <p:txBody><a:bodyPr wrap="square" lIns="${EMU(p[0])}" tIns="${EMU(p[1])}" rIns="${EMU(p[2])}" bIns="${EMU(p[3])}" rtlCol="0" anchor="t"><a:noAutofit/></a:bodyPr><a:lstStyle/>${fin}</p:txBody></p:sp>`;
+            sp += `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="Texto ${id}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm>${xf(e.w, e.h)}</a:xfrm><a:prstGeom prst="${e.rad === "o" ? "ellipse" : e.rad ? "roundRect" : "rect"}"><a:avLst>${e.rad && e.rad !== "o" ? `<a:gd name="adj" fmla="val ${Math.min(50000, Math.round(e.rad / Math.min(e.w, e.h) * 100000))}"/>` : ""}</a:avLst></a:prstGeom>${e.fill ? `<a:solidFill><a:srgbClr val="${e.fill}"/></a:solidFill>` : "<a:noFill/>"}${e.borde ? `<a:ln w="9525"><a:solidFill><a:srgbClr val="${e.borde}"/></a:solidFill><a:prstDash val="dash"/></a:ln>` : e.bs ? `<a:ln w="12700"><a:solidFill><a:srgbClr val="${e.bs}"/></a:solidFill></a:ln>` : "<a:ln><a:noFill/></a:ln>"}</p:spPr>
+              <p:txBody><a:bodyPr wrap="square" lIns="${EMU(p[0])}" tIns="${EMU(p[1])}" rIns="${EMU(p[2])}" bIns="${EMU(p[3])}" rtlCol="0" anchor="${e.anc === "m" ? "ctr" : "t"}"><a:noAutofit/></a:bodyPr><a:lstStyle/>${fin}</p:txBody></p:sp>`;
           }
         }
         slides.push(i + 1);
@@ -6385,7 +6431,7 @@ V.hoja = {
         arch.push({ n: `ppt/slides/_rels/slide${i + 1}.xml.rels`, d: rels(rl) });
       }
       for (let i = 0; i < charts.length; i++) {
-        arch.push({ n: `ppt/charts/chart${i + 1}.xml`, d: this.chartXml(charts[i]) });
+        arch.push({ n: `ppt/charts/chart${i + 1}.xml`, d: charts[i].tipo === "pie" ? this.pieXml(charts[i]) : this.chartXml(charts[i]) });
         arch.push({ n: `ppt/charts/_rels/chart${i + 1}.xml.rels`, d: rels([["rId1", "package", `../embeddings/Datos_grafica${i + 1}.xlsx`]]) });
         arch.push({ n: `ppt/embeddings/Datos_grafica${i + 1}.xlsx`, d: await this.xlsx(charts[i]) });
       }
@@ -6477,6 +6523,260 @@ V.hoja = {
         catch (err) { B.ui.error(err); }
       };
       prev();
+    }
+  };
+})();
+;
+/* ---- tend.js ---- */
+/* =====================================================================
+   BITACORA 24RU1 - LIDERES EN CAMPO: GRAFICAS Y REPORTES DE TENDENCIAS
+   Con las tarjetas cargadas (Excel de la semana) arma laminas configurables:
+   "Estado actual" (totales, pastel de debilidades y lista), TOP 5 de hallazgos,
+   evolucion semana a semana, estandares entre semanas, por departamento y por
+   turno / unidad / edificio. Salen en PDF, PowerPoint editable e imagen (PNG)
+   horizontal o vertical. Usa el mismo generador de laminas de la E+1 (B.e1).
+   ===================================================================== */
+(function () {
+  const TJ = B.tj, E1 = B.e1, esc = s => U.esc(s);
+  const VERDE = "155B4E", ROJO = "C8102E", NARANJA = "F28C1E", TXT = "262626";
+  const PAL = ["0F5E4A", "9CCB5E", "D4A94E", "7B9CC9", "B9A0D0", "F2A04A", "A8A8B0", "9CC7EE", "E58F8F", "6FB7A8", "C9C36A", "8E8EC2"];
+  const DIMS = { std: "Estándar de seguridad", obsDepto: "Departamento observado", edif: "Edificio", turno: "Turno", energia: "Tipo de energía", uni: "Unidad" };
+  const LAMS = [["estado", "Estado actual (totales, pastel y lista)"], ["top", "TOP 5 de hallazgos"], ["evol", "Evolución semana a semana"], ["std", "Estándares entre semanas"], ["depto", "Por departamento observado"], ["lugar", "Por turno, unidad y edificio"]];
+  const pct = (n, t) => (t ? n / t * 100 : 0).toFixed(1) + "%";
+  const corto = (t, n) => { t = String(t || "").replace(/\s+/g, " ").trim(); return t.length > n ? t.slice(0, n - 1).replace(/[\s,;.]+\S*$/, "") + "…" : t; };
+  // texto propuesto para el TOP: sin la pregunta del formulario al inicio
+  const frase = t => { t = String(t || "").replace(/\s+/g, " ").replace(/^¿[^?]{0,90}\?\s*/, "").trim(); return t ? t[0].toUpperCase() + t.slice(1) : ""; };
+  const T = (x, y, w, h, pars, o) => Object.assign({ k: "t", x, y, w, h, pars }, o || {});
+  const P = (al, runs) => ({ al, runs });
+  const R = (t, f, sz, o) => Object.assign({ t: String(t), f, sz }, o || {});
+  const NS = "Noto Sans";
+
+  const TD = B.tend = {
+    F: null, G: {},
+    base() { return { desde: "", hasta: "", fu: "", subg: "", obsDepto: "", uni: "", turno: "", ae: false, dim: "std", max: 8, titulo: "", intro: "", lams: Object.fromEntries(LAMS.map(l => [l[0], true])) }; },
+    esDeb: c => /^DEBIL/i.test(c.si || ""), esCum: c => /^CUMPLE/i.test(c.si || ""),
+    pasa(c, F) {
+      if (F.fu && !String(c.fu || "").split(",").includes(F.fu)) return false;
+      for (const k of ["subg", "obsDepto", "uni", "turno"]) if (F[k] && U.norm(c[k] || "") !== U.norm(F[k])) return false;
+      return !F.ae || /^S/i.test(c.ae || "");
+    },
+    contar(L, dim) { const m = new Map(); for (const c of L) { const k = String(c[dim] || "").trim() || "Sin dato"; m.set(k, (m.get(k) || 0) + 1); } return [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])); },
+    // TOP 5 propuesto: primero las debilidades ya marcadas como acto o condicion insegura, luego las de alta energia
+    sugerir(L) {
+      const M = TJ.datos.marcas || {}, peso = c => ((M[c.id] || {}).m === "A" || (M[c.id] || {}).m === "C" ? 0 : (M[c.id] || {}).m === "D" ? 9 : /^S/i.test(c.ae || "") ? 1 : 2);
+      return L.filter(this.esDeb).sort((a, b) => peso(a) - peso(b) || (+a.id || 0) - (+b.id || 0)).slice(0, 5).map(c => this.fila(c));
+    },
+    fila(c) { return { id: String(c.id), act: corto(frase(c.qp || c.doc), 120), riesgo: corto(frase(c.qpp), 90) }; },
+    introDef() { return `A través de las observaciones de líderes en campo se han identificado desviaciones a los estándares de seguridad, los cuales debemos corregir para evitar eventos durante la ${B.t.periodo()}.`; },
+
+    async modelo(F, G) {
+      const sems = Object.keys(TJ.datos.semanas).sort(), W = F.hasta, rango = sems.filter(s => s <= W && (!F.desde || s >= F.desde)), porSem = {};
+      for (const s of rango) porSem[s] = (await TJ.semana(s)).filter(c => this.pasa(c, F));
+      const L = porSem[W] || [], deb = L.filter(this.esDeb), cum = L.filter(this.esCum), nS = +W.slice(5), et = s => "SEM " + (+s.slice(5));
+      let g = this.contar(deb, F.dim); const mx = Math.max(2, Math.min(12, +F.max || 8));
+      if (g.length > mx) g = g.slice(0, mx - 1).concat([["Otros", g.slice(mx - 1).reduce((a, x) => a + x[1], 0)]]);
+      const grupos = g.map(([n, v], i) => ({ n, v, p: pct(v, deb.length), col: PAL[i % PAL.length] }));
+      const todo = rango.flatMap(s => porSem[s]), debT = todo.filter(this.esDeb), cumT = todo.filter(this.esCum);
+      const ult = rango.slice(-6), catsStd = this.contar(ult.flatMap(s => porSem[s].filter(this.esDeb)), F.dim).slice(0, 8).map(x => x[0]);
+      const par = (dim, n) => { const c = this.contar(debT, dim).slice(0, n).map(x => x[0]), cu = new Map(this.contar(cumT, dim)), de = new Map(this.contar(debT, dim));
+        for (const [k] of this.contar(cumT, dim)) if (c.length < n && !c.includes(k)) c.push(k);
+        return { cats: c, etq: true, series: [{ n: "DEBILIDADES", col: ROJO, v: c.map(k => de.get(k) || 0) }, { n: "CUMPLEN LA EXPECTATIVA", col: "9CCB5E", v: c.map(k => cu.get(k) || 0) }] }; };
+      const dep = par("obsDepto", 12); dep.series[0].cols = dep.cats.map(k => U.norm(k).includes("SEGURIDAD INDUSTRIAL") ? "7A0019" : ROJO); dep.series[1].cols = dep.cats.map(k => U.norm(k).includes("SEGURIDAD INDUSTRIAL") ? "2E7D32" : "9CCB5E");
+      const ant = rango.length > 1 ? porSem[rango[rango.length - 2]] : null;
+      return {
+        W, nS, rango, L, n: L.length, deb: deb.length, cum: cum.length, grupos, dim: F.dim, debs: deb,
+        titulo: F.titulo || "Estado actual", intro: F.intro || this.introDef(), top: (G.top || []).filter(x => x && x.id), lams: F.lams || {},
+        evol: { titulo: "Observaciones de Líderes en Campo por semana", cats: rango.map(et), etq: true, series: [{ n: "OBSERVACIONES", col: VERDE, v: rango.map(s => porSem[s].length) }, { n: "CUMPLEN LA EXPECTATIVA", col: "9CCB5E", v: rango.map(s => porSem[s].filter(this.esCum).length) }, { n: "DEBILIDADES", col: ROJO, v: rango.map(s => porSem[s].filter(this.esDeb).length) }] },
+        txEvol: `En la **semana ${nS}** se registraron **${L.length} observaciones**: ${cum.length} cumplieron la expectativa (${pct(cum.length, L.length)}) y **${deb.length} fueron debilidades (${pct(deb.length, L.length)})**.` +
+          (ant ? ` En la semana anterior las debilidades fueron ${ant.filter(this.esDeb).length} de ${ant.length} (${pct(ant.filter(this.esDeb).length, ant.length)}).` : ""),
+        stdSem: { titulo: "Debilidades por " + DIMS[F.dim].toLowerCase() + " · últimas " + ult.length + " semanas", cats: catsStd, etq: true, bm: 96, series: ult.map((s, i) => ({ n: et(s), col: PAL[i % PAL.length], v: catsStd.map(k => porSem[s].filter(c => this.esDeb(c) && (String(c[F.dim] || "").trim() || "Sin dato") === k).length) })) },
+        depto: Object.assign(dep, { titulo: "Observaciones por departamento observado · " + (rango.length > 1 ? "semanas " + (+rango[0].slice(5)) + " a " + nS : "semana " + nS), bm: 110 }),
+        turno: Object.assign(par("turno", 4), { titulo: "Por turno", bm: 44 }), uni: Object.assign(par("uni", 4), { titulo: "Por unidad", bm: 44 }), edif: Object.assign(par("edif", 8), { titulo: "Por edificio", bm: 96 }),
+        rangoTxt: rango.length > 1 ? "Semanas " + (+rango[0].slice(5)) + " a " + nS : "Semana " + nS
+      };
+    },
+
+    /* ------------------------------------------------------------ piezas comunes */
+    cajas(M, x, y, w, vert) {
+      // tres recuadros: observaciones, cumplieron y debilidades (en fila ancha u apilados y centrados en la imagen vertical)
+      const c = (yy, h, fill, bs, col, num, lin) => vert
+        ? [T(x, yy, w, h, [], { fill, bs, rad: 6 }), T(x, yy + 6, w, 50, [P("c", [R(num, NS, 40, { b: 1, col })])]), T(x + 4, yy + 56, w - 8, h - 58, lin.map(t => P("c", [R(t, NS, 12.5, { b: 1, col })]))) ]
+        : [T(x, yy, w, h, [], { fill, bs, rad: 6 }), T(x + 6, yy, 96, h, [P("c", [R(num, NS, h > 70 ? 42 : 34, { b: 1, col })])], { anc: "m" }), T(x + 104, yy, w - 108, h, lin.map(t => P("l", [R(t, NS, 13, { b: 1, col })])), { anc: "m" })];
+      const hs = vert ? [116, 110, 100] : [77, 60, 58], gap = vert ? 12 : 13;
+      return [].concat(c(y, hs[0], "4A8B2C", null, "FFFFFF", M.n, ["Observaciones", "registradas", "Semana " + M.nS]),
+        c(y + hs[0] + gap, hs[1], "EAF6EC", "8CCB9B", VERDE, M.cum, ["Cumplieron", "la expectativa", "(" + pct(M.cum, M.n) + ")"]),
+        c(y + hs[0] + hs[1] + 2 * gap, hs[2], "FDECEC", "F2A9A9", ROJO, M.deb, ["Debilidades", "(" + pct(M.deb, M.n) + ")"]));
+    },
+    pastel(M, x, y, w, nombres) { return { k: "g", tipo: "pie", x, y, w, h: w, nombres, titulo: "", cats: M.grupos.map(g => g.n), series: [{ n: "Debilidades", v: M.grupos.map(g => g.v), cols: M.grupos.map(g => g.col) }] }; },
+    lista(M, x, y, w, alto, sz) {
+      const n = M.grupos.length || 1, paso = Math.min(30, alto / n), els = [];
+      M.grupos.forEach((g, i) => {
+        const yy = y + i * paso;
+        els.push(T(x, yy, 26, paso, [P("l", [R("●", "Arial", Math.min(22, paso * 0.8), { col: g.col })])], { anc: "m" }), T(x + 32, yy, w - 132, paso, [P("l", [R(g.n, NS, sz, { col: TXT })])], { anc: "m" }),
+          T(x + w - 100, yy, 34, paso, [P("r", [R(g.v, NS, sz, { b: 1, col: TXT })])], { anc: "m" }), T(x + w - 62, yy, 62, paso, [P("l", [R("(" + g.p + ")", NS, sz, { col: TXT })])], { anc: "m" }),
+          T(x + 30, yy + paso - 1, w - 30, 0.8, [], { fill: "D9D9D9" }));
+      });
+      return els;
+    },
+    tablaTop(M, x, y, w, hFila, sz) {
+      const cw = [w * 0.105, w * 0.115, w * 0.42, w * 0.36], cx = [x, x + cw[0], x + cw[0] + cw[1], x + cw[0] + cw[1] + cw[2]], els = [];
+      els.push(T(x, y, w, 46, [], { fill: VERDE, rad: 6 }), T(x + 12, y, 130, 46, [P("l", [R("TOP " + M.top.length, NS, 30, { b: 1, col: "FFFFFF" })])], { anc: "m" }), T(x + 150, y + 7, 1, 32, [], { fill: "FFFFFF" }),
+        T(x + 164, y, w - 170, 46, ["HALLAZGOS CON MAYOR", "POTENCIAL DE CONSECUENCIA"].map(t => P("l", [R(t, NS, 13, { b: 1, col: "FFFFFF" })])), { anc: "m" }));
+      const y1 = y + 52; els.push(T(x, y1, w, 22, [], { fill: "DDEFE2" }));
+      ["PRIORIDAD", "ID", "ACTIVIDAD / CONDICIÓN", "RIESGO POTENCIAL"].forEach((t, i) => els.push(T(cx[i], y1, cw[i], 22, [P("c", [R(t, NS, sz - 2.5, { b: 1, col: VERDE })])], { anc: "m" })));
+      M.top.forEach((r, i) => {
+        const yy = y1 + 24 + i * (hFila + 2), col = i < 3 ? ROJO : NARANJA, d = Math.min(38, hFila - 12);
+        const a = E1.ajustar(r.act, cw[2] - 16, hFila - 6, sz, 8), b = E1.ajustar(r.riesgo, cw[3] - 16, hFila - 6, sz, 8);
+        els.push(T(x, yy, w, hFila, [], { fill: i < 3 ? "FDECEC" : "FEF1DF" }), T(cx[0] + (cw[0] - d) / 2, yy + (hFila - d) / 2, d, d, [P("c", [R(i + 1, NS, d * 0.55, { b: 1, col: "FFFFFF" })])], { fill: col, rad: "o", anc: "m" }),
+          T(cx[1], yy, cw[1], hFila, [P("c", [R(r.id, NS, sz + 4, { b: 1, col })])], { anc: "m" }),
+          T(cx[2] + 8, yy, cw[2] - 16, hFila, [P("l", [R(r.act, NS, a.sz, { col: TXT })])], { anc: "m" }), T(cx[3] + 8, yy, cw[3] - 16, hFila, [P("l", [R(r.riesgo, NS, b.sz, { b: 1, col })])], { anc: "m" }));
+      });
+      return els;
+    },
+    titulo(t, sub) { return [T(62, 20, 700, 50, [P("l", [R(t, NS, 34, { b: 1, col: VERDE })])])].concat(sub ? [T(64, 66, 700, 22, [P("l", [R(sub, NS, 14, { col: "595959" })])])] : []); },
+    nota(txt, y) { const a = E1.ajustar(txt, 826, 58, 14, 9); return T(60, y, 840, Math.min(66, a.h + 12), [P("j", E1.runs(txt, { f: "Arial", sz: a.sz }))], { fill: "EDEDED", rad: 4, pad: [8, 6, 8, 6] }); },
+
+    /* ------------------------------------------------------------ laminas horizontales (960 x 540, fondo de la E+1) */
+    laminas(M) {
+      const L = [], on = k => M.lams[k] !== false, g = (o, x, y, w, h) => Object.assign({ k: "g", x, y, w, h }, o);
+      const encabezado = M.dim === "std" ? `Los comportamientos más peligrosos registrados en la semana ${M.nS} son:` : `Debilidades por ${DIMS[M.dim].toLowerCase()} en la semana ${M.nS}:`;
+      if (on("estado")) {
+        const a = E1.ajustar(M.intro, 640, 70, 17, 11);
+        L.push({ fondo: "interior", els: [T(62, 18, 640, 54, [P("l", [R(M.titulo, NS, 40, { b: 1, col: VERDE })])]), T(64, 76, 640, 74, [P("l", [R(M.intro, NS, a.sz, { col: TXT })])])]
+          .concat(this.cajas(M, 44, 180, 233), M.deb ? [this.pastel(M, 286, 162, 296)] : [T(286, 280, 296, 40, [P("c", [R("Sin debilidades registradas", NS, 14, { col: "595959" })])])],
+            [T(592, 158, 340, 46, [P("l", [R(encabezado, NS, 16, { b: 1, col: VERDE })])])], this.lista(M, 592, 208, 340, 262, 13)) });
+      }
+      if (on("top") && M.top.length) L.push({ fondo: "interior", els: this.titulo("Hallazgos de la semana " + M.nS, "Debilidades con mayor potencial de consecuencia").concat(this.tablaTop(M, 46, 96, 868, Math.min(62, (360 - 2 * M.top.length) / M.top.length), 13)) });
+      if (on("evol")) L.push({ fondo: "interior", els: this.titulo("Tendencia semana a semana", M.rangoTxt).concat([g(M.evol, 45, 92, 870, 312), this.nota(M.txEvol, 414)]) });
+      if (on("std") && M.stdSem.cats.length) L.push({ fondo: "interior", els: this.titulo(DIMS[M.dim] + " entre semanas", "Debilidades registradas en cada semana").concat([g(M.stdSem, 45, 92, 870, 390)]) });
+      if (on("depto") && M.depto.cats.length) L.push({ fondo: "interior", els: this.titulo("Por departamento observado", M.rangoTxt + " · Seguridad Industrial en tono oscuro").concat([g(M.depto, 45, 92, 870, 390)]) });
+      if (on("lugar")) L.push({ fondo: "interior", els: this.titulo("Dónde y cuándo", M.rangoTxt + " · debilidades y observaciones que cumplen").concat([g(M.turno, 40, 100, 250, 370), g(M.uni, 300, 100, 250, 370), g(M.edif, 560, 100, 370, 370)]) });
+      return L;
+    },
+    /* ------------------------------------------------------------ imagen vertical (540 x 960) para WhatsApp */
+    vertical(M) {
+      const a = E1.ajustar(M.intro, 440, 84, 14.5, 10), els = [T(14, 14, 10, 116, [], { fill: VERDE }), T(42, 20, 300, 50, [P("l", [R(M.titulo, NS, 36, { b: 1, col: VERDE })])]),
+        { k: "im", src: B.imgUrl("ofIzq"), x: 356, y: 18, w: 168, h: 34 }, T(44, 72, 440, 86, [P("l", [R(M.intro, NS, a.sz, { col: TXT })])])]
+        .concat(this.cajas(M, 16, 170, 138, true), M.deb ? [this.pastel(M, 160, 158, 366, true)] : []);
+      if (M.top.length && M.lams.top !== false) els.push(...this.tablaTop(M, 12, 532, 516, Math.min(54, (290 - 2 * M.top.length) / M.top.length), 11));
+      else els.push(T(16, 536, 508, 30, [P("l", [R(`Debilidades de la semana ${M.nS} por ${DIMS[M.dim].toLowerCase()}:`, NS, 14, { b: 1, col: VERDE })])]), ...this.lista(M, 16, 570, 508, 300, 12.5));
+      els.push({ k: "im", src: B.imgUrl("pie"), x: 16, y: 896, w: 508, h: 58 });
+      return { fondo: "", w: 540, h: 960, els };
+    },
+    html(l, w, h) { return `<div class="s" style="width:${w || 960}pt;height:${h || 540}pt;${l.fondo ? `background-image:url('${E1.fondo(l.fondo)}')` : "background:#fff"}">${l.els.map(e => E1.elHtml(e)).join("")}</div>`; },
+    nombre(M) { return "LIDERES EN CAMPO SEMANA " + M.nS; },
+    doc(M) {
+      return { tipo: "e1", nombre: this.nombre(M), carpeta: "LIDERES EN CAMPO", horizontal: true,
+        html: `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>${this.nombre(M)}</title><style>@page{size:960pt 540pt;margin:0}html,body{margin:0;padding:0}${E1.css("")} .s{page-break-after:always;break-after:page}.s:last-child{page-break-after:auto;break-after:auto}</style></head><body>${this.laminas(M).map(l => this.html(l)).join("")}</body></html>` };
+    },
+    // imagen PNG de una lamina: se dibuja el mismo HTML dentro de un SVG y de ahi a un lienzo (todo en el navegador, sin servidor)
+    async png(l, w, h, ancho) {
+      const dato = async url => { if (/^data:/.test(url)) return url; const b = await (await fetch(url)).blob(); return await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(b); }); };
+      const fondo = l.fondo ? await dato(E1.fondo(l.fondo)) : "", partes = [];
+      for (const e of l.els) partes.push(E1.elHtml(e.k === "im" ? Object.assign({}, e, { src: await dato(e.src) }) : e));
+      const caja = document.createElement("div"); caja.className = "x";
+      caja.innerHTML = `<style>${E1.css(".x")}</style><div class="s" style="width:${w}pt;height:${h}pt;${fondo ? `background-image:url('${fondo}')` : "background:#fff"}">${partes.join("")}</div>`;
+      caja.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
+      const pw = w * 4 / 3, ph = h * 4 / 3, esc2 = ancho / pw;
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${ancho}" height="${Math.round(ph * esc2)}" viewBox="0 0 ${pw} ${ph}"><foreignObject x="0" y="0" width="${pw}" height="${ph}">${new XMLSerializer().serializeToString(caja)}</foreignObject></svg>`;
+      const img = new Image(); await new Promise((ok, mal) => { img.onload = ok; img.onerror = () => mal(new Error("No se pudo dibujar la imagen en este navegador. Usa el PDF.")); img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg); });
+      const cv = document.createElement("canvas"); cv.width = ancho; cv.height = Math.round(ph * esc2);
+      const cx = cv.getContext("2d"); cx.fillStyle = "#fff"; cx.fillRect(0, 0, cv.width, cv.height); cx.drawImage(img, 0, 0, cv.width, cv.height);
+      return await new Promise((ok, mal) => { try { cv.toBlob(b => b ? ok(b) : mal(new Error("No se pudo generar la imagen.")), "image/png"); } catch (e) { mal(new Error("Este navegador no permite generar la imagen. Usa el PDF.")); } });
+    },
+
+    /* ------------------------------------------------------------ pantalla (pestana "Graficas y reportes") */
+    async vista(Pv, c) {
+      const D = TJ.datos, sems = Object.keys(D.semanas).sort();
+      if (!sems.length) { c.innerHTML = `<div class="tarjeta">${B.ui.vacio("Primero carga los Excel de la semana en la pestaña <b>Tarjetas y tendencias</b>.", "doc")}</div>`; return; }
+      D.graf = D.graf || {};
+      if (!this.F) { this.F = Object.assign(this.base(), JSON.parse(JSON.stringify(D.graf.cfg || {}))); this.F.lams = Object.assign(this.base().lams, this.F.lams || {}); this.F.hasta = ""; }
+      const F = this.F;
+      if (!sems.includes(F.hasta)) F.hasta = sems.includes(Pv.sem) ? Pv.sem : sems[sems.length - 1];
+      if (!F.desde || !sems.includes(F.desde) || F.desde > F.hasta) F.desde = sems.filter(s => s <= F.hasta).slice(-6)[0];
+      const W = F.hasta, cruda = await TJ.semana(W);
+      if (!this.G[W]) this.G[W] = JSON.parse(JSON.stringify(D.graf[W] || {}));
+      const G = this.G[W]; let M = await this.modelo(F, G);
+      if (!Array.isArray(G.top)) { G.top = this.sugerir(M.L); M = await this.modelo(F, G); }
+      const ops = (k) => [...new Set(cruda.map(x => String(x[k] || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+      const sel = (k, t, lista, todos) => `<div class="campo" style="flex:1 1 170px"><label>${t}</label><select class="inp" data-f="${k}"><option value="">${todos}</option>${lista.map(o => `<option value="${esc(Array.isArray(o) ? o[0] : o)}" ${F[k] === (Array.isArray(o) ? o[0] : o) ? "selected" : ""}>${esc(Array.isArray(o) ? o[1] : o)}</option>`).join("")}</select></div>`;
+      const semOp = v => sems.map(s => `<option value="${s}" ${s === v ? "selected" : ""}>${TJ.semTxt(s)}</option>`).join("");
+      const filaTop = (r, i) => `<div class="fila" data-top="${i}" style="align-items:flex-end;gap:8px;margin-bottom:8px"><span class="badge ${i < 3 ? "r" : "d"}" style="margin-bottom:10px">${i + 1}</span>
+          <div class="campo" style="flex:0 0 190px;margin:0"><label>Tarjeta (ID)</label><select class="inp" data-tk="id">${(M.debs.some(x => String(x.id) === r.id) ? [] : [`<option value="${esc(r.id)}" selected>#${esc(r.id)} (fuera del filtro)</option>`]).concat(M.debs.map(x => `<option value="${esc(x.id)}" ${String(x.id) === r.id ? "selected" : ""}>#${esc(x.id)} · ${esc(corto(x.std || "", 22))}</option>`)).join("")}</select></div>
+          <div class="campo" style="flex:2 1 260px;margin:0"><label>Actividad / condición</label><input class="inp" data-tk="act" value="${esc(r.act)}" maxlength="160"></div>
+          <div class="campo" style="flex:1.4 1 200px;margin:0"><label>Riesgo potencial</label><input class="inp" data-tk="riesgo" value="${esc(r.riesgo)}" maxlength="120"></div>
+          <div style="display:flex;gap:4px;margin-bottom:2px"><button class="btn fantasma btn-icono" data-ta="ver" title="Ver la tarjeta completa">${B.ico("ojo")}</button><button class="btn fantasma btn-icono" data-ta="sube" title="Subir prioridad" ${i ? "" : "disabled"}>▲</button><button class="btn fantasma btn-icono" data-ta="baja" title="Bajar prioridad" ${i < G.top.length - 1 ? "" : "disabled"}>▼</button><button class="btn fantasma btn-icono" data-ta="quita" title="Quitar">${B.ico("basura")}</button></div></div>`;
+      c.innerHTML = `
+        <div class="tarjeta"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start"><div><h2 style="margin:0;font-size:17px">Gráficas y reportes de tendencias</h2><p class="muted peque" style="margin:4px 0 0">Elige la semana y los filtros; el reporte cuenta solo las tarjetas que pasan el filtro. Sale en PDF, PowerPoint editable o imagen.</p></div></div>
+          <div class="fila" style="margin-top:12px"><div class="campo" style="flex:1 1 230px"><label>Semana del reporte</label><select class="inp" data-f="hasta">${semOp(F.hasta)}</select></div>
+            <div class="campo" style="flex:1 1 230px"><label>Tendencias desde la semana</label><select class="inp" data-f="desde">${semOp(F.desde)}</select></div>
+            ${sel("fu", "Archivo", [["SI", "Seguridad Industrial (SEGIND)"], ["AE", "Alta energía"]], "Ambos archivos")}
+            <div class="campo" style="flex:1 1 200px"><label>Graficar las debilidades por</label><select class="inp" data-f="dim">${Object.entries(DIMS).map(([k, t]) => `<option value="${k}" ${F.dim === k ? "selected" : ""}>${t}</option>`).join("")}</select></div>
+            <div class="campo" style="flex:0 0 130px"><label>Rebanadas (máx.)</label><input class="inp" type="number" min="3" max="12" data-f="max" value="${esc(F.max)}"></div></div>
+          <div class="fila">${sel("subg", "Subgerencia observada", ops("subg"), "Todas")}${sel("obsDepto", "Departamento observado", ops("obsDepto"), "Todos")}${sel("uni", "Unidad", ops("uni"), "Todas")}${sel("turno", "Turno", ops("turno"), "Todos")}
+            <label class="chip-ali" style="margin:0 0 14px"><input type="checkbox" data-f="ae" ${F.ae ? "checked" : ""}><span>Solo con peligros de alta energía</span></label></div>
+          <div class="tj-kpis" style="margin:2px 0 12px"><div><b>${M.n}</b><span>observaciones en la semana ${M.nS}${M.n !== cruda.length ? " (de " + cruda.length + " cargadas)" : ""}</span></div><div><b style="color:var(--verde,#1E6B4A)">${M.cum}</b><span>cumplieron la expectativa (${pct(M.cum, M.n)})</span></div><div><b style="color:var(--rojo)">${M.deb}</b><span>debilidades (${pct(M.deb, M.n)})</span></div><div><b>${M.rango.length}</b><span>semana(s) en las tendencias</span></div></div>
+          <div class="campo"><label>Láminas que se incluyen</label><div class="chips-ali">${LAMS.map(([k, t]) => `<label class="chip-ali"><input type="checkbox" data-lam="${k}" ${F.lams[k] !== false ? "checked" : ""}><span>${t}</span></label>`).join("")}</div></div>
+          <div class="fila"><div class="campo" style="flex:0 0 240px"><label>Título</label><input class="inp" data-x="titulo" value="${esc(F.titulo)}" placeholder="Estado actual"></div>
+            <div class="campo" style="flex:1"><label>Texto de introducción (vacío = el propuesto)</label><textarea class="inp" data-x="intro" rows="2" placeholder="${esc(this.introDef())}">${esc(F.intro)}</textarea></div></div></div>
+        <div class="tarjeta"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start"><div><h2 style="margin:0;font-size:17px">TOP ${G.top.length} · hallazgos con mayor potencial de consecuencia</h2><p class="muted peque" style="margin:4px 0 0">Se proponen las debilidades que marcaste como acto o condición insegura y las de alta energía. Cambia cuáles van, su orden y resume los textos.</p></div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn chico sec" id="tdMas" ${G.top.length >= 5 || !M.debs.length ? "disabled" : ""}>${B.ico("mas")} Agregar</button><button class="btn chico sec" id="tdProp">${B.ico("reutilizar")} Proponer de nuevo</button></div></div>
+          <div style="margin-top:12px">${G.top.length ? G.top.map(filaTop).join("") : `<p class="muted" style="margin:0">Sin hallazgos en el TOP: la lámina no se incluye.${M.debs.length ? "" : " No hay debilidades con este filtro."}</p>`}</div></div>
+        <div class="tarjeta"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start"><div><h2 style="margin:0;font-size:17px">Vista previa</h2><p class="muted peque" style="margin:4px 0 0">En PowerPoint los textos y las gráficas se pueden editar (clic derecho en la gráfica → Modificar datos).</p></div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn sec" id="tdGuardar">${B.ico("ok")} Guardar</button><button class="btn" id="tdPdf">${B.ico("pdf")} ${B.modoLocal ? "Guardar PDF" : "Generar PDF"}</button><button class="btn dorado" id="tdPptx">${B.ico("descargar")} PowerPoint (.pptx)</button>
+              <button class="btn sec" id="tdPngH" title="La lámina «Estado actual» como imagen 16:9">${B.ico("descargar")} Imagen horizontal</button><button class="btn sec" id="tdPngV" title="Infografía vertical para WhatsApp">${B.ico("descargar")} Imagen vertical</button></div></div>
+          <style>${E1.css(".e1-doc")}</style><div class="e1-prev" style="margin-top:12px"><div class="e1-doc" id="tdDoc"></div></div>
+          <h3 style="font-size:13px;margin:16px 0 8px;color:var(--texto-2)">Imagen vertical (WhatsApp)</h3><div class="e1-doc" id="tdVert" style="width:auto"></div></div>`;
+      const prev = async () => {
+        const d = c.querySelector("#tdDoc"); if (!d) return;
+        M = await this.modelo(F, G);
+        d.innerHTML = this.laminas(M).map(l => this.html(l)).join("") || `<p class="muted">No hay láminas marcadas.</p>`;
+        d.style.zoom = Math.min(1, (d.parentNode.clientWidth - 2) / 1280);
+        const v = c.querySelector("#tdVert"); v.innerHTML = this.html(this.vertical(M), 540, 960); v.style.zoom = Math.min(0.62, (d.parentNode.clientWidth - 2) / 720);
+      };
+      const lento = U.debounce(prev, 500), repinta = () => Pv.pinta();
+      c.querySelectorAll("[data-f]").forEach(i => i.onchange = () => { const k = i.dataset.f; F[k] = i.type === "checkbox" ? i.checked : k === "max" ? Math.max(3, Math.min(12, +i.value || 8)) : i.value; if (k === "hasta") Pv.sem = F.hasta; repinta(); });
+      c.querySelectorAll("[data-lam]").forEach(i => i.onchange = () => { F.lams[i.dataset.lam] = i.checked; prev(); });
+      c.querySelectorAll("[data-x]").forEach(i => i.oninput = () => { F[i.dataset.x] = i.value.trim(); lento(); });
+      c.querySelectorAll("[data-top]").forEach(f => {
+        const i = +f.dataset.top, r = G.top[i];
+        f.querySelectorAll("[data-tk]").forEach(x => { const k = x.dataset.tk;
+          if (k === "id") x.onchange = () => { const t = M.debs.find(y => String(y.id) === x.value); if (t) { G.top[i] = this.fila(t); repinta(); } };
+          else x.oninput = () => { r[k] = x.value.trim(); lento(); }; });
+        f.querySelectorAll("[data-ta]").forEach(b => b.onclick = () => { const a = b.dataset.ta;
+          if (a === "ver") { const t = cruda.find(y => String(y.id) === r.id); if (t) Pv.detalle(t, null, () => { }); return; }
+          if (a === "quita") G.top.splice(i, 1); else { const j = a === "sube" ? i - 1 : i + 1; [G.top[i], G.top[j]] = [G.top[j], G.top[i]]; }
+          repinta(); });
+      });
+      c.querySelector("#tdMas").onclick = () => { const t = M.debs.find(y => !G.top.some(r => r.id === String(y.id))); if (t) { G.top.push(this.fila(t)); repinta(); } };
+      c.querySelector("#tdProp").onclick = async () => { if (!G.top.length || await B.ui.confirmar("Se reemplazará el TOP actual (y sus textos) por el propuesto.", "Proponer de nuevo", "Reemplazar")) { G.top = this.sugerir(M.L); repinta(); } };
+      const guardar = async callado => {
+        try {
+          const cfg = Object.assign({}, F); delete cfg.hasta; delete cfg.desde;
+          await TJ.llamar("grafGuardar", { clave: "cfg", datos: cfg }); await TJ.llamar("grafGuardar", { clave: W, datos: { top: G.top } });
+          D.graf.cfg = JSON.parse(JSON.stringify(cfg)); D.graf[W] = JSON.parse(JSON.stringify({ top: G.top }));
+          if (!callado) B.ui.toast("Configuración y TOP de la semana guardados.", "ok"); return true;
+        } catch (e) { B.ui.error(e); return false; }
+      };
+      const listo = async () => { M = await this.modelo(F, G); if (!this.laminas(M).length) { B.ui.toast("Marca al menos una lámina.", "error"); return false; } return true; };
+      c.querySelector("#tdGuardar").onclick = () => guardar();
+      c.querySelector("#tdPdf").onclick = async e => { const b = e.currentTarget; if (await listo() && await guardar(true)) B.rep.pdf(this.doc(M), b); };
+      c.querySelector("#tdPptx").onclick = async () => {
+        if (!(await listo()) || !(await guardar(true))) return;
+        try { U.descargar(this.nombre(M) + ".pptx", await E1.pptx(M, this.laminas(M)), "application/vnd.openxmlformats-officedocument.presentationml.presentation"); B.ui.toast("Presentación descargada: búscala en <b>Descargas</b>.", "ok", 6000); }
+        catch (err) { B.ui.error(err); }
+      };
+      const imagen = async vert => {
+        M = await this.modelo(F, G); await guardar(true);
+        try {
+          const l = vert ? this.vertical(M) : (this.laminas(Object.assign({}, M, { lams: { estado: true, top: false, evol: false, std: false, depto: false, lugar: false } }))[0]);
+          U.descargar(this.nombre(M) + (vert ? " vertical" : "") + ".png", await this.png(l, vert ? 540 : 960, vert ? 960 : 540, vert ? 1080 : 1920), "image/png");
+          B.ui.toast("Imagen descargada: búscala en <b>Descargas</b>.", "ok", 6000);
+        } catch (err) { B.ui.error(err); }
+      };
+      c.querySelector("#tdPngH").onclick = () => imagen(false);
+      c.querySelector("#tdPngV").onclick = () => imagen(true);
+      await prev();
     }
   };
 })();
@@ -7031,7 +7331,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "4.5.1", servidorViejo: false,
+  info: {}, VERSION: "4.6", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -7217,7 +7517,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "procedimientos" ? '<span class="contador oculto" id="cntProc"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.5.1")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.6")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
