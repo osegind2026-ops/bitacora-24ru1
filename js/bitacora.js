@@ -799,7 +799,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.7", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.7.1", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -3997,13 +3997,32 @@ V.config = {
   // Respaldo de emergencia en el celular del administrador: descarga lo que tiene el telefono
   movil(c) {
     c.innerHTML = `<div class="tarjeta">${cab("descargar", "v", "Respaldo de emergencia desde este celular", "Por si la PC falla: descarga un respaldo con todo lo que tiene este teléfono.")}
-      <button class="btn verde bloque" id="bRespCel" style="min-height:50px">${B.ico("descargar")} Descargar respaldo de este celular (.json)</button>
+      <button class="btn verde bloque" id="bRespWa" style="min-height:50px" disabled>${B.ico("subir")} Preparando el respaldo…</button>
+      <button class="btn sec bloque" id="bRespCel" style="margin-top:8px" disabled>${B.ico("descargar")} Guardar el respaldo en el celular</button><div id="bRespAv"></div>
       <div class="aviso a" style="margin-top:12px">${B.ico("info")}<div>Trae lo que llegó en el <b>último paquete de datos</b> más lo que capturaste aquí: personal, actividades, espacios, vigilancias, horas extra, procedimientos (sin los PDF) y las semanas de tarjetas que tiene el celular.
         Para tener <b>todas</b> las semanas, carga el «paquete completo para el administrador» que se genera en la PC (Celulares).<br>Se restaura en la PC: <b>Configuración y respaldos → Restaurar</b>. La configuración y los permisos se cambian en la PC.</div></div></div>`;
-    c.querySelector("#bRespCel").onclick = async () => {
-      try { const d = await B.api.llamar("respaldo"); delete d.ok; U.descargar("respaldo_bitacora_" + (B.estado.config.proyecto || "24RU1") + "_CELULAR_" + U.ahoraISO().replace(/[:T]/g, "") + ".json", JSON.stringify(d), "application/json");
-        ui.toast("Respaldo guardado en <b>Descargas</b>. Guárdalo también en otro lugar (correo o WhatsApp a tu propio chat).", "ok", 9000); } catch (e) { ui.error(e); }
+    // el archivo queda listo al abrir la pantalla: asi, al tocar el boton, lo primero que se hace es compartir (si no, el celular lo rechaza)
+    let P = null; const bw = c.querySelector("#bRespWa"), bg = c.querySelector("#bRespCel"), av = c.querySelector("#bRespAv");
+    (async () => {
+      try {
+        const d = await B.api.llamar("respaldo"); delete d.ok;
+        const n = "Respaldo bitacora " + (B.estado.config.proyecto || "24RU1") + " CELULAR " + B.usuario.ini + " " + U.ahoraISO().replace("T", " ").replace(":", "") + ".pdf", json = JSON.stringify(d);
+        const sems = Object.keys(d.tarjetasSem || {}).length, pdf = B.inter.pdfDatos("Bitacora 24RU1 - Respaldo de emergencia (celular)", ["Generado: " + U.fh(U.ahoraISO()) + " por " + B.usuario.ini,
+          "Personal: " + (d.personal || []).length + "   Actividades: " + (d.actividades || []).length + "   Espacios confinados: " + (d.ec || []).length,
+          "Procedimientos: " + (d.procedimientos || []).length + "   Semanas de tarjetas: " + sems, "", "Este PDF lleva el respaldo dentro. En la bitacora de la PC:",
+          "Configuracion y respaldos > Restaurar desde un respaldo > elige este PDF."], json);
+        let file = null; try { file = new File([pdf], n, { type: "application/pdf" }); } catch (e) { }
+        P = { n, pdf, file, kb: Math.round(pdf.length / 1024) };
+        bw.disabled = bg.disabled = false; bw.innerHTML = `${B.ico("subir")} Enviar por WhatsApp (${P.kb} KB)`;
+      } catch (e) { bw.innerHTML = "No se pudo preparar el respaldo"; ui.error(e); }
+    })();
+    bw.onclick = async () => {
+      if (!P) return;
+      const r = await B.inter.compartirArchivo(P.file, P.n, P.pdf, "application/pdf");
+      av.innerHTML = r.modo === "compartido" ? `<div class="aviso v" style="margin-top:10px">${B.ico("ok")}<div><b>Respaldo enviado.</b> Mándalo a tu propio chat o al del administrador para tenerlo a la mano.</div></div>`
+        : r.modo === "descargado" ? `<div class="aviso d" style="margin-top:10px">${B.ico("alerta")}<div><b>No se pudo compartir directo</b>${r.error ? " (" + U.esc(r.error) + ")" : ""}. El PDF <b>${U.esc(P.n)}</b> quedó en <b>Descargas</b>: en WhatsApp toca el clip → <b>Documento</b> y elígelo.</div></div>` : "";
     };
+    bg.onclick = () => { if (!P) return; U.descargar(P.n, P.pdf, "application/pdf"); av.innerHTML = `<div class="aviso v" style="margin-top:10px">${B.ico("ok")}<div>El PDF <b>${U.esc(P.n)}</b> quedó en <b>Descargas</b>. Guárdalo también en otro lugar (correo o WhatsApp a tu propio chat).</div></div>`; };
   },
   // resultado de una restauracion: que se recupero y que falta
   async resumen(r) {
@@ -4068,7 +4087,7 @@ V.config = {
         <div class="tarjeta" data-tour="cfg-respaldo">${cab("descargar", "v", "Respaldos", "Se guarda una copia en cada cambio y una diaria en la carpeta de respaldos.")}
           ${B.modoLocal ? "" : `<button class="btn verde bloque" id="bRespZip" style="margin-bottom:8px">${B.ico("descargar")} Respaldo completo con PDF (.zip)</button>`}
           <button class="btn sec bloque" id="bResp" style="margin-bottom:10px">${B.ico("descargar")} Respaldo de datos sin PDF (.json)</button>
-          <label class="btn peligro bloque" style="cursor:pointer">${B.ico("subir")} Restaurar desde un respaldo…<input type="file" id="fRest" accept=".json,.zip" hidden></label>
+          <label class="btn peligro bloque" style="cursor:pointer">${B.ico("subir")} Restaurar desde un respaldo…<input type="file" id="fRest" accept=".json,.zip,.pdf" hidden></label>
           <p class="peque muted">${B.modoLocal ? "" : "Para llevar la bitácora a <b>otro equipo</b> usa el respaldo completo (.zip): lleva también los PDF de procedimientos y de los estándares POE. "}Restaurar reemplaza TODOS los datos actuales (antes se guarda una copia automática) y al terminar muestra lo que se recuperó.</p></div>
       </div></div>`;
     c.querySelector("#gCfg").onclick = async () => {
@@ -4117,7 +4136,7 @@ V.config = {
         } catch (x) { ui.error(x); }
         return;
       }
-      let db; try { db = JSON.parse(await f.text()); } catch (x) { ui.toast("El archivo no es un respaldo válido.", "error"); return; }
+      let db; try { db = JSON.parse(B.inter.datosDe(await f.text())); } catch (x) { ui.toast(/PDF/.test(x.message) ? x.message : "El archivo no es un respaldo válido.", "error"); return; }
       const tipo = db._paquete ? " <b>Ojo: es un PAQUETE para celulares</b>, no un respaldo (solo trae las últimas semanas de tarjetas)." : db._origen === "celular" ? " <b>Es un respaldo hecho en un celular</b>: trae lo que tenía el teléfono, sin PDF." : " No incluye los PDF: para eso usa el respaldo completo (.zip).";
       if (!(await ui.confirmar(`Se reemplazarán TODOS los datos con el respaldo <b>${U.esc(f.name)}</b>${db._generado ? " (generado " + U.esc(db._generado) + ")" : ""}.${tipo} ¿Continuar?`, "Restaurar respaldo", "Restaurar", true))) return;
       try { const r = await B.api.llamar("restaurar", { db }); if (r.resumen) await this.resumen(r); else { ui.toast("Respaldo restaurado.", "ok"); location.reload(); } } catch (x) { ui.error(x); }
@@ -6931,6 +6950,46 @@ B.pwa = {
 B.pwa.iniciar();
 
 B.inter = {
+  /* WhatsApp no acepta bien los .txt / .json que se le mandan con "Compartir" desde el navegador (regresa a la bitacora con
+     error). Un PDF si lo acepta siempre como Documento. Por eso las capturas y el respaldo de emergencia viajan en un PDF
+     normal (se abre y dice que contiene) que lleva los datos dentro, en base64, como comentarios del PDF. La PC los lee. */
+  pdfDatos(titulo, lineas, json) {
+    const a = s => String(s).normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\x20-\x7E]/g, "?").replace(/([()\\])/g, "\\$1");
+    let y = 740; const t = ["BT /F1 17 Tf 50 " + y + " Td (" + a(titulo) + ") Tj ET"];
+    for (const l of lineas) { y -= 22; t.push("BT /F1 11 Tf 50 " + y + " Td (" + a(l) + ") Tj ET"); }
+    const cont = t.join("\n");
+    const objs = ["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+      "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+      "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>", "<< /Length " + cont.length + " >>\nstream\n" + cont + "\nendstream"];
+    let s = "%PDF-1.4\n"; const off = [];
+    objs.forEach((o, i) => { off.push(s.length); s += (i + 1) + " 0 obj\n" + o + "\nendobj\n"; });
+    const b = btoa(unescape(encodeURIComponent(json))), partes = ["%B24-INICIO\n"];
+    for (let i = 0; i < b.length; i += 76) partes.push("%B24 " + b.slice(i, i + 76) + "\n");
+    partes.push("%B24-FIN\n"); s += partes.join("");
+    const x = s.length;
+    s += "xref\n0 6\n0000000000 65535 f \n" + off.map(o => String(o).padStart(10, "0") + " 00000 n \n").join("") + "trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n" + x + "\n%%EOF\n";
+    return s;
+  },
+  // texto de un archivo recibido: si es uno de esos PDF, devuelve el JSON que lleva dentro; si no, el texto tal cual
+  datosDe(texto) {
+    texto = String(texto || "");
+    if (!/^\s*%PDF/.test(texto)) return texto;
+    const L = texto.split(/\r?\n/), i = L.indexOf("%B24-INICIO");
+    if (i < 0) throw new Error("Ese PDF no trae datos de la bitácora. Elige el PDF que generó el celular.");
+    let b = ""; for (let k = i + 1; k < L.length && L[k] !== "%B24-FIN"; k++) b += L[k].slice(5).trim();
+    try { return decodeURIComponent(escape(atob(b))); } catch (e) { throw new Error("El PDF está incompleto o dañado. Pide que lo vuelvan a enviar."); }
+  },
+  // comparte un archivo (lo primero que se hace tras el toque); si no se puede, lo deja en Descargas. Devuelve que paso.
+  async compartirArchivo(file, nombre, contenido, tipo) {
+    let error = "";
+    if (!file) error = "este celular no puede crear el archivo para compartir";
+    else if (!navigator.share) error = "este navegador no tiene la función de compartir";
+    else if (navigator.canShare && !navigator.canShare({ files: [file] })) error = "este navegador no permite compartir ese archivo";
+    else try { await navigator.share({ files: [file] }); return { modo: "compartido" }; }
+      catch (e) { if (e.name === "AbortError") return { modo: "cancelado" }; error = e.name + ": " + e.message; }
+    U.descargar(nombre, contenido, tipo);
+    return { modo: "descargado", error };
+  },
   // operaciones que se pueden hacer en el celular y que viajan a la PC
   LOG: /^(actividades|ec|vig|he)\.|^(turnos\.guardar|hojas\.guardar|perfil\.guardar|catalogos\.agregar)$/,
   permitida(k) { return this.LOG.test(k) || k === "usuarios.tourVisto"; },
@@ -7119,10 +7178,12 @@ B.inter = {
   async prepararCapturas() {
     const ops = await this.pendientes(); if (!ops.length) return null;
     const u = B.usuario, obj = { tipo: "b24-capturas", version: B.app.VERSION, generado: U.ahoraISO(), ini: u.ini, nombre: u.nombre, ops };
-    // extension .txt: es la que los celulares permiten compartir directo a WhatsApp
-    const nombre = "Bitacora24RU1 CAPTURAS " + u.ini + " " + U.ahoraISO().replace("T", " ").replace(":", "") + ".txt", texto = JSON.stringify(obj);
-    let file = null; try { file = new File([texto], nombre, { type: "text/plain" }); } catch (e) { }
-    return { nombre, texto, file, n: ops.length };
+    // viaja como PDF (WhatsApp lo acepta como Documento); los datos van dentro del PDF
+    const nombre = "Bitacora24RU1 CAPTURAS " + u.ini + " " + U.ahoraISO().replace("T", " ").replace(":", "") + ".pdf", texto = JSON.stringify(obj);
+    const pdf = this.pdfDatos("Bitacora 24RU1 - Capturas del celular", ["Persona: " + u.ini + " - " + u.nombre, "Capturas: " + ops.length, "Generado: " + U.fh(U.ahoraISO()),
+      "", "Este PDF lleva las capturas dentro. En la bitacora de la PC:", "Celulares > Importar capturas de un celular > elige este PDF."], texto);
+    let file = null; try { file = new File([pdf], nombre, { type: "application/pdf" }); } catch (e) { }
+    return { nombre, texto, pdf, file, n: ops.length };
   },
   // modo: "" = compartir el archivo; "descargar" = guardarlo en el celular; "texto" = mandarlo como mensaje de texto (ultimo recurso)
   async exportarCapturas(modo, prep) {
@@ -7136,14 +7197,8 @@ B.inter = {
       if (navigator.share) try { await navigator.share({ text: msg }); return fin("texto"); } catch (e) { if (e.name === "AbortError") return fin("cancelado"); error = e.name + ": " + e.message; }
       try { await navigator.clipboard.writeText(msg); return fin("copiado", error); } catch (e) { return fin("fallo", (error ? error + " · " : "") + e.name + ": " + e.message); }
     }
-    if (!modo) {
-      if (!p.file) error = "este celular no puede crear el archivo para compartir";
-      else if (!navigator.share) error = "este navegador no tiene la función de compartir";
-      else if (navigator.canShare && !navigator.canShare({ files: [p.file] })) error = "este navegador no permite compartir archivos";
-      else try { await navigator.share({ files: [p.file] }); return fin("compartido"); }
-        catch (e) { if (e.name === "AbortError") return fin("cancelado"); error = e.name + ": " + e.message; }
-    }
-    U.descargar(p.nombre, p.texto, "text/plain");
+    if (!modo) { const r = await this.compartirArchivo(p.file, p.nombre, p.pdf, "application/pdf"); return fin(r.modo, r.error); }
+    U.descargar(p.nombre, p.pdf, "application/pdf");
     return fin("descargado", error);
   }
 };
@@ -7163,7 +7218,7 @@ V.celular = {
     c.innerHTML = `
       <div class="cuadricula">
       <div class="tarjeta c6" data-tour="cel-importar">${cab("descargar", "v", "Importar capturas de un celular", sup ? "Archivos «Bitacora24RU1 CAPTURAS …» que mandan los técnicos por WhatsApp. Puedes elegir varios a la vez." : "El archivo «Bitacora24RU1 CAPTURAS …» que mandaste desde tu celular (descárgalo de WhatsApp Web o del correo).")}
-        <label class="btn verde bloque" style="cursor:pointer">${B.ico("subir")} Elegir archivo(s) de capturas…<input type="file" id="celImp" accept=".txt,.json,text/plain,application/json" multiple hidden></label>
+        <label class="btn verde bloque" style="cursor:pointer">${B.ico("subir")} Elegir archivo(s) de capturas…<input type="file" id="celImp" accept=".pdf,.txt,.json,application/pdf,text/plain,application/json" multiple hidden></label>
         <p class="muted peque" style="margin:10px 0 0">Las capturas entran con el nombre de quien las hizo y con las reglas de siempre: no se duplican actividades ni espacios confinados, y el número de espacio confinado lo asigna la PC.
           Si el mismo archivo se importa dos veces no pasa nada: lo ya recibido se ignora. ${sup ? "" : "Solo puedes importar tus propias capturas."}</p>
         <details style="margin-top:10px"><summary class="peque" style="cursor:pointer;font-weight:600">¿Llegaron como mensaje de texto? Pégalas aquí</summary>
@@ -7185,7 +7240,7 @@ V.celular = {
       caja.innerHTML = `<p class="muted peque" style="margin-top:10px">Importando…</p>`; let h = "";
       for (const f of files) {
         try {
-          const r = await B.inter.importarCapturas(await this.leerArchivo(f));
+          const r = await B.inter.importarCapturas(B.inter.datosDe(await this.leerArchivo(f)));
           h += `<div class="aviso ${r.fallas.length ? "d" : "v"}" style="margin-top:10px">${B.ico("ok")}<div><b>${U.esc(r.de || "")} ${U.esc(r.nombre)}</b> · ${U.esc(f.name)}<br>
             ${r.ok} captura(s) aplicadas${r.unidas ? " (" + r.unidas + " se unieron a registros que ya existían, sin duplicar)" : ""}${r.repetidas ? " · " + r.repetidas + " ya se habían recibido antes" : ""}.</div></div>` + this.fallasHtml(r.fallas);
         } catch (err) { h += `<div class="aviso r" style="margin-top:10px">${B.ico("alerta")}<div><b>${U.esc(f.name)}</b><br>${U.esc(err.message)}</div></div>`; }
@@ -7424,7 +7479,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "4.7", servidorViejo: false,
+  info: {}, VERSION: "4.7.1", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -7611,7 +7666,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "procedimientos" ? '<span class="contador oculto" id="cntProc"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.7")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.7.1")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
