@@ -799,7 +799,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.6.1", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.7", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -811,7 +811,7 @@ B.local = {
       case "estado": return this.estado(s);
       case "clave": if (B.modoMovil) throw new Error("La contraseña se cambia en la bitácora de la PC; el celular la recibe con el siguiente paquete de datos."); return this.bloquear(() => this.cambiarClave(s, b));
       case "op": return this.bloquear(() => this.opComo(s, sup, b));
-      case "respaldo": if (!sup) throw new Error("Solo supervisores."); if (B.modoMovil) throw new Error("Los respaldos se hacen en la bitácora de la PC."); { const db = await this.cargar(); db._generado = U.ahoraISO(); db.tarjetas = await this.tarjLeer(); db.tarjetasSem = {}; for (const k of Object.keys(db.tarjetas.semanas)) db.tarjetasSem[k] = (await this.leer("tarjetas_" + k)) || []; return db; }
+      case "respaldo": if (!sup) throw new Error("Solo supervisores."); if (B.modoMovil && !(B.usuario && B.usuario.admin)) throw new Error("Los respaldos se hacen en la bitácora de la PC (en el celular, solo el administrador)."); { const db = await this.cargar(); db._generado = U.ahoraISO(); db._version = B.app.VERSION; db._origen = B.modoMovil ? "celular" : "planb"; db.tarjetas = await this.tarjLeer(); db.tarjetasSem = {}; for (const k of Object.keys(db.tarjetas.semanas)) db.tarjetasSem[k] = (await this.leer("tarjetas_" + k)) || []; return db; }
       case "restaurar": if (!sup) throw new Error("Solo supervisores."); if (B.modoMovil) throw new Error("Solo disponible en la bitácora de la PC."); return this.bloquear(() => this.restaurar(b.db));
       case "pdf": throw new Error("En el modo sin servidor usa Imprimir y elige 'Guardar como PDF'.");
       case "tarjetas": return ["ver", "semana", "mias"].includes(b.accion) ? this.tarjetas(s, sup, b) : this.bloquear(() => this.tarjetas(s, sup, b));
@@ -3994,7 +3994,30 @@ V.config = {
     const g = cv.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, cv.width, cv.height); g.drawImage(img, 0, 0, cv.width, cv.height);
     return cv.toDataURL(f.type === "image/png" ? "image/png" : "image/jpeg", 0.92);
   },
+  // Respaldo de emergencia en el celular del administrador: descarga lo que tiene el telefono
+  movil(c) {
+    c.innerHTML = `<div class="tarjeta">${cab("descargar", "v", "Respaldo de emergencia desde este celular", "Por si la PC falla: descarga un respaldo con todo lo que tiene este teléfono.")}
+      <button class="btn verde bloque" id="bRespCel" style="min-height:50px">${B.ico("descargar")} Descargar respaldo de este celular (.json)</button>
+      <div class="aviso a" style="margin-top:12px">${B.ico("info")}<div>Trae lo que llegó en el <b>último paquete de datos</b> más lo que capturaste aquí: personal, actividades, espacios, vigilancias, horas extra, procedimientos (sin los PDF) y las semanas de tarjetas que tiene el celular.
+        Para tener <b>todas</b> las semanas, carga el «paquete completo para el administrador» que se genera en la PC (Celulares).<br>Se restaura en la PC: <b>Configuración y respaldos → Restaurar</b>. La configuración y los permisos se cambian en la PC.</div></div></div>`;
+    c.querySelector("#bRespCel").onclick = async () => {
+      try { const d = await B.api.llamar("respaldo"); delete d.ok; U.descargar("respaldo_bitacora_" + (B.estado.config.proyecto || "24RU1") + "_CELULAR_" + U.ahoraISO().replace(/[:T]/g, "") + ".json", JSON.stringify(d), "application/json");
+        ui.toast("Respaldo guardado en <b>Descargas</b>. Guárdalo también en otro lugar (correo o WhatsApp a tu propio chat).", "ok", 9000); } catch (e) { ui.error(e); }
+    };
+  },
+  // resultado de una restauracion: que se recupero y que falta
+  async resumen(r) {
+    const s = r.resumen || {}, av = r.avisos || [], fila = (t, v) => v == null ? "" : `<tr><td>${t}</td><td class="c"><b>${U.esc(v)}</b></td></tr>`;
+    await ui.modal({ titulo: "Respaldo restaurado", icono: "ok", ancho: true,
+      html: `<table class="tabla"><tbody>${fila("Personal", s.personal)}${fila("Actividades", s.actividades)}${fila("Espacios confinados", s.ec)}${fila("Vigilancias", s.vig)}${fila("Horas extra", s.he)}${fila("Procedimientos", s.procedimientos)}
+        ${fila("Tarjetas Líderes en Campo", s.tarjetas == null ? null : s.tarjetas + " en " + s.tarjetasSemanas + " semana(s)")}${fila("PDF de procedimientos recuperados", s.pdfProc)}${fila("PDF de estándares POE recuperados", s.pdfPoe)}</tbody></table>
+        ${av.map(a => `<div class="aviso d" style="margin-top:10px">${B.ico("alerta")}<div>${U.esc(a)}</div></div>`).join("")}
+        <p class="muted peque" style="margin:12px 0 0">La página se volverá a cargar para mostrar los datos restaurados.</p>`,
+      botones: [{ t: "Aceptar", v: true }] });
+    location.reload();
+  },
   render(c) {
+    if (B.modoMovil) return this.movil(c);
     const s = B.estado.servidor, ofc = B.oficio.cfg();
     const cf = { ...B.estado.config };
     for (const [k, d] of [["ofLinea1", ofc.linea1], ["ofLinea2", ofc.linea2], ["ofLinea3", ofc.linea3], ["ofDepto", ofc.depto], ["ofVoboNombre", ofc.voboNombre],
@@ -4043,9 +4066,10 @@ V.config = {
           <p class="peque muted ruta" style="line-height:1.7">Datos: <b>${U.esc(s.datos)}</b><br>Respaldos: <b>${U.esc(s.respaldos)}</b><br>PDF: <b>${U.esc(s.reportes)}</b><br>
           PDF automáticos: ${s.edge ? '<span class="badge v">Disponible (Edge/Chrome)</span>' : '<span class="badge r">No disponible: usar Imprimir</span>'}</p></div>
         <div class="tarjeta" data-tour="cfg-respaldo">${cab("descargar", "v", "Respaldos", "Se guarda una copia en cada cambio y una diaria en la carpeta de respaldos.")}
-          <button class="btn sec bloque" id="bResp" style="margin-bottom:10px">${B.ico("descargar")} Descargar respaldo completo (.json)</button>
-          <label class="btn peligro bloque" style="cursor:pointer">${B.ico("subir")} Restaurar desde un respaldo…<input type="file" id="fRest" accept=".json" hidden></label>
-          <p class="peque muted">Restaurar reemplaza TODOS los datos actuales (antes se guarda una copia automática).</p></div>
+          ${B.modoLocal ? "" : `<button class="btn verde bloque" id="bRespZip" style="margin-bottom:8px">${B.ico("descargar")} Respaldo completo con PDF (.zip)</button>`}
+          <button class="btn sec bloque" id="bResp" style="margin-bottom:10px">${B.ico("descargar")} Respaldo de datos sin PDF (.json)</button>
+          <label class="btn peligro bloque" style="cursor:pointer">${B.ico("subir")} Restaurar desde un respaldo…<input type="file" id="fRest" accept=".json,.zip" hidden></label>
+          <p class="peque muted">${B.modoLocal ? "" : "Para llevar la bitácora a <b>otro equipo</b> usa el respaldo completo (.zip): lleva también los PDF de procedimientos y de los estándares POE. "}Restaurar reemplaza TODOS los datos actuales (antes se guarda una copia automática) y al terminar muestra lo que se recuperó.</p></div>
       </div></div>`;
     c.querySelector("#gCfg").onclick = async () => {
       const n = { ...cf };
@@ -4069,11 +4093,34 @@ V.config = {
       try { const d = await B.api.llamar("respaldo"); delete d.ok; U.descargar("respaldo_bitacora_" + B.estado.config.proyecto + "_" + U.ahoraISO().replace(/[:T]/g, "") + ".json", JSON.stringify(d), "application/json"); }
       catch (e) { ui.error(e); }
     };
+    const bz = c.querySelector("#bRespZip");
+    if (bz) bz.onclick = async () => {
+      const t = bz.innerHTML; bz.disabled = true; bz.innerHTML = '<span class="giro" style="width:16px;height:16px;border-width:2px"></span> Armando el respaldo…';
+      try {
+        const r = await fetch("/api/respaldozip", { headers: { "X-Token": B.token } });
+        if (!r.ok) { let m = "No se pudo generar el respaldo."; try { m = (await r.json()).error || m; } catch (x) { } throw new Error(m); }
+        const b = await r.blob();
+        U.descargar("respaldo_COMPLETO_bitacora_" + B.estado.config.proyecto + "_" + U.ahoraISO().replace(/[:T]/g, "") + ".zip", b, "application/zip");
+        ui.toast("Respaldo completo descargado (" + Math.round(b.size / 1024) + " KB): datos y PDF. Cópialo a una USB o a OneDrive.", "ok", 9000);
+      } catch (x) { ui.error(x); }
+      bz.disabled = false; bz.innerHTML = t;
+    };
     c.querySelector("#fRest").onchange = async e => {
-      const f = e.target.files[0]; if (!f) return;
+      const f = e.target.files[0]; if (!f) return; e.target.value = "";
+      if (/\.zip$/i.test(f.name)) {
+        if (B.modoLocal) { ui.toast("El respaldo .zip se restaura con el servidor de la bitácora (no en el modo sin servidor).", "error", 8000); return; }
+        if (!(await ui.confirmar(`Se reemplazarán TODOS los datos y se copiarán los PDF del respaldo completo <b>${U.esc(f.name)}</b>. ¿Continuar?`, "Restaurar respaldo completo", "Restaurar", true))) return;
+        try {
+          const r = await (await fetch("/api/respaldozip", { method: "POST", headers: { "X-Token": B.token, "Content-Type": "application/zip" }, body: f })).json();
+          if (!r.ok) throw new Error(r.error || "No se pudo restaurar.");
+          await this.resumen(r);
+        } catch (x) { ui.error(x); }
+        return;
+      }
       let db; try { db = JSON.parse(await f.text()); } catch (x) { ui.toast("El archivo no es un respaldo válido.", "error"); return; }
-      if (!(await ui.confirmar(`Se reemplazarán TODOS los datos con el respaldo <b>${U.esc(f.name)}</b>${db._generado ? " (generado " + U.esc(db._generado) + ")" : ""}. ¿Continuar?`, "Restaurar respaldo", "Restaurar", true))) return;
-      await ejecutar(() => B.api.llamar("restaurar", { db }), "Respaldo restaurado.");
+      const tipo = db._paquete ? " <b>Ojo: es un PAQUETE para celulares</b>, no un respaldo (solo trae las últimas semanas de tarjetas)." : db._origen === "celular" ? " <b>Es un respaldo hecho en un celular</b>: trae lo que tenía el teléfono, sin PDF." : " No incluye los PDF: para eso usa el respaldo completo (.zip).";
+      if (!(await ui.confirmar(`Se reemplazarán TODOS los datos con el respaldo <b>${U.esc(f.name)}</b>${db._generado ? " (generado " + U.esc(db._generado) + ")" : ""}.${tipo} ¿Continuar?`, "Restaurar respaldo", "Restaurar", true))) return;
+      try { const r = await B.api.llamar("restaurar", { db }); if (r.resumen) await this.resumen(r); else { ui.toast("Respaldo restaurado.", "ok"); location.reload(); } } catch (x) { ui.error(x); }
     };
   }
 };
@@ -7003,7 +7050,7 @@ B.inter = {
     return { ...res, total: f.ops.length, repetidas: f.ops.length - ops.length, de: f.ini, nombre: f.nombre || "" };
   },
   /* ---------- PC (supervisor): paquete de datos para los celulares */
-  async generarPaquete() {
+  async generarPaquete(completo) {
     const db = await B.api.llamar("respaldo");
     delete db.imagenes; delete db.ok;
     const c = B.oficio.cfg();
@@ -7012,7 +7059,7 @@ B.inter = {
     db.poe = B.POE || [];
     // tarjetas Lideres en Campo: marcador completo y las tarjetas de las ultimas semanas (para el resumen y el trabajo remoto)
     if (db.tarjetas && B.tj) {
-      const ver = await B.tj.cargar(), sems = Object.keys(db.tarjetasSem || {}).sort().slice(-this.SEMANAS_CEL), ts = {};
+      const ver = await B.tj.cargar(), sems = Object.keys(db.tarjetasSem || {}).sort().slice(completo ? 0 : -this.SEMANAS_CEL), ts = {};
       for (const k of sems) ts[k] = db.tarjetasSem[k];
       db.tarjetasSem = ts;
       db.tarjetas.cfg = Object.assign({}, db.tarjetas.cfg, { editores: ver.editores, inicio: B.tj.inicio() });
@@ -7021,7 +7068,8 @@ B.inter = {
       db.tarjetas.hist = Object.assign({}, B.E1_SEMILLA || {}, db.tarjetas.hist);
     }
     db._paquete = { tipo: "b24-paquete", generado: U.ahoraISO(), version: B.app.VERSION, por: B.usuario.ini, periodo: B.t.periodo() };
-    const nombre = "Bitacora24RU1 PAQUETE celulares " + U.ahoraISO().replace("T", " ").replace(":", "") + ".json";
+    if (completo) db._paquete.completo = true;
+    const nombre = "Bitacora24RU1 PAQUETE " + (completo ? "COMPLETO administrador " : "celulares ") + U.ahoraISO().replace("T", " ").replace(":", "") + ".json";
     U.descargar(nombre, JSON.stringify(db), "application/json");
     return nombre;
   },
@@ -7125,6 +7173,7 @@ V.celular = {
       </div>
       <div class="tarjeta c6" data-tour="cel-paquete">${cab("subir", "d", "Paquete de datos para los celulares", "Lleva al celular el personal, las asignaciones, pendientes, espacios, vigilancias, la hoja de asignación y las tarjetas Líderes en Campo.")}
         ${sup ? `<button class="btn dorado bloque" id="celPaq">${B.ico("descargar")} Generar paquete para celulares</button>
+          ${B.dom.esAdmin() ? `<button class="btn sec bloque" id="celPaqC" style="margin-top:8px" title="Todas las semanas de tarjetas, para consultar todo y hacer respaldos de emergencia desde el celular">${B.ico("descargar")} Paquete completo para el administrador</button>` : ""}
           <p class="muted peque" style="margin:10px 0 0">Se descarga un archivo «Bitacora24RU1 PAQUETE celulares …». Mándalo al grupo de WhatsApp (WhatsApp Web → adjuntar → Documento). Cada técnico lo abre en su celular: <b>Celulares → Recibir datos</b>.
             Conviene generarlo al inicio del turno, después de asignar actividades, y después de importar capturas.</p>
           <div class="aviso a" style="margin-top:10px">${B.ico("info")}<div>El paquete contiene <b>toda la información de la bitácora</b> (incluye horas extra y los accesos del personal). Compártelo solo en el grupo del personal de Seguridad Industrial.</div></div>`
@@ -7154,6 +7203,8 @@ V.celular = {
       } catch (err) { caja.innerHTML = `<div class="aviso r" style="margin-top:10px">${B.ico("alerta")}<div><b>Texto pegado</b><br>${U.esc(err.message)}${/JSON|leer/i.test(err.message) ? "<br>Parece incompleto: en WhatsApp toca «Leer más» y copia el mensaje entero." : ""}</div></div>`; }
     };
     const bp = c.querySelector("#celPaq");
+    const bpc = c.querySelector("#celPaqC");
+    if (bpc) bpc.onclick = async () => { bpc.disabled = true; try { const n = await B.inter.generarPaquete(true); ui.toast("Paquete completo generado: <b>" + U.esc(n) + "</b>. Mándalo solo a tu propio chat y cárgalo en tu celular (Celulares → Recibir datos).", "ok", 10000); } catch (e) { ui.error(e); } bpc.disabled = false; };
     if (bp) bp.onclick = async () => { bp.disabled = true; try { const n = await B.inter.generarPaquete(); ui.toast("Paquete generado: <b>" + U.esc(n) + "</b>. Está en Descargas; mándalo al grupo de WhatsApp.", "ok", 9000); } catch (e) { ui.error(e); } bp.disabled = false; };
   },
   async movil(c) {
@@ -7373,7 +7424,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "4.6.1", servidorViejo: false,
+  info: {}, VERSION: "4.7", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -7548,6 +7599,7 @@ B.app = {
     ];
     if (sup) {
       enlaces.push(["SUPERVISIÓN", [["turno", "Datos del turno", "usuarios"], ["reporte", "Reporte del turno", "pdf"], ["hoja", "Hoja de asignación", "doc"], ["asistencia", "Asistencia y horas extra", "calendario"]]]);
+      if (B.modoMovil && B.dom.esAdmin()) enlaces.push(["ADMINISTRACIÓN", [["usuarios", "Usuarios", "llave"], ["roles", "Roles y permisos", "escudo"], ["config", "Respaldo de emergencia", "engrane"]]]);
       if (!B.modoMovil) enlaces.push(["ADMINISTRACIÓN", [["personal", B.dom.esAdmin() ? "Personal y turnos" : "Cambios de turno", "usuario"]].concat(B.dom.esAdmin() ? [["catalogos", "Catálogos", "lista"]] : []).concat([["usuarios", "Usuarios", "llave"]]).concat(B.dom.esAdmin() ? [["roles", "Roles y permisos", "escudo"], ["config", "Configuración y respaldos", "engrane"]] : [])]);
     }
     // cada quien ve solo las secciones que su rol (o su excepcion personal) tiene permitidas
@@ -7559,7 +7611,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "procedimientos" ? '<span class="contador oculto" id="cntProc"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.6.1")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.7")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
