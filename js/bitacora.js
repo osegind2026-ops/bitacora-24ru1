@@ -799,7 +799,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.7.1", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.7.2", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -5275,6 +5275,54 @@ V.hoja = {
   PR.estado = d => { const n = PR.dias(d), u = PR.umbral(); return n == null ? "sf" : n < 0 ? "ven" : n < u.pv ? "urg" : n < u.vig ? "pv" : "vig"; };
   PR.EST = { vig: ["v", "Vigente", "#E2F0D9", "#1E6B4A"], pv: ["d", "Por vencer", "#FFF2CC", "#7F6000"], urg: ["r", "Urgente", "#FFD2D2", "#C00000"], ven: ["r", "VENCIDO", "#C00000", "#FFFFFF"], sf: ["n", "Sin fecha", "#EDEDED", "#595959"] };
   PR.esPCI = d => /incendio/i.test(d.area || "");
+
+  /* ---------------- importar la tabla de procedimientos desde un CSV o un Excel (.xlsx)
+     Acepta el CSV que exporta la bitacora, el Excel "Control Vigencia Procedimientos" (con titulos arriba de la tabla) y tablas
+     parecidas: busca el renglon de encabezados y reconoce las columnas por su nombre. Dias restantes y Estado se calculan solos. */
+  PR.COLS = [["orden", /^(NO|NUM|NUMERO|#)$/], ["clave", /^(PROCEDIMIENTO|CLAVE|NO DE PROCEDIMIENTO|DOCUMENTO)$/], ["clase", /^CLASE/], ["srp", /^SRP/], ["rev", /^REV(ISION)?$/],
+    ["cambio", /CAMBIO/], ["area", /^AREA (SI|S I)|^ESPECIALIDAD/], ["areaResp", /^AREA( RESPONSABLE)?$/], ["frec", /^FREC/], ["fecha", /EMISION/], ["vigencia", /^(FECHA (DE )?)?VIGENCIA$/], ["titulo", /^TITULO/], ["tipo", /^TIPO/], ["nota", /^(NOTA|OBSERV)/]];
+  PR.leerCsv = function (txt) {
+    txt = txt.replace(/^﻿/, "");
+    const lin1 = txt.split(/\r?\n/).slice(0, 15).join("\n"), sep = (lin1.match(/;/g) || []).length > (lin1.match(/,/g) || []).length ? ";" : ",";
+    const filas = []; let f = [], v = "", q = false;
+    for (let i = 0; i < txt.length; i++) {
+      const ch = txt[i];
+      if (q) { if (ch === '"') { if (txt[i + 1] === '"') { v += '"'; i++; } else q = false; } else v += ch; continue; }
+      if (ch === '"') q = true; else if (ch === sep) { f.push(v); v = ""; } else if (ch === "\n" || ch === "\r") { if (ch === "\r" && txt[i + 1] === "\n") i++; f.push(v); filas.push(f); f = []; v = ""; } else v += ch;
+    }
+    if (v !== "" || f.length) { f.push(v); filas.push(f); }
+    return filas;
+  };
+  PR.fechaIso = v => {
+    if (v == null || v === "") return "";
+    if (typeof v === "number") { const d = new Date(Date.UTC(1899, 11, 30) + Math.round(v) * 864e5); return d.toISOString().slice(0, 10); }
+    const s = String(v).trim(); let m;
+    if ((m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(s))) return m[1] + "-" + m[2].padStart(2, "0") + "-" + m[3].padStart(2, "0");
+    if ((m = /^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})$/.exec(s))) return (m[3].length === 2 ? "20" + m[3] : m[3]) + "-" + m[2].padStart(2, "0") + "-" + m[1].padStart(2, "0");
+    return s;
+  };
+  PR.tabla = function (filas) {
+    const nh = h => U.norm(String(h ?? "").replace(/[.:✓]/g, " ")).replace(/\s+/g, " ").trim();
+    const ih = filas.slice(0, 40).findIndex(f => { const h = f.map(nh); return h.some(x => /^(PROCEDIMIENTO|CLAVE)$/.test(x)) && h.some(x => /^TITULO|^REV/.test(x)); });
+    if (ih < 0) throw new Error("No encontré el renglón de encabezados: la tabla debe tener al menos las columnas «Procedimiento» y «Título» (o «Rev»).");
+    const enc = filas[ih].map(nh), mapa = {}, usadas = new Set();
+    for (const [k, re] of PR.COLS) { const i = enc.findIndex((h, j) => h && !usadas.has(j) && re.test(h)); if (i >= 0) { mapa[k] = i; usadas.add(i); } }
+    const items = [];
+    for (const f of filas.slice(ih + 1)) {
+      const val = k => mapa[k] == null ? undefined : f[mapa[k]];
+      const clave = String(val("clave") ?? "").trim(); if (!clave) continue;
+      const it = {};
+      for (const k of Object.keys(mapa)) {
+        let v = val(k);
+        if (k === "fecha" || k === "vigencia") v = PR.fechaIso(v);
+        else if (k === "orden") v = parseInt(v, 10) || 0;
+        else v = v == null ? "" : typeof v === "number" ? String(v) : String(v).replace(/\s+/g, " ").trim();
+        it[k] = v;
+      }
+      it.clave = clave; items.push(it);
+    }
+    return { items, columnas: Object.keys(mapa) };
+  };
   // Documento imprimible: el control de vigencia tal como se lleva en el Excel
   PR.docControl = function (lista, titulo) {
     const c = B.estado.config, k = v => U.esc(v ?? ""), u = PR.umbral(), n = e => lista.filter(d => PR.estado(d) === e).length;
@@ -5294,7 +5342,7 @@ V.hoja = {
       const sup = B.dom.esSup() && !B.modoLocal, vig = this.vigentes(), u = PR.umbral(), n = e => vig.filter(d => PR.estado(d) === e).length, sinPdf = vig.filter(d => !d.archivo).length;
       const kpi = (k, num, txt, color) => `<a href="#" class="pr-kpi ${this.est === k ? "on" : ""}" data-est="${k}"><b style="color:${color}">${num}</b><span>${txt}</span></a>`;
       c.innerHTML = `<div class="tarjeta">${cab("doc", "g", "Control de vigencia de procedimientos", `${vig.length} procedimientos. El semáforo cuenta los días que faltan para la fecha de vigencia.`,
-          `${sup ? `<button class="btn" id="prSubir">${B.ico("mas")} Agregar procedimiento</button>` : ""}<button class="btn sec" id="prImp">${B.ico("imprimir")} Imprimir</button>${B.modoLocal ? "" : `<button class="btn sec" id="prPdf">${B.ico("pdf")} PDF</button>`}<button class="btn sec" id="prCsv">${B.ico("descargar")} Excel (CSV)</button>`)}
+          `${sup ? `<button class="btn" id="prSubir">${B.ico("mas")} Agregar procedimiento</button><label class="btn sec" style="cursor:pointer" title="Cargar o actualizar la tabla de procedimientos desde un CSV o un Excel">${B.ico("subir")} Importar tabla (CSV / Excel)<input type="file" id="prImpTabla" accept=".csv,.xlsx,.xls,.txt,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden></label>` : ""}<button class="btn sec" id="prImp">${B.ico("imprimir")} Imprimir</button>${B.modoLocal ? "" : `<button class="btn sec" id="prPdf">${B.ico("pdf")} PDF</button>`}<button class="btn sec" id="prCsv">${B.ico("descargar")} Excel (CSV)</button>`)}
           <div class="pr-kpis">${kpi("todos", vig.length, "Todos", "var(--texto)")}${kpi("vig", n("vig"), "Vigentes · " + u.vig + " días o más", "var(--verde)")}${kpi("pv", n("pv"), "Por vencer · menos de " + u.vig + " días", "#8a6526")}${kpi("urg", n("urg"), "Urgentes · menos de " + u.pv + " días", "var(--rojo)")}${kpi("ven", n("ven"), "Vencidos", "var(--rojo)")}${B.modoLocal ? "" : kpi("sinpdf", sinPdf, "Sin PDF cargado", "var(--azul)")}</div>
           <div class="fila" style="align-items:flex-end;margin-top:14px"><div class="campo" style="flex:3 1 260px;margin:0"><label>Buscar</label><input class="inp" id="prQ" value="${esc(this.q)}" placeholder="No. de procedimiento, palabras del título${B.modoLocal ? "" : " o del contenido del PDF"}…" autocomplete="off"></div>
             <div class="campo" style="flex:0 0 auto;margin:0"><label>Área</label>${B.ui.seg("area", ["Todas", "Seguridad Industrial", "Contra Incendio"], this.area)}</div>
@@ -5307,6 +5355,7 @@ V.hoja = {
       c.querySelector("#prOrd").onchange = e => { this.orden = e.target.value; this.pinta(c); };
       c.querySelectorAll("[data-est]").forEach(a => a.onclick = e => { e.preventDefault(); this.est = a.dataset.est; c.querySelectorAll("[data-est]").forEach(x => x.classList.toggle("on", x === a)); this.pinta(c); });
       const bs = c.querySelector("#prSubir"); if (bs) bs.onclick = () => this.editar(null);
+      const bt = c.querySelector("#prImpTabla"); if (bt) bt.onchange = e => { const f = e.target.files[0]; e.target.value = ""; if (f) this.importar(f); };
       const bu = c.querySelector("#prUmb"); if (bu) bu.onclick = () => this.semaforo();
       c.querySelector("#prImp").onclick = () => B.rep.imprimir(PR.docControl(this.visibles, this.tituloFiltro()));
       const bp = c.querySelector("#prPdf"); if (bp) bp.onclick = e => B.rep.pdf(PR.docControl(this.visibles, this.tituloFiltro()), e.currentTarget);
@@ -5394,6 +5443,48 @@ V.hoja = {
     },
 
     // Subir un documento nuevo, una revision nueva (revDe) o corregir datos y anexos de uno existente (d)
+    // Importar la tabla de procedimientos (CSV o Excel): muestra que va a cambiar y pide confirmar
+    async importar(file) {
+      let filas;
+      try {
+        const buf = await file.arrayBuffer();
+        if (/\.xlsx$/i.test(file.name)) filas = B.xlsxFilas(buf);
+        else if (/\.xls$/i.test(file.name)) throw new Error("Ese es un Excel antiguo (.xls). Ábrelo en Excel y guárdalo como «Libro de Excel (.xlsx)» o como CSV.");
+        else { let t; try { t = new TextDecoder("utf-8", { fatal: true }).decode(buf); } catch (e) { t = new TextDecoder("windows-1252").decode(buf); } filas = PR.leerCsv(t); }
+      } catch (e) { B.ui.toast("No se pudo leer <b>" + esc(file.name) + "</b>: " + esc(e.message), "error", 9000); return; }
+      let T; try { T = PR.tabla(filas); } catch (e) { B.ui.toast(esc(e.message), "error", 9000); return; }
+      if (!T.items.length) { B.ui.toast("El archivo no trae procedimientos.", "error"); return; }
+      const NOM = { orden: "No.", clave: "Procedimiento", clase: "Clase", srp: "SRP", rev: "Rev", cambio: "No. cambio", areaResp: "Área", frec: "Frec. rev.", fecha: "Fecha emisión", vigencia: "Fecha vigencia", titulo: "Título", tipo: "Tipo", area: "Área SI / PCI", nota: "Nota" };
+      const act = new Map(this.vigentes().map(d => [U.norm(d.clave), d])), todos = new Map(PR.lista().map(d => [U.norm(d.clave), d])), vistos = new Set(), nuevos = [], cambian = [], iguales = [];
+      for (const it of T.items) {
+        const k = U.norm(it.clave); if (vistos.has(k)) continue; vistos.add(k);
+        const d = act.get(k) || todos.get(k);
+        if (!d) { nuevos.push(it); continue; }
+        const dif = T.columnas.filter(c => c !== "clave" && (c === "orden" ? it.orden > 0 && +it.orden !== +d.orden : String(it[c] ?? "") !== String(d[c] ?? "")));
+        (dif.length || d.vigente === false ? cambian : iguales).push({ it, d, dif });
+      }
+      const faltan = this.vigentes().filter(d => d.clave && !vistos.has(U.norm(d.clave)));
+      const fv = (c, v) => c === "fecha" || c === "vigencia" ? U.corta(v) : esc(v);
+      const r = await B.ui.modal({
+        titulo: "Importar procedimientos · " + esc(file.name), icono: "subir", ancho: true,
+        html: `<p style="margin:0 0 10px;line-height:1.55">Se leyeron <b>${vistos.size}</b> procedimientos. Columnas reconocidas: ${T.columnas.map(c => "<b>" + NOM[c] + "</b>").join(", ")}. Las demás columnas (días restantes, estado…) se calculan solas. <b>Nada se ha cambiado todavía.</b></p>
+          <div class="tj-kpis" style="margin-bottom:12px"><div><b style="color:var(--verde,#1E6B4A)">${nuevos.length}</b><span>nuevos (se agregan)</span></div><div><b style="color:#8a6526">${cambian.length}</b><span>con cambios (se actualizan)</span></div><div><b>${iguales.length}</b><span>sin cambios</span></div><div><b style="color:var(--rojo)">${faltan.length}</b><span>en la bitácora y no en el archivo</span></div></div>
+          ${cambian.length ? `<label style="font-size:12px;font-weight:700;color:var(--texto-2)">CAMBIOS</label><div class="tabla-cont" style="max-height:230px;overflow:auto;margin-bottom:10px"><table class="tabla"><thead><tr><th>Procedimiento</th><th>Dato</th><th>Ahora</th><th>Con el archivo</th></tr></thead><tbody>
+            ${cambian.slice(0, 120).flatMap(x => (x.dif.length ? x.dif : ["vigente"]).map((c, j) => `<tr><td>${j ? "" : "<b>" + esc(x.d.clave) + "</b>"}</td><td>${c === "vigente" ? "Estado" : NOM[c]}</td><td>${c === "vigente" ? "Revisión anterior / retirado" : fv(c, x.d[c])}</td><td><b>${c === "vigente" ? "Vigente" : fv(c, x.it[c])}</b></td></tr>`)).join("")}</tbody></table></div>` : ""}
+          ${nuevos.length ? `<label style="font-size:12px;font-weight:700;color:var(--texto-2)">NUEVOS</label><p class="muted peque" style="margin:2px 0 10px">${nuevos.slice(0, 60).map(x => "<b>" + esc(x.clave) + "</b>" + (x.titulo ? " " + esc(x.titulo.slice(0, 50)) : "")).join(" · ")}${nuevos.length > 60 ? " …" : ""}</p>` : ""}
+          ${cambian.some(x => x.dif.includes("rev") && x.d.archivo) ? `<div class="aviso d" style="margin-bottom:10px">${B.ico("alerta")}<div>Algunos procedimientos <b>cambian de revisión</b> y tienen PDF cargado: ese PDF es de la revisión anterior; súbelo de nuevo desde su ficha.</div></div>` : ""}
+          ${faltan.length ? `<label class="chip-ali" style="margin:0"><input type="checkbox" id="impQuitar"><span>Retirar del control los <b>${faltan.length}</b> que no vienen en el archivo (quedan en el historial, no se borran)</span></label>` : ""}`,
+        botones: [{ t: "Cancelar", c: "sec", v: null }, { t: "Importar", c: "verde", v: v => ({ quitar: !!(v.querySelector("#impQuitar") || {}).checked }) }]
+      });
+      if (!r) return;
+      if (r.quitar && !(await B.ui.confirmar(`Se retirarán del control <b>${faltan.length}</b> procedimiento(s) que no vienen en el archivo: ${faltan.slice(0, 15).map(d => esc(d.clave)).join(", ")}${faltan.length > 15 ? "…" : ""}. ¿Continuar?`, "Retirar procedimientos", "Sí, importar y retirar", true))) return;
+      const items = [...vistos].map(k => T.items.find(x => U.norm(x.clave) === k));
+      try {
+        const x = await B.api.op("proc", "importar", { items, quitarFaltantes: r.quitar });
+        await B.app.refrescar();
+        B.ui.toast(`Importación terminada: <b>${x.nuevos}</b> nuevos, <b>${x.actualizados}</b> actualizados, ${x.iguales} sin cambios${x.retirados ? ", " + x.retirados + " retirados" : ""}.`, "ok", 9000);
+      } catch (e) { B.ui.error(e); }
+    },
     async editar(d, revDe) {
       const base = d || (revDe ? { clave: revDe.clave, titulo: revDe.titulo, tipo: revDe.tipo, area: revDe.area, clase: revDe.clase, frec: revDe.frec, areaResp: revDe.areaResp } : {}), nuevo = !d;
       let buf = null, textos = null, paginas = d ? d.paginas || 0 : 0, anexos = JSON.parse(JSON.stringify((d && d.anexos) || []));
@@ -5558,6 +5649,7 @@ V.hoja = {
   }
 
   // Primera hoja del libro como matriz de celdas (texto o numero)
+  B.xlsxFilas = buf => xlsxFilas(buf);
   function xlsxFilas(buf) {
     const z = zipLeer(new Uint8Array(buf)), xml = n => new DOMParser().parseFromString(new TextDecoder().decode(z.get(n)()), "application/xml");
     const hoja = [...z.keys()].filter(k => /^xl\/worksheets\/[^/]+\.xml$/.test(k)).sort()[0];
@@ -7479,7 +7571,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "4.7.1", servidorViejo: false,
+  info: {}, VERSION: "4.7.2", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -7666,7 +7758,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "procedimientos" ? '<span class="contador oculto" id="cntProc"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.7.1")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.7.2")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
