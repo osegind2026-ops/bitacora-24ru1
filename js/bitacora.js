@@ -220,10 +220,13 @@ B.dom = {
       if (v.fecha === f && v.turno === t) sumar(v.capAlta);
       if (v.retiro) { const r = B.t.de(v.retiro); if (r.f === f && r.t === t) sumar(v.capRet); }
     }
-    for (const h of B.estado.he) if (h.fecha === f && h.turno === t && String(h.he) !== "") sumar(h.ini);
+    // el tiempo extra NO cuenta como asistencia: hay quien lo deja capturado antes o le toca descanso
     return d;
   },
-  /* Presentes: quien capturo + marcados por el supervisor + elaboro/reviso */
+  // quien solo tiene tiempo extra capturado en el turno (sin actividades ni otros registros)
+  soloHe(f, t) { const r = this.registros(f, t); return new Set(B.estado.he.filter(h => h.fecha === f && h.turno === t && String(h.he) !== "" && !r.has(U.ini(h.ini)) && this.persona(h.ini)).map(h => U.ini(h.ini))); },
+  /* Presentes: quien capturo actividades o registros (o se los asignaron) + marcados por el supervisor + elaboro/reviso,
+     menos los que el supervisor quito del reporte (td.quitar) */
   presentes(f, t) {
     const regs = this.registros(f, t), td = this.turnoDatos(f, t), m = new Map();
     if (td) {
@@ -231,6 +234,7 @@ B.dom = {
       for (const x of [td.elab, td.rev]) if (x && this.persona(x)) m.set(U.ini(x), "Supervisor del turno");
     }
     for (const [k] of regs) m.set(k, "Capturó registros");
+    if (td) for (const x of (td.quitar || [])) m.delete(U.ini(x));
     return m;
   },
   sinCaptura(f, t) {
@@ -799,7 +803,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.7.3", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.7.4", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -1575,7 +1579,7 @@ B.local = {
         const L = await this.leer("turnos") || [];
         let t = L.find(x => x.fecha === d.fecha && x.turno === d.turno);
         if (!t) { t = {}; L.push(t); }
-        for (const k of ["fecha", "turno", "dif", "notas", "elab", "rev", "pres", "pdf"]) if (k in d) t[k] = d[k];
+        for (const k of ["fecha", "turno", "dif", "notas", "elab", "rev", "pres", "quitar", "pdf"]) if (k in d) t[k] = d[k];
         t.mod = ahora() + " " + s.ini;
         await this.escribir("turnos", L);
         if (d.dif) { const cat = await this.leer("catalogos") || {}; if (this.agregarCatalogo(cat, "difusion", d.dif)) await this.escribir("catalogos", cat); }
@@ -3624,8 +3628,9 @@ V.turno = {
   titulo: "Datos del turno", sup: true,
   render(c) {
     const { f, t } = T(), td = B.dom.turnoDatos(f, t) || {}, regs = B.dom.registros(f, t);
-    const marcados = new Set((td.pres || []).map(U.ini));
-    const gente = new Set([...B.dom.personalDelTurno(f, t), ...regs.keys(), ...marcados]);
+    const marcados = new Set((td.pres || []).map(U.ini)), quitados = new Set((td.quitar || []).map(U.ini)), soloHe = B.dom.soloHe(f, t);
+    const gente = new Set([...B.dom.personalDelTurno(f, t), ...regs.keys(), ...marcados, ...soloHe]);
+    const esPres = i => !quitados.has(i) && ((regs.get(i) || 0) > 0 || marcados.has(i));
     const sups = () => ui.personas(p => B.dom.catOrden(p.cat) === 4);
     const lbl = i => i ? i + " - " + B.dom.nombre(i) : "";
     c.innerHTML = `
@@ -3641,7 +3646,7 @@ V.turno = {
       <div class="tarjeta" style="margin-top:18px">${cab("doc", "d", "Notas adicionales", "Una nota por renglón; en el reporte aparecen con viñetas.")}
         <textarea class="inp" id="tNotas" rows="4">${U.esc(td.notas || "")}</textarea></div>
       <div class="tarjeta" data-tour="sup-asistencia">${cab("usuarios", "g", "Asistencia del turno",
-        "Quien capturó aparece automáticamente. Marca <b>Presente</b> a quien estuvo en el turno aunque no haya capturado ninguna actividad: saldrá en «Personal que estuvo en el turno» del reporte. En rojo: asignados sin registro.",
+        "Aparece solo quien capturó actividades o registros, o a quien se le asignaron. <b>El tiempo extra por sí solo ya no cuenta</b> (hay quien lo deja capturado antes o le toca descanso). Marca <b>Presente</b> a quien sí estuvo; quítale la palomita a quien no deba salir en el reporte. En rojo: asignados sin registro.",
         `<div class="campo" style="margin:0;min-width:260px"><input class="inp" id="tAgregar" placeholder="+ Agregar persona de otro turno"></div>`)}
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
           <button class="btn sec chico" id="tTodos">${B.ico("ok")} Marcar presentes a todos los asignados</button>
@@ -3654,20 +3659,24 @@ V.turno = {
     const tb = c.querySelector("#tAsis");
     const pintar = () => {
       tb.innerHTML = B.dom.ordenados([...gente]).map(i => {
-        const p = B.dom.persona(i), n = regs.get(i) || 0, te = B.dom.turnoEfectivo(i, f), pres = n > 0 || marcados.has(i);
-        const sin = te === t && !pres;
-        return `<tr data-i="${i}"><td><b>${U.esc(i)}</b></td><td>${U.esc(p ? p.nombre : "")}</td><td class="muted">${U.esc(p ? B.dom.catCorta(p.cat) : "")}</td><td>${U.esc(te)}</td>
-          <td class="c">${n || ""}</td><td class="c"><input type="checkbox" ${pres ? "checked" : ""} ${n ? "disabled title='Tiene registros'" : ""}></td>
-          <td>${sin ? '<span class="badge r">SIN CAPTURA</span>' : n ? '<span class="badge v">Capturó</span>' : pres ? '<span class="badge a">Presente</span>' : '<span class="badge n">No asistió</span>'}</td></tr>`;
+        const p = B.dom.persona(i), n = regs.get(i) || 0, te = B.dom.turnoEfectivo(i, f), pres = esPres(i), he = soloHe.has(i);
+        const sin = te === t && !pres && !quitados.has(i);
+        return `<tr data-i="${i}" style="${quitados.has(i) ? "opacity:.6" : ""}"><td><b>${U.esc(i)}</b></td><td>${U.esc(p ? p.nombre : "")}</td><td class="muted">${U.esc(p ? B.dom.catCorta(p.cat) : "")}</td><td>${U.esc(te)}</td>
+          <td class="c">${n || ""}</td><td class="c"><input type="checkbox" ${pres ? "checked" : ""} title="${n ? "Tiene registros: quítale la palomita si no debe salir en el reporte" : "Marcar presente"}"></td>
+          <td>${quitados.has(i) ? '<span class="badge n">Quitado del reporte</span>' : he && !pres ? '<span class="badge d" title="Solo capturó tiempo extra: no cuenta como asistencia. Márcalo presente si sí estuvo.">Solo tiempo extra</span>' : sin ? '<span class="badge r">SIN CAPTURA</span>' : n ? '<span class="badge v">Capturó</span>' : pres ? '<span class="badge a">Presente</span>' : he ? '<span class="badge d" title="Solo capturó tiempo extra: no cuenta como asistencia">Solo tiempo extra</span>' : '<span class="badge n">No asistió</span>'}</td></tr>`;
       }).join("");
-      tb.querySelectorAll("input[type=checkbox]").forEach(ch => ch.onchange = () => { const i = ch.closest("tr").dataset.i; ch.checked ? marcados.add(i) : marcados.delete(i); pintar(); sinGuardar(); });
-      const pres = [...gente].filter(i => (regs.get(i) || 0) > 0 || marcados.has(i)).length;
-      c.querySelector("#tCuenta").innerHTML = `Presentes en el turno: <b>${pres}</b> de ${gente.size} · marcados a mano: <b>${[...marcados].filter(i => !regs.get(i)).length}</b>`;
+      tb.querySelectorAll("input[type=checkbox]").forEach(ch => ch.onchange = () => {
+        const i = ch.closest("tr").dataset.i, n = regs.get(i) || 0;
+        if (ch.checked) { quitados.delete(i); if (!n) marcados.add(i); } else { marcados.delete(i); if (n) quitados.add(i); }
+        pintar(); sinGuardar();
+      });
+      const pres = [...gente].filter(esPres).length;
+      c.querySelector("#tCuenta").innerHTML = `Presentes en el turno: <b>${pres}</b> de ${gente.size} · marcados a mano: <b>${[...marcados].filter(i => !regs.get(i)).length}</b>${quitados.size ? ` · quitados del reporte: <b>${quitados.size}</b>` : ""}`;
     };
     const sinGuardar = () => { const e = c.querySelector("#tEstado"); e.textContent = "Cambios sin guardar"; e.classList.add("sucio"); };
     pintar();
     c.querySelector("#tTodos").onclick = () => { for (const i of gente) if (B.dom.turnoEfectivo(i, f) === t && !regs.get(i)) marcados.add(i); pintar(); sinGuardar(); };
-    c.querySelector("#tNinguno").onclick = () => { marcados.clear(); pintar(); sinGuardar(); };
+    c.querySelector("#tNinguno").onclick = () => { marcados.clear(); quitados.clear(); pintar(); sinGuardar(); };
     ui.combo(c.querySelector("#tElab"), { items: sups });
     ui.combo(c.querySelector("#tRev"), { items: sups });
     ui.combo(c.querySelector("#tAgregar"), { items: () => ui.personas(), alElegir: v => { if (v) { gente.add(v); marcados.add(v); pintar(); sinGuardar(); c.querySelector("#tAgregar").value = ""; } } });
@@ -3689,8 +3698,8 @@ V.turno = {
       const ini = id => { const el = c.querySelector(id); return U.ini(el.dataset.valor || el.value.split(" - ")[0]); };
       const elab = ini("#tElab"), rev = ini("#tRev");
       for (const x of [elab, rev]) if (x && !B.dom.persona(x)) { ui.toast("Supervisor no válido: " + U.esc(x), "error"); return false; }
-      const pres = [...marcados].filter(i => !regs.get(i));
-      return ejecutar(() => B.api.op("turnos", "guardar", { fecha: f, turno: t, elab, rev, dif: c.querySelector("#tDif").value.trim(), notas: c.querySelector("#tNotas").value.trim(), pres }), "Datos del turno guardados.");
+      const pres = [...marcados].filter(i => !regs.get(i)), quitar = [...quitados].filter(i => regs.get(i));
+      return ejecutar(() => B.api.op("turnos", "guardar", { fecha: f, turno: t, elab, rev, dif: c.querySelector("#tDif").value.trim(), notas: c.querySelector("#tNotas").value.trim(), pres, quitar }), "Datos del turno guardados.");
     };
     c.querySelector("#tGuardar").onclick = guardar;
     c.querySelector("#tVer").onclick = async () => { if (await guardar()) location.hash = "#/reporte"; };
@@ -7571,7 +7580,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "4.7.3", servidorViejo: false,
+  info: {}, VERSION: "4.7.4", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -7758,7 +7767,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "procedimientos" ? '<span class="contador oculto" id="cntProc"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.7.3")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.7.4")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
