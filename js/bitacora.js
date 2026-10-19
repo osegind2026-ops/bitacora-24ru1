@@ -803,7 +803,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.8.2", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.8.3", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -827,7 +827,7 @@ B.local = {
      En el celular los datos llegan en el paquete de la PC; lo que se hace aqui se anota en pendientes y viaja a la PC. */
   async tarjLeer() {
     const T = (await this.leer("tarjetas")) || {};
-    for (const k of ["marcas", "sem", "hist", "cfg", "semanas", "graf", "correos", "envios", "ubic", "correoTpl"]) if (!T[k] || typeof T[k] !== "object") T[k] = {};
+    for (const k of ["marcas", "sem", "hist", "cfg", "semanas", "graf", "correos", "envios", "ubic", "correoTpl", "noAplica"]) if (!T[k] || typeof T[k] !== "object") T[k] = {};
     T.decl = Array.isArray(T.decl) ? T.decl : [];
     for (const d of T.decl) if (!d.uid) d.uid = "d" + d.id;
     return T;
@@ -856,7 +856,7 @@ B.local = {
     switch (acc) {
       case "ver": {
         const r = { ok: true, editor: ed, esp: ed && !sup, editores: eds, cfg: T.cfg };
-        if (ed) Object.assign(r, { decl: T.decl, marcas: T.marcas, sem: T.sem, hist: T.hist, semanas: T.semanas, graf: T.graf, correos: T.correos, envios: T.envios, ubic: T.ubic, correoTpl: T.correoTpl });
+        if (ed) Object.assign(r, { decl: T.decl, marcas: T.marcas, sem: T.sem, hist: T.hist, semanas: T.semanas, graf: T.graf, correos: T.correos, envios: T.envios, ubic: T.ubic, correoTpl: T.correoTpl, noAplica: T.noAplica });
         else r.decl = T.decl.filter(x => U.ini(x.ini) === s.ini || x.est === "C").map(x => U.ini(x.ini) === s.ini ? x : { ini: x.ini, f: x.f, t: x.t, est: "C" });
         return r;
       }
@@ -940,7 +940,7 @@ B.local = {
         return fin();
       }
       case "org": { soloEd(); const o = (await this.leer("organigrama")) || {}; let n = Array.isArray(o.nodos) ? o.nodos : []; if (b.sinFotos) n = n.map(x => { const y = Object.assign({}, x); delete y.f; return y; }); return { ok: true, nodos: n, fuente: o.fuente || "", mod: o.mod || "" }; }
-      case "orgNodo": case "correosGuardar": case "envio": case "tplGuardar": {
+      case "orgNodo": case "correosGuardar": case "envio": case "noAplica": case "tplGuardar": {
         soloEd();
         if (B.modoMovil) throw new Error("El organigrama y los correos se editan en la bitácora de la PC.");
         if (acc === "orgNodo") {
@@ -953,6 +953,7 @@ B.local = {
         }
         if (acc === "correosGuardar") { for (const [k, v] of Object.entries(b.mapa || {})) { if (String(v || "").trim()) T.correos[k] = String(v).trim(); else delete T.correos[k]; } for (const [k, v] of Object.entries(b.ubic || {})) { if (+v > 0) T.ubic[k.toUpperCase()] = +v; else delete T.ubic[k.toUpperCase()]; } }
         if (acc === "envio") for (const id of b.ids || []) { if (b.on) T.envios[id] = { fh: ahora(), por: s.ini }; else delete T.envios[id]; }
+        if (acc === "noAplica") for (const id of b.ids || []) { if (b.on) T.noAplica[id] = { fh: ahora(), por: s.ini, motivo: String(b.motivo || "") }; else delete T.noAplica[id]; }
         if (acc === "tplGuardar") T.correoTpl = b.tpl || {};
         await this.escribir("tarjetas", T); return { ok: true };
       }
@@ -7247,8 +7248,10 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
         .sort((a, b) => F.orden === "nom" ? String(a.nom).localeCompare(String(b.nom)) || (+a.id - +b.id) : F.orden === "fecha" ? String(b.fobs || "").localeCompare(String(a.fobs || "")) : (+b.id || 0) - (+a.id || 0));
       // originadores con tarjetas de ALTA ENERGIA que fueron DEBILIDAD (en las semanas elegidas)
       const grupos = new Map();
-      for (const x of todas.filter(x => esAE(x) && esDeb(x))) { const k = U.ini(x.rpe) || U.norm(x.nom); if (!grupos.has(k)) grupos.set(k, { rpe: x.rpe, nom: x.nom, area: x.area, depto: x.depto, cards: [] }); grupos.get(k).cards.push(x); }
-      const O = [...grupos.values()].map(o => { o.cards.sort((a, b) => +a.id - +b.id); o.ubic = this.ubicar(o); o.pend = o.cards.filter(c => !envios[c.id]); o.D = this.destinatarios(o); return o; })
+      // las que el supervisor marco "No aplica" no entran al correo (quedan aparte, con su motivo)
+      const NA = D.noAplica || {};
+      for (const x of todas.filter(x => esAE(x) && esDeb(x))) { const k = U.ini(x.rpe) || U.norm(x.nom); if (!grupos.has(k)) grupos.set(k, { rpe: x.rpe, nom: x.nom, area: x.area, depto: x.depto, cards: [], desc: [] }); grupos.get(k)[NA[x.id] ? "desc" : "cards"].push(x); }
+      const O = [...grupos.values()].map(o => { o.cards.sort((a, b) => +a.id - +b.id); o.desc.sort((a, b) => +a.id - +b.id); o.ubic = this.ubicar(o); o.pend = o.cards.filter(c => !envios[c.id]); o.D = this.destinatarios(o); return o; })
         .sort((a, b) => (!a.pend.length - !b.pend.length) || String(a.nom).localeCompare(String(b.nom)));      // primero los pendientes
       const sel = this.sel = this.sel || new Set();
       const semOp = v => sems.map(s => `<option value="${s}" ${s === v ? "selected" : ""}>${TJ.semTxt(s)}</option>`).join("");
@@ -7268,7 +7271,7 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
           <div class="tabla-cont" style="max-height:440px;overflow:auto"><table class="tabla"><thead><tr><th>ID</th><th>Sem.</th><th>Fecha obs.</th><th>Originador</th><th>Su departamento</th><th>Archivo</th><th>Estándar</th><th>Resultado</th><th>¿Qué pasó?</th><th>Correo</th></tr></thead><tbody>
             ${L.slice(0, this.lim).map(x => `<tr data-v="${esc(x.id)}" data-s="${x.sem}" style="cursor:pointer"><td><b>${esc(x.id)}</b></td><td>${+x.sem.slice(5)}</td><td class="tnum">${esc(fechaCorta(x.fobs))}</td><td>${esc(x.nom)}<div class="peque muted">${esc(x.rpe)}</div></td><td class="peque">${esc(x.depto)}${x._err ? `<div><span class="badge d" title="${esc(x._err)}">⚠ Revisar captura</span></div>` : ""}</td><td>${esAE(x) ? '<span class="badge r">AE</span>' : ""}${String(x.fu || "").split(",").includes("SI") ? ' <span class="badge v">SI</span>' : ""}</td>
               <td class="peque">${esc(x.std)}</td><td>${esDeb(x) ? '<span class="badge r">Debilidad</span>' : '<span class="badge v">Cumple</span>'}</td><td class="peque" style="min-width:220px">${esc(String(x.qp || x.doc || "").slice(0, 160))}</td>
-              <td class="peque">${envios[x.id] ? "✓ " + esc(String(envios[x.id].fh || "").slice(0, 10)) : esAE(x) && esDeb(x) ? '<span style="color:#b45309">pendiente</span>' : "—"}</td></tr>`).join("") || `<tr><td colspan="10" class="muted">Sin tarjetas con ese filtro.</td></tr>`}</tbody></table></div>
+              <td class="peque">${NA[x.id] && esAE(x) && esDeb(x) ? `<span class="muted" title="${esc((NA[x.id].motivo || "Sin motivo") + " · " + (NA[x.id].por || ""))}">No aplica</span>` : envios[x.id] ? "✓ " + esc(String(envios[x.id].fh || "").slice(0, 10)) : esAE(x) && esDeb(x) ? '<span style="color:#b45309">pendiente</span>' : "—"}</td></tr>`).join("") || `<tr><td colspan="10" class="muted">Sin tarjetas con ese filtro.</td></tr>`}</tbody></table></div>
           ${L.length > this.lim ? `<button class="btn chico sec" id="crMas" style="margin-top:8px">Ver ${Math.min(200, L.length - this.lim)} más</button>` : ""}</div>
         <div class="tarjeta"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap"><div><h2 style="margin:0;font-size:17px">Correos de reconocimiento (alta energía · debilidad)</h2>
             <p class="muted peque" style="margin:4px 0 0">Un correo por originador con todas sus tarjetas de alta energía que fueron debilidad en las semanas elegidas. Se genera un <b>borrador de Outlook</b> con el ${adj ? "PDF <b>" + esc(adj.nombre) + "</b> adjunto" : "adjunto"}: ábrelo, revísalo y presiona <b>Enviar</b>.</p></div>
@@ -7278,14 +7281,14 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
               <button class="btn verde" id="crGen" ${B.modoLocal ? "disabled" : ""}>${B.ico("descargar")} Generar borradores de los marcados</button><span class="muted peque" id="crN"></span></div>
             <div class="lista">${O.map((o, i) => `<div class="item" style="flex-wrap:wrap;align-items:flex-start;${o.pend.length ? "" : "opacity:.65"}" data-o="${i}">
               <input type="checkbox" data-sel="${i}" ${sel.has(o.rpe) ? "checked" : ""} style="width:18px;height:18px;margin-top:3px">
-              <div class="cuerpo" style="min-width:260px;flex:1"><div class="tit">${esc(o.nom)} <span class="muted peque">${esc(o.rpe)}</span> · ${o.cards.length} tarjeta(s): ${o.cards.map(x => "#" + esc(x.id)).join(", ")}
-                ${o.pend.length ? `<span class="badge d">pendiente</span>` : `<span class="badge v">correo generado</span>`}</div>
+              <div class="cuerpo" style="min-width:260px;flex:1"><div class="tit">${esc(o.nom)} <span class="muted peque">${esc(o.rpe)}</span> · ${o.cards.length ? o.cards.length + " tarjeta(s): " + o.cards.map(x => "#" + esc(x.id)).join(", ") : "sin tarjetas para correo"}${o.desc.length ? ` <span class="muted peque" title="${esc(o.desc.map(x => "#" + x.id + ": " + ((NA[x.id] || {}).motivo || "sin motivo")).join(" · "))}">· no aplica: ${o.desc.map(x => "#" + esc(x.id)).join(", ")}</span>` : ""}
+                ${!o.cards.length ? `<span class="badge n">no aplica</span>` : o.pend.length ? `<span class="badge d">pendiente</span>` : `<span class="badge v">correo generado</span>`}</div>
                 <div class="meta"><span>${o.ubic.nodo ? (o.ubic.seguro ? "" : "⚠ ") + esc(ruta(o) || o.ubic.nodo.n) : o.ubic.contratista ? `<b>Personal de compañía contratista</b> (${esc(o.depto || "")}): no está en el organigrama` : `<b style="color:#b45309">⚠ No encontré su área en el organigrama</b> (${esc(o.area || "")} · ${esc(o.depto || "")})`}</span><a href="#" data-ub="${i}">${o.ubic.nodo ? "Cambiar área" : "Elegir área"}</a></div>
                 ${o.ubic.error ? `<div class="meta" style="color:#b45309"><span>⚠ Error de captura: ${esc(o.ubic.error)}</span></div>` : ""}
                 <div class="meta" style="gap:4px;flex-wrap:wrap;margin-top:6px"><b>Para:</b> ${chip(o.D.para)}</div>
                 <div class="meta" style="gap:4px;flex-wrap:wrap;margin-top:4px"><b>CC:</b> ${o.D.cc.map(chip).join(" ")}</div></div>
-              <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn chico" data-gen="${i}" ${B.modoLocal ? "disabled" : ""}>${B.ico("descargar")} Borrador</button><button class="btn chico sec" data-web="${i}" title="Para enviarlo desde Outlook en el navegador (Office 365)">Copiar para Outlook web</button><button class="btn chico sec" data-ver="${i}">Ver correo</button>
-                ${o.pend.length ? `<button class="btn chico fantasma" data-env="${i}" title="Marcar como enviado sin generar el borrador">Marcar enviado</button>` : `<button class="btn chico fantasma" data-noenv="${i}">Quitar marca</button>`}</div></div>`).join("")}</div>`
+              <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn chico fantasma" data-desc="${i}" title="Tarjetas que no requieren correo ni los anexos del PAG-28">No aplica…</button><button class="btn chico" data-gen="${i}" ${B.modoLocal || !o.cards.length ? "disabled" : ""}>${B.ico("descargar")} Borrador</button><button class="btn chico sec" data-web="${i}" ${o.cards.length ? "" : "disabled"} title="Para enviarlo desde Outlook en el navegador (Office 365)">Copiar para Outlook web</button><button class="btn chico sec" data-ver="${i}">Ver correo</button>
+                ${!o.cards.length ? "" : o.pend.length ? `<button class="btn chico fantasma" data-env="${i}" title="Marcar como enviado sin generar el borrador">Marcar enviado</button>` : `<button class="btn chico fantasma" data-noenv="${i}">Quitar marca</button>`}</div></div>`).join("")}</div>`
             : `<p class="muted" style="margin:10px 0 0">No hay tarjetas de alta energía con debilidad en las semanas elegidas.</p>`}</div>`;
       const repinta = () => P.pinta();
       c.querySelectorAll("[data-f]").forEach(s => s.onchange = () => { F[s.dataset.f] = s.value; this.lim = 200; repinta(); });
@@ -7310,12 +7313,13 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
           sel.clear(); repinta();
         } catch (e) { B.ui.error(e); }
       };
-      const bg = c.querySelector("#crGen"); if (bg) bg.onclick = () => { const l = O.filter(o => sel.has(o.rpe)); if (!l.length) { B.ui.toast("Marca al menos un originador.", "error"); return; } generar(l); };
+      const bg = c.querySelector("#crGen"); if (bg) bg.onclick = () => { const l = O.filter(o => sel.has(o.rpe) && o.cards.length); if (!l.length) { B.ui.toast("Marca al menos un originador.", "error"); return; } generar(l); };
       c.querySelectorAll("[data-gen]").forEach(b => b.onclick = () => generar([O[+b.dataset.gen]]));
       c.querySelectorAll("[data-env]").forEach(b => b.onclick = async () => { try { await marcar(O[+b.dataset.env].cards.map(x => String(x.id)), true); repinta(); } catch (e) { B.ui.error(e); } });
       c.querySelectorAll("[data-noenv]").forEach(b => b.onclick = async () => { try { await marcar(O[+b.dataset.noenv].cards.map(x => String(x.id)), false); repinta(); } catch (e) { B.ui.error(e); } });
       c.querySelectorAll("[data-ver]").forEach(b => b.onclick = () => this.ver(O[+b.dataset.ver]));
       c.querySelectorAll("[data-web]").forEach(b => b.onclick = () => this.web(O[+b.dataset.web], marcar, repinta));
+      c.querySelectorAll("[data-desc]").forEach(b => b.onclick = () => this.noAplica(O[+b.dataset.desc], repinta));
       c.querySelectorAll("[data-ub]").forEach(a => a.onclick = e => { e.preventDefault(); this.elegirArea(O[+a.dataset.ub], P); });
       c.querySelector("#crTpl").onclick = () => this.editarTpl(P);
       c.querySelector("#crDir").onclick = () => this.directorio(O, P);
@@ -7358,6 +7362,29 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
         }),
         botones: [{ t: "Cerrar", c: "sec", v: null }, { t: "Ya lo envié", c: "verde", antes: async () => { try { await marcar(o.cards.map(x => String(x.id)), true); B.ui.toast("Tarjetas marcadas con correo enviado.", "ok"); } catch (e) { B.ui.error(e); return false; } }, v: true }] });
       repinta();
+    },
+    // descartar tarjetas: debilidades de alta energia que no requieren el correo ni la informacion de los anexos
+    async noAplica(o, repinta) {
+      const NA = TJ.datos.noAplica || {}, todas = o.cards.concat(o.desc).sort((a, b) => +a.id - +b.id);
+      const motivo0 = (todas.map(x => NA[x.id]).find(Boolean) || {}).motivo || "";
+      const r = await B.ui.modal({ titulo: "No aplica · " + esc(o.nom), icono: "editar", ancho: true,
+        html: `<p style="margin:0 0 10px;line-height:1.5">Marca las tarjetas que <b>no requieren</b> correo ni el reporte de desviación con los anexos del PAG-28. Dejan de entrar en el correo de esta persona; si todas se descartan, no se le envía correo.</p>
+          <div class="lista">${todas.map(x => `<label class="item" style="align-items:flex-start;cursor:pointer"><input type="checkbox" data-na="${esc(x.id)}" ${NA[x.id] ? "checked" : ""} style="width:18px;height:18px;margin-top:2px">
+            <div class="cuerpo"><div class="tit">#${esc(x.id)} · ${esc(fechaCorta(x.fobs))} · ${esc(x.std || "")}</div><div class="meta"><span>${esc(String(x.qp || x.doc || "").slice(0, 220))}</span></div>
+            ${NA[x.id] ? `<div class="meta"><span class="muted">Descartada ${esc(String(NA[x.id].fh || "").slice(0, 10))} por ${esc(NA[x.id].por || "")}${NA[x.id].motivo ? " · " + esc(NA[x.id].motivo) : ""}</span></div>` : ""}</div></label>`).join("")}</div>
+          <div class="campo" style="margin-top:10px"><label>Motivo (se guarda con las tarjetas descartadas)</label><input class="inp" id="naMot" value="${esc(motivo0)}" placeholder="Ej. no es un acto inseguro / ya se atendió / capturada por error"></div>`,
+        botones: [{ t: "Cancelar", c: "sec", v: null }, { t: "Guardar", c: "verde", v: v => ({ si: [...v.querySelectorAll("[data-na]:checked")].map(i => i.dataset.na), no: [...v.querySelectorAll("[data-na]:not(:checked)")].map(i => i.dataset.na), motivo: v.querySelector("#naMot").value.trim() }) }] });
+      if (!r) return;
+      const nuevos = r.si.filter(id => !NA[id]), quitar = r.no.filter(id => NA[id]), cambiaMotivo = r.si.filter(id => NA[id] && (NA[id].motivo || "") !== r.motivo);
+      try {
+        if (nuevos.length || cambiaMotivo.length) await TJ.llamar("noAplica", { ids: nuevos.concat(cambiaMotivo), on: true, motivo: r.motivo });
+        if (quitar.length) await TJ.llamar("noAplica", { ids: quitar, on: false });
+        TJ.datos.noAplica = TJ.datos.noAplica || {};
+        for (const id of nuevos.concat(cambiaMotivo)) TJ.datos.noAplica[id] = { fh: U.ahoraISO(), por: B.usuario.ini, motivo: r.motivo };
+        for (const id of quitar) delete TJ.datos.noAplica[id];
+        if (nuevos.length || quitar.length || cambiaMotivo.length) B.ui.toast(`${nuevos.length ? nuevos.length + " tarjeta(s) marcadas «No aplica». " : ""}${quitar.length ? quitar.length + " vuelven a entrar al correo." : ""}${!nuevos.length && !quitar.length ? "Motivo actualizado." : ""}`, "ok");
+        repinta();
+      } catch (e) { B.ui.error(e); }
     },
     ver(o) {
       const D = o.D, nom = p => esc(p.nom) + (p.correo ? " &lt;" + esc(p.correo) + "&gt;" : " <i style='color:#b45309'>(sin correo)</i>");
@@ -8044,7 +8071,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "4.8.2", servidorViejo: false,
+  info: {}, VERSION: "4.8.3", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -8231,7 +8258,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "procedimientos" ? '<span class="contador oculto" id="cntProc"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.8.2")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.8.3")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
