@@ -803,7 +803,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.9.2", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.9.3", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -7791,7 +7791,7 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
           ${L.length > this.lim ? `<button class="btn chico sec" id="crMas" style="margin-top:8px">Ver ${Math.min(200, L.length - this.lim)} más</button>` : ""}</div>
         <div class="tarjeta"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap"><div><h2 style="margin:0;font-size:17px">Correos de reconocimiento (alta energía · debilidad)</h2>
             <p class="muted peque" style="margin:4px 0 0">Un correo por originador con todas sus tarjetas de alta energía que fueron debilidad en las semanas elegidas. Se genera un <b>borrador de Outlook</b> con el ${adj ? "PDF <b>" + esc(adj.nombre) + "</b> adjunto" : "adjunto"}: ábrelo, revísalo y presiona <b>Enviar</b>.</p></div>
-            <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-start"><button class="btn chico sec" id="crTpl">${B.ico("editar")} Texto del correo</button><button class="btn chico sec" id="crDir">${B.ico("usuarios")} Correos electrónicos</button>${B.dom.esSup() && !B.modoLocal ? `<label class="btn chico sec" style="cursor:pointer" title="PDF que se adjunta a todos los correos">${B.ico("subir")} Cambiar PDF adjunto<input type="file" id="crAdj" accept="application/pdf" hidden></label>` : ""}</div></div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-start"><button class="btn chico sec" id="crTpl">${B.ico("editar")} Texto del correo</button><button class="btn chico sec" id="crDir">${B.ico("usuarios")} Correos electrónicos</button><button class="btn chico sec" id="crRep" title="Fecha, a quién y a qué área o compañía se enviaron las solicitudes de los anexos del PAG-28">${B.ico("pdf")} Reporte de correos enviados</button>${B.dom.esSup() && !B.modoLocal ? `<label class="btn chico sec" style="cursor:pointer" title="PDF que se adjunta a todos los correos">${B.ico("subir")} Cambiar PDF adjunto<input type="file" id="crAdj" accept="application/pdf" hidden></label>` : ""}</div></div>
           ${B.modoLocal ? `<div class="aviso a" style="margin-top:10px">${B.ico("info")}<div>Los borradores con el PDF adjunto se generan en la bitácora de la PC (con el servidor).</div></div>` : ""}
           ${O.length ? `<div class="fila" style="align-items:center;margin:10px 0"><label class="chip-ali" style="margin:0"><input type="checkbox" id="crTodos"><span>Marcar los pendientes (${O.filter(o => o.pend.length).length})</span></label>
               <button class="btn verde" id="crGen" ${B.modoLocal ? "disabled" : ""}>${B.ico("descargar")} Generar borradores de los marcados</button><span class="muted peque" id="crN"></span></div>
@@ -7840,6 +7840,7 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
       c.querySelectorAll("[data-ub]").forEach(a => a.onclick = e => { e.preventDefault(); this.elegirArea(O[+a.dataset.ub], P); });
       c.querySelector("#crTpl").onclick = () => this.editarTpl(P);
       c.querySelector("#crDir").onclick = () => this.directorio(O, P);
+      c.querySelector("#crRep").onclick = () => this.reporteEnvios();
       const ba = c.querySelector("#crAdj");
       if (ba) ba.onchange = async e => { const f = e.target.files[0]; if (!f) return; try { const r = await (await fetch("/api/adjunto?nombre=" + encodeURIComponent(f.name), { method: "POST", headers: { "X-Token": B.token }, body: f })).json(); if (!r.ok) throw new Error(r.error); this._adj = null; B.ui.toast("PDF adjunto actualizado: <b>" + esc(r.nombre) + "</b>.", "ok"); repinta(); } catch (x) { B.ui.error(x); } };
     },
@@ -7945,6 +7946,111 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
       const tpl = r === "orig" ? {} : r;
       if (tpl.cuerpo && !tpl.cuerpo.includes("{tabla}") && !(await B.ui.confirmar("El mensaje no tiene <b>{tabla}</b>: el correo saldrá sin la tabla de tarjetas. ¿Guardar así?", "Sin tabla", "Guardar"))) return;
       try { await TJ.llamar("tplGuardar", { tpl }); TJ.datos.correoTpl = tpl; B.ui.toast("Texto del correo guardado.", "ok"); P.pinta(); } catch (e) { B.ui.error(e); }
+    },
+    /* ---------- reporte de los correos enviados (solicitud del Reporte de Desviacion con los anexos del PAG-28):
+       fecha de envio, a quien, su area o compania y sus tarjetas. Sale en PDF, CSV (Excel) o mensaje de WhatsApp,
+       para tenerlo a la mano al armar una presentacion. Un renglon = un originador en un dia de envio. */
+    async enviosDatos() {
+      const D = TJ.datos, env = D.envios || {}, cartas = new Map();
+      try { await B.org.cargar(); } catch (e) { }
+      for (const s of Object.keys(D.semanas || {}).sort()) { const cs = await TJ.semana(s).catch(() => []); this.aprenderAlias(cs); for (const x of cs) cartas.set(String(x.id), x); }
+      const filas = new Map();
+      for (const [id, e] of Object.entries(env)) {
+        const x = cartas.get(String(id)), dia = String((e && e.fh) || "").slice(0, 10); if (!x || !dia) continue;
+        const k = dia + "|" + (U.ini(x.rpe) || U.norm(x.nom));
+        if (!filas.has(k)) {
+          const u = this.ubicar(x), sub = u.nodo ? B.org.nivelSub(u.nodo.id) : null;
+          filas.set(k, { dia, nom: x.nom, rpe: x.rpe || "", correo: this.correoDe(x), por: (e && e.por) || "", cards: [],
+            area: u.contratista ? (x.depto || "Contratista") : u.nodo ? u.nodo.n : [x.area, x.depto].filter(Boolean).join(" · "),
+            sub: u.contratista ? "COMPAÑÍA CONTRATISTA" : sub ? sub.n : (x.area || ""), contratista: !!u.contratista });
+        }
+        filas.get(k).cards.push(x);
+      }
+      return [...filas.values()].map(f => Object.assign(f, { cards: f.cards.sort((a, b) => +a.id - +b.id) })).sort((a, b) => a.dia.localeCompare(b.dia) || String(a.nom).localeCompare(String(b.nom)));
+    },
+    // libro de Excel real (.xlsx), armado en el navegador con el mismo empaquetador de las presentaciones
+    async libroXlsx(hojas) {
+      const X = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n', NS = 'xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"', REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships", PK = "http://schemas.openxmlformats.org/package/2006";
+      const col = i => { let s = ""; i++; while (i > 0) { const m = (i - 1) % 26; s = String.fromCharCode(65 + m) + s; i = Math.floor((i - 1) / 26); } return s; };
+      const xe = v => String(v ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "");
+      const celda = (r, i, v, s) => typeof v === "number" ? `<c r="${col(i)}${r}" s="${s}"><v>${v}</v></c>` : `<c r="${col(i)}${r}" s="${s}" t="inlineStr"><is><t xml:space="preserve">${xe(v)}</t></is></c>`;
+      const hoja = h => { const nc = h.filas[0].length, ult = col(nc - 1) + h.filas.length;
+        return X + `<worksheet ${NS}><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><cols>${h.anchos.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join("")}</cols>` +
+          `<sheetData>${h.filas.map((f, r) => `<row r="${r + 1}">${f.map((v, i) => celda(r + 1, i, v, r ? 2 : 1)).join("")}</row>`).join("")}</sheetData>${h.filas.length > 1 ? `<autoFilter ref="A1:${ult}"/>` : ""}</worksheet>`; };
+      const nombres = hojas.map((h, i) => xe(String(h.n).replace(/[\\/?*[\]:]/g, " ").slice(0, 31)) || "Hoja" + (i + 1));
+      return await B.e1.zip([
+        { n: "[Content_Types].xml", d: X + `<Types xmlns="${PK}/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("")}<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>` },
+        { n: "_rels/.rels", d: X + `<Relationships xmlns="${PK}/relationships"><Relationship Id="rId1" Type="${REL}/officeDocument" Target="xl/workbook.xml"/></Relationships>` },
+        { n: "xl/workbook.xml", d: X + `<workbook ${NS} xmlns:r="${REL}"><sheets>${nombres.map((n, i) => `<sheet name="${n}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join("")}</sheets>${hojas.map((h, i) => h.filas.length > 1 ? `` : ``).join("")}</workbook>` },
+        { n: "xl/_rels/workbook.xml.rels", d: X + `<Relationships xmlns="${PK}/relationships">${hojas.map((h, i) => `<Relationship Id="rId${i + 1}" Type="${REL}/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join("")}<Relationship Id="rId${hojas.length + 1}" Type="${REL}/styles" Target="styles.xml"/></Relationships>` },
+        { n: "xl/styles.xml", d: X + `<styleSheet ${NS}><fonts count="2"><font><sz val="10"/><name val="Arial"/></font><font><b/><sz val="10"/><color rgb="FFFFFFFF"/><name val="Arial"/></font></fonts>` +
+          `<fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF155B4E"/><bgColor indexed="64"/></patternFill></fill></fills>` +
+          `<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left style="thin"><color rgb="FFBFBFBF"/></left><right style="thin"><color rgb="FFBFBFBF"/></right><top style="thin"><color rgb="FFBFBFBF"/></top><bottom style="thin"><color rgb="FFBFBFBF"/></bottom><diagonal/></border></borders>` +
+          `<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="3"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>` +
+          `<xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>` +
+          `<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>` }
+      ].concat(hojas.map((h, i) => ({ n: `xl/worksheets/sheet${i + 1}.xml`, d: hoja(h) }))));
+    },
+    async reporteEnvios() {
+      const todas = await this.enviosDatos();
+      if (!todas.length) { B.ui.toast("Todavía no hay correos marcados como enviados.", "aviso", 5000); return; }
+      const dias = [...new Set(todas.map(f => f.dia))].sort(), F = { d1: dias[0], d2: dias[dias.length - 1] };
+      const fd = s => U.corta(s), lista = () => todas.filter(f => f.dia >= F.d1 && f.dia <= F.d2);
+      const porArea = L => { const m = new Map(); for (const f of L) { const k = f.contratista ? "Contratista · " + f.area : (f.sub || "Sin área"); m.set(k, (m.get(k) || 0) + 1); } return [...m].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])); };
+      const nT = L => L.reduce((a, f) => a + f.cards.length, 0);
+      const tabla = L => `<p class="muted peque" style="margin:0 0 8px"><b>${L.length}</b> correo(s) a <b>${new Set(L.map(f => U.ini(f.rpe) || U.norm(f.nom))).size}</b> persona(s) · <b>${nT(L)}</b> tarjeta(s) de alta energía con debilidad.</p>
+        <div class="tabla-cont" style="max-height:44vh;overflow:auto"><table class="tabla"><thead><tr><th>Envío</th><th>Para</th><th>Área o compañía</th><th>Subgerencia</th><th>Tarjetas</th></tr></thead><tbody>
+        ${L.map(f => `<tr><td class="tnum">${fd(f.dia)}</td><td><b>${esc(f.nom)}</b><div class="peque muted">${esc(f.rpe)}${f.correo ? " · " + esc(f.correo) : ""}</div></td><td class="peque">${f.contratista ? "<b>Contratista</b> · " : ""}${esc(f.area)}</td><td class="peque">${esc(f.sub)}</td><td class="peque">${f.cards.map(x => "#" + esc(x.id)).join(", ")}</td></tr>`).join("") || `<tr><td colspan="5" class="muted">Sin correos en esas fechas.</td></tr>`}</tbody></table></div>
+        ${L.length ? `<p class="peque" style="margin:10px 0 0"><b>Por área:</b> ${porArea(L).map(([k, n]) => esc(k) + " (" + n + ")").join(" · ")}</p>` : ""}`;
+      const periodo = () => F.d1 === F.d2 ? fd(F.d1) : fd(F.d1) + " al " + fd(F.d2);
+      const doc = L => {
+        const c = B.estado.config, k = v => U.esc(v ?? "");
+        const h = `<h2 class="doc">SOLICITUDES DEL REPORTE DE DESVIACIÓN (ANEXOS PAG-28)</h2><div class="doc-sub">TARJETAS LÍDERES EN CAMPO · ALTA ENERGÍA CON DEBILIDAD &nbsp;|&nbsp; ENVIADOS DEL ${k(periodo())}</div>
+          <div class="c" style="font-size:8pt;margin-bottom:6px">Correos: <b>${L.length}</b> &nbsp;|&nbsp; Personas: <b>${new Set(L.map(f => U.ini(f.rpe) || U.norm(f.nom))).size}</b> &nbsp;|&nbsp; Tarjetas: <b>${nT(L)}</b> &nbsp;|&nbsp; Emitido: ${U.fh(U.ahoraISO())}</div>
+          <table class="dat"><thead><tr><th style="width:3.5%">No.</th><th style="width:8%">FECHA DE ENVÍO</th><th style="width:19%">ENVIADO A</th><th style="width:6%">RPE</th><th style="width:20%">ÁREA O COMPAÑÍA</th><th style="width:15%">SUBGERENCIA</th><th style="width:9%">TARJETAS</th><th>ESTÁNDAR</th><th style="width:5%">ENVIÓ</th></tr></thead><tbody>` +
+          L.map((f, i) => `<tr><td>${i + 1}</td><td>${fd(f.dia)}</td><td class="izq" style="text-align:left"><b>${k(f.nom)}</b>${f.correo ? `<div class="gris" style="font-size:6.5pt">${k(f.correo)}</div>` : ""}</td><td>${k(f.rpe)}</td><td class="izq" style="text-align:left">${f.contratista ? "<b>CONTRATISTA</b> · " : ""}${k(f.area)}</td><td class="izq" style="text-align:left">${k(f.sub)}</td><td>${f.cards.map(x => k(x.id)).join(", ")}</td><td class="izq" style="text-align:left">${k([...new Set(f.cards.map(x => x.std).filter(Boolean))].join(" · "))}</td><td>${k(f.por)}</td></tr>`).join("") + `</tbody></table>
+          <h3 style="font-size:9pt;margin:12px 0 4px">RESUMEN POR ÁREA</h3><table class="dat" style="width:55%"><thead><tr><th style="text-align:left">SUBGERENCIA O COMPAÑÍA</th><th style="width:22%">CORREOS</th></tr></thead><tbody>${porArea(L).map(([a, n]) => `<tr><td class="izq" style="text-align:left">${k(a)}</td><td class="b">${n}</td></tr>`).join("")}</tbody></table>`;
+        return { html: B.rep.documento("Solicitudes anexos PAG-28", h, true), horizontal: true, nombre: `SOLICITUDES ANEXOS PAG-28 ${c.proyecto || ""} ${periodo().replace(/\//g, ".")}`.replace(/\s+/g, " "), carpeta: "LIDERES EN CAMPO", tipo: "concentrado" };
+      };
+      const whatsapp = L => {
+        const r = [`📧 *Solicitudes del Reporte de Desviación (anexos PAG-28)*`, `Tarjetas Líderes en Campo · alta energía con debilidad`, `Periodo: ${periodo()}`, "",
+          `Se enviaron *${L.length} correo(s)* a ${new Set(L.map(f => U.ini(f.rpe) || U.norm(f.nom))).size} persona(s), con ${nT(L)} tarjeta(s).`];
+        for (const d of [...new Set(L.map(f => f.dia))]) {
+          r.push("", `📅 *${fd(d)}*`);
+          for (const f of L.filter(x => x.dia === d)) r.push(`• ${f.nom} — ${f.contratista ? "Contratista " + f.area : f.area}${f.sub && !f.contratista && f.sub !== f.area ? " (" + f.sub + ")" : ""} · ${f.cards.map(x => "#" + x.id).join(", ")}`);
+        }
+        r.push("", "*Por área:*"); for (const [a, n] of porArea(L)) r.push(`• ${a}: ${n}`);
+        return r.join("\n");
+      };
+      const csv = L => U.csv("Solicitudes anexos PAG-28 " + periodo().replace(/\//g, "."), ["Fecha de envío", "Enviado a", "RPE", "Correo", "Área o compañía", "Contratista", "Subgerencia", "Tarjetas", "Estándar", "Fecha de observación", "Envió"],
+        L.map(f => [fd(f.dia), f.nom, f.rpe, f.correo, f.area, f.contratista ? "Sí" : "No", f.sub, f.cards.map(x => x.id).join(" "), [...new Set(f.cards.map(x => x.std).filter(Boolean))].join(" · "), [...new Set(f.cards.map(x => fechaCorta(x.fobs)))].join(" "), f.por]));
+      const excel = async L => {
+        const est = f => [...new Set(f.cards.map(x => x.std).filter(Boolean))].join(" · ");
+        const libro = await this.libroXlsx([
+          { n: "Correos enviados", anchos: [6, 12, 34, 9, 30, 38, 12, 30, 14, 28, 9],
+            filas: [["No.", "Fecha de envío", "Enviado a", "RPE", "Correo", "Área o compañía", "Contratista", "Subgerencia", "Tarjetas", "Estándar", "Envió"]]
+              .concat(L.map((f, i) => [i + 1, fd(f.dia), f.nom, f.rpe, f.correo, f.area, f.contratista ? "Sí" : "No", f.sub, f.cards.map(x => x.id).join(", "), est(f), f.por])) },
+          { n: "Tarjetas", anchos: [9, 12, 12, 34, 9, 30, 30, 28, 70],
+            filas: [["ID", "Fecha de envío", "Fecha de observación", "Originador", "RPE", "Área o compañía", "Subgerencia", "Estándar", "¿Qué pasó?"]]
+              .concat(L.flatMap(f => f.cards.map(x => [+x.id || String(x.id), fd(f.dia), fechaCorta(x.fobs), f.nom, f.rpe, (f.contratista ? "Contratista · " : "") + f.area, f.sub, x.std || "", String(x.qp || x.doc || "").replace(/\s+/g, " ").trim()]))) },
+          { n: "Resumen por área", anchos: [48, 12, 12],
+            filas: [["Subgerencia o compañía", "Correos", "Tarjetas"]].concat(porArea(L).map(([a, n]) => [a, n, L.filter(f => (f.contratista ? "Contratista · " + f.area : (f.sub || "Sin área")) === a).reduce((s, f) => s + f.cards.length, 0)])) }
+        ]);
+        U.descargar("Solicitudes anexos PAG-28 " + periodo().replace(/\//g, ".") + ".xlsx", libro, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        B.ui.toast("Excel descargado: búscalo en <b>Descargas</b>.", "ok", 6000);
+      };
+      const op = v => dias.map(d => `<option value="${d}" ${d === v ? "selected" : ""}>${fd(d)}</option>`).join("");
+      await B.ui.modal({ titulo: "Correos enviados · anexos PAG-28", icono: "pdf", ancho: true,
+        html: `<div class="fila" style="margin-bottom:6px"><div class="campo" style="flex:1 1 160px"><label>Enviados desde</label><select class="inp" id="reD1">${op(F.d1)}</select></div><div class="campo" style="flex:1 1 160px"><label>Hasta</label><select class="inp" id="reD2">${op(F.d2)}</select></div></div><div id="reT">${tabla(lista())}</div>`,
+        alAbrir: v => { const cambia = () => { F.d1 = v.querySelector("#reD1").value; F.d2 = v.querySelector("#reD2").value; if (F.d1 > F.d2) [F.d1, F.d2] = [F.d2, F.d1]; v.querySelector("#reT").innerHTML = tabla(lista()); }; v.querySelector("#reD1").onchange = cambia; v.querySelector("#reD2").onchange = cambia; },
+        botones: [{ t: "Cerrar", c: "sec", v: null },
+          { t: "CSV", c: "sec", antes: () => { if (lista().length) csv(lista()); return false; } },
+          { t: "Excel", c: "sec", antes: async () => { if (lista().length) try { await excel(lista()); } catch (e) { B.ui.error(e); } return false; } },
+          { t: "WhatsApp", c: "verde", antes: async () => { const L = lista(); if (!L.length) return false; const txt = whatsapp(L);
+              if (navigator.share && B.modoMovil) { try { await navigator.share({ text: txt }); return false; } catch (e) { if (e.name === "AbortError") return false; } }
+              try { await navigator.clipboard.writeText(txt); } catch (e) { const a = document.createElement("textarea"); a.value = txt; document.body.appendChild(a); a.select(); document.execCommand("copy"); a.remove(); }
+              B.ui.toast("Mensaje copiado. Pégalo en WhatsApp.", "ok"); return false; } },
+          { t: B.modoLocal ? "Guardar PDF" : "Generar PDF", c: "", antes: ev => { const L = lista(); if (L.length) B.rep.pdf(doc(L)); return false; } }] });
     },
     // directorio: una fila por persona (originador, jefe o los dos), con su correo y su extension
     async directorio(O, P) {
@@ -8629,7 +8735,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "4.9.2", servidorViejo: false,
+  info: {}, VERSION: "4.9.3", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -8816,7 +8922,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "procedimientos" ? '<span class="contador oculto" id="cntProc"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.9.2")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.9.3")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
