@@ -803,7 +803,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.9", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.9.1", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -7024,7 +7024,7 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
   // lo capturado todo en mayusculas se pasa a oraciones normales
   const oracion = t => { t = String(t || "").trim(); const may = (t.match(/[A-ZÁÉÍÓÚÑ]/g) || []).length, min = (t.match(/[a-záéíóúñ]/g) || []).length;
     if (may > min * 2) t = t.toLowerCase().replace(/(^|[.!?]\s+)([a-záéíóúñ])/g, (m, a, b) => a + b.toUpperCase())
-      .replace(/[\wáéíóúñ-]*\d[\wáéíóúñ-]*/gi, w => w.toUpperCase()).replace(/\b(epp|cfe|pnd|loto|ii?)\b/gi, w => w.toUpperCase()); return t ? t[0].toUpperCase() + t.slice(1) : ""; };     // claves de equipo y siglas en mayusculas
+      .replace(/[\wáéíóúñ-]*\d[\wáéíóúñ-]*/gi, w => w.toUpperCase()).replace(/\b(epp|cfe|pnd|loto|ii?|tgb|rb|nswb|cwph|hvac|rme|pet|swgr|pr|ot|rpt|smt|eme|srvs?|ccp|mcc|dld|poe|hds|lp|cw|nsw|ssn|ae|si-\w+)\b/gi, w => w.toUpperCase()); return t ? t[0].toUpperCase() + t.slice(1) : ""; };     // claves de equipo y siglas en mayusculas
   const recorta = (t, n) => { t = String(t || "").trim(); return t.length <= n ? t : t.slice(0, n - 1).replace(/[\s,;:]+\S*$/, "") + "…"; };
   const punto = t => t && !/[.!?…]$/.test(t) ? t + "." : t;
   const catDe = c => { const t = U.norm(texto(c)); return CATS.find(k => k.re.test(t)) || porK(STD[U.norm(c.std)]) || null; };
@@ -7060,8 +7060,126 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
     .ti-g ul{margin:4px 0 0;padding-left:24px} .ti-g li{font-size:20.5px;font-weight:500;line-height:1.22;margin-top:3px;color:#1F3B73}
     .ti-nada{background:#E5F4EA;border:2px solid #9FD2AE;border-radius:10px;padding:18px;font-size:24px;font-weight:700;color:#1E7B3A;margin-top:8px}`;
 
+  /* ------------------------------------------------------------ frases para la imagen (sin internet: reglas de como se
+     redactan las tarjetas). Frase corta: "Personal sin tapones auditivos durante maniobras de izaje." Relato para el TOP:
+     "Durante ... se observó que un técnico ...". Se trabaja con el texto (t) y su copia sin acentos en mayusculas (N),
+     que miden lo mismo, para buscar en N y recortar de t. */
+  const sinAc = s => String(s).normalize("NFD").replace(/[̀-ͯ]/g, "").normalize("NFC").toUpperCase();
+  const ACENTOS = Object.fromEntries(("técnico técnicos área áreas arnés línea líneas instalación posición condición operación aplicación revisión inspección protección " +
+    "eléctrico eléctrica eléctricos mecánico móvil vehículo vehículos quería tenía tenían había habían tránsito caída bahía evalúa incómoda práctica gestión " +
+    "maniobrista ubicación señalización señalamiento colocándolo también después según máquina máquinas válvula válvulas camión grúa zona").split(" ").map(w => [sinAc(w), w]));
+  const acentuar = s => String(s).replace(/[A-Za-zÁÉÍÓÚÑáéíóúñü]+/g, w => { const a = ACENTOS[sinAc(w)]; if (!a || a === w.toLowerCase()) return w; return w === w.toUpperCase() && w.length > 1 ? a.toUpperCase() : w[0] === w[0].toUpperCase() ? a[0].toUpperCase() + a.slice(1) : a; })
+    .replace(/\b([Ss]e) (observo|detecto|identifico|encontro|reporto|retiro|percato|realizo|solicito|coloco)\b/g, (m, a, b) => a + " " + b.slice(0, -1) + "ó")
+    .replace(/\b([Nn]o) (anclo|uso|utilizo|porto|coloco|respeto|reviso|aviso)\b/g, (m, a, b) => a + " " + b.slice(0, -1) + "ó")
+    .replace(/\besta (\w+(ando|iendo))\b/g, "está $1");
+  const VACIAS_FIN = /\s+(al|el|la|las|los|de|del|para|a|en|y|e|o|con|un|una|que|por|su|sus|se|sin)$/i;
+  const palabras = (s, n) => { let w = String(s).trim().split(/\s+/).slice(0, n).join(" ").replace(/[,;:]+$/, ""); for (let i = 0; i < 4; i++) w = w.replace(/\s+\S*\d\S*$/, "").replace(VACIAS_FIN, ""); return w; };
+  const minus1 = s => s ? s[0].toLowerCase() + s.slice(1) : s;
+  // equipo de proteccion: como se busca, como se nombra y su genero/numero (para "mal colocado/a/os/as")
+  const EPP = [[/TAPON/, "tapones auditivos", "os"], [/PROTECCION AUDITIVA/, "protección auditiva", "a"], [/GUANTE/, "guantes", "os"], [/BARBIQUEJO/, "barbiquejo", "o"], [/CASCO/, "casco", "o"], [/ARNES/, "arnés", "o"],
+    [/LENTES|GAFAS/, "lentes de seguridad", "os"], [/\bFAJA\b/, "faja", "a"], [/CARETA/, "careta", "a"], [/RESPIRADOR|MASCARILLA|PROTECCION RESPIRATORIA/, "protección respiratoria", "a"], [/\bBOTAS\b|ZAPATOS|CALZADO/, "calzado de seguridad", "o"], [/\bEPP\b/, "el EPP requerido", "o"]];
+  // lo que hacia el trabajador: "al acomodar el cable", "durante maniobras de izaje", "durante actividades de soldadura"
+  const contexto = (t, N, desde) => {
+    const tras = N.slice(desde), d = t.slice(desde);
+    let m = /^[^.;]{0,50}?\b(?:CUANDO|MIENTRAS)\s+(?:ESTABA[N]?\s+|SE ENCONTRABA[N]?\s+)?([A-Z]+)ANDO\b/.exec(tras);
+    if (m) return " al " + palabras(minus1(m[1]) .toLowerCase() + "ar" + d.slice(m.index + m[0].length).replace(/,.*$/, ""), 8);
+    m = /^[^.;]{0,40}?\b(AL|PARA) ((?!ESTANDAR|LUGAR|CELULAR|AUXILIAR|PILAR|NIVEL|OBSERVAR|VER\b|LLEGAR|NOTAR|PERCATAR|ACERCAR|PREGUNTAR|CUESTIONAR)[A-Z]+(AR|ER|IR)(SE)?)\b/.exec(tras);
+    if (m) return " " + m[1].toLowerCase() + " " + palabras(d.slice(m.index + m[0].length - m[2].length).replace(/[,.;].*$/, "").toLowerCase(), 7);
+    m = /\bDURANTE\s+(?:LA\s+|EL\s+|LAS\s+|LOS\s+)?(?:ACTIVIDAD(?:ES)?\s+DE\s+|EJECUCION\s+DE\s+|TRABAJOS\s+DE\s+)?([^,.;]{4,80}?)(?=,|\.|;|\s+SE\s|\s+OBSERV|\s+EN EL \d|\s+(?:EL|LA|LOS|LAS|UN|UNA|UNO)\s+(?:AYUDANTE|TECNICO|TRABAJADOR|PERSONAL|SUPERVISOR|OPERADOR|MANIOBRISTA)|\s+(?:PERSONAL|TECNICO|TRABAJADOR)\b|\s+NO\s|$)/.exec(N);
+    if (m) {
+      // sin claves de equipo ni ordenes de trabajo; si no queda algo con sentido, se usa el tema
+      const w = palabras(t.substr(m.index + m[0].length - m[1].length, m[1].length).split(/\s+/).filter(x => !/\d|\(|\)/.test(x)).join(" ").toLowerCase().replace(/^(de|la|el|las|los)\s+/, ""), 6);
+      if (w.replace(/\b(la|el|las|los|de|del|en|y)\b/g, "").trim().length >= 6) return " durante " + w;
+    }
+    if (/SOLDADURA|SOLDAR/.test(N)) return " durante actividades de soldadura";
+    if (/IZAJE/.test(N)) return " durante maniobras de izaje";
+    if (/ANDAMIO/.test(N)) return " en andamio";
+    if (/ALTURA/.test(N)) return " en trabajos en altura";
+    return "";
+  };
+  // la parte de la tarjeta que cuenta la desviacion (sin lo que salio bien antes ni lo que se hizo despues)
+  const nucleo = t => {
+    let s = t, pre = "";
+    // "se observan las siguientes áreas de mejora: 1. ... 2. ..." -> el primer punto
+    const lis = /^(.*?)\b(?:las\s+)?siguientes\s+(?:áreas|areas|puntos|desviaciones|observaciones|deficiencias)[^:]{0,40}:\s*(?:1\s*[.)-]\s*)?/i.exec(s);
+    if (lis) { const pl = /^((?:durante|en|al)\s[^,]{3,140}?)(?=,|\s+se\s)/i.exec(lis[1]); if (pl) pre = pl[1]; s = s.slice(lis[0].length).split(/\s+2\s*[.)-]\s/)[0]; }
+    const giro = /\b(sin embargo|posteriormente|no obstante|pero)\b[,]?\s*/i.exec(s);
+    if (giro && /CORRECT|ADECUAD|BUEN|EXCELENTE|OPORTUN|EFICIENT|CUMPL/.test(sinAc(s.slice(0, giro.index)))) {
+      const p = /^(durante|en|al)\s[^,]{3,120}?(?=,|\s+se\s+(observ|detect|identific))/i.exec(s); if (p) pre = p[0];
+      s = s.slice(giro.index + giro[0].length);
+    }
+    // "Durante X, durante Y, se detectó que ..." -> se queda la primera actividad y lo que se detecto
+    for (let i = 0; i < 3; i++) {
+      const p = /^((?:durante|en el transcurso de|al realizar|al llegar a|en la|en el)\s[^,]{3,140}?)(?:,\s*|\s+(?=(?:se\s+)?(?:observ|obersev|obserb|detect|identific|report|encontr|percat|aprecia|visualiz)[\wáéíóú]*))/i.exec(s);
+      if (p) { if (!pre) pre = p[1]; s = s.slice(p[0].length); }
+      const s0 = s; s = s.replace(/^(?:posteriormente\s+)?(?:se\s+)?(?:observ|obersev|obserb|detect|identific|report|encontr|percat|aprecia|visualiz)[\wáéíóú]*\s+(?:que\s+|a\s+(?=\w))?/i, "");
+      if (!p && s === s0) break;
+    }
+    s = s.replace(/^al\s+(?=(?:trabajador|técnico|tecnico|personal|ayudante|operador|maniobrista|soldador)\b)/i, "el ");
+    s = s.replace(/^(?:uno|una)\s+de\s+los\s+(trabajadores|técnicos|tecnicos)/i, (m, w) => "un " + w.replace(/es$|os$/, x => x === "es" ? "" : "o"))
+      .replace(/^(?:uno|una)\s+de\s+los\s+dos\s+(técnicos|tecnicos|trabajadores)/i, (m, w) => "un " + w.replace(/es$|os$/, x => x === "es" ? "" : "o"));
+    // lo que se hizo despues (retroalimentacion, correccion) no va
+    const fin = /[,;.]?\s+(?:por lo que se (?:le|les|solicit|indic|detuvo|detiene|pidi)|se (?:le|les) (?:indic|solicit|hizo|hace|realiz|coment|retroaliment|explic|detien|pidi)|se retroaliment|se proced|se llam|corrigi|adicional(?:mente)?,? se|esto es (?:un|una)|cabe mencionar|es importante mencionar|siendo (?:este|esta)|se comento|se comentó)/i.exec(s);
+    if (fin && fin.index > 15) s = s.slice(0, fin.index);
+    s = s.split(/(?<=[.!?])\s+/)[0].replace(/[.,;:\s]+$/, "");
+    return { pre: pre.trim(), s: s.trim() };
+  };
+  const sujeto = /^(?:el|la|los|las|un|una)?\s*(?:personal|técnico|tecnico|técnicos|tecnicos|trabajador|trabajadora|trabajadores|ayudante|ayudantes|soldador|maniobrista|operador|compañero|compañera|colaborador|colaboradora|supervisor|contratista)\b/i;
+  const resumen = c => {
+    const t = acentuar(oracion(texto(c))), N = sinAc(t);
+    if (!t) return "";
+    let m = /\b(?:DEBAJO|ABAJO) DE (UN|UNA|LA|EL|LOS|LAS) ([A-Z]+)/.exec(N);
+    if (m) { const w = t.substr(m.index + m[0].length - m[2].length, m[2].length).toLowerCase(); return punto("Personal debajo de " + m[1].toLowerCase() + " " + w + (/INSEGUR/.test(N) ? (/a$/.test(w) ? " insegura" : " inseguro") : "")); }
+    if (/CONO DE CAIDA|CARGA SUSPENDIDA|BAJO (LA )?CARGA/.test(N)) return "Personal en la zona de caída de una carga suspendida.";
+    if (/ANDAMIO/.test(N) && /NO ANCL|SIN ANCLAR|SIN ANCLAJE|NO ESTABA(N)? ANCLAD/.test(N) && /LINEA/.test(N)) return "Andamios sin anclaje de líneas de vida.";
+    if (/ANCLAD[OA] POR DEBAJO/.test(N)) return "Línea de vida anclada por debajo del plano de trabajo.";
+    if (/(1|UN) PUNTO DE ANCLAJE/.test(N)) return "Línea de vida con un solo punto de anclaje.";
+    // EPP que no traian puesto
+    const falta = [], mal = [], dan = [];
+    let fin = 0;
+    for (const [re, nom, g] of EPP) {
+      const x = re.exec(N); if (!x) continue;
+      if (nom === "el EPP requerido" && (falta.length || mal.length || dan.length)) continue;     // ya se dijo cual
+      const antes = N.slice(Math.max(0, x.index - 40), x.index), despues = N.slice(x.index, x.index + 45);
+      const e = /MAL COLOCAD|MAL PUEST/.test(despues) ? mal : /DANAD|ROT[OA]S?\b/.test(despues) ? dan : /\b(NO|SIN|FALTA|RETIRO|RETIRA|RETIRABA|RECHAZA)\b/.test(antes) ? falta : null;
+      if (e && e.length < 2) { e.push([nom, g]); fin = Math.max(fin, x.index + x[0].length); }
+    }
+    if (falta.length || mal.length || dan.length) {
+      if (falta.some(x => x[0] === "arnés") && /SUBIR(SE)? (A|AL|EN|POR) (UN |UNA |EL |LA |LOS )?ANDAMIO/.test(N)) return "Personal sin arnés para subir a andamios.";
+      const lista = (L, y) => L.map(x => x[0]).join(y);
+      const gen = (L, base) => L.length > 1 ? base + (L.some(x => x[1][0] === "o") ? "os" : "as") : base + L[0][1];
+      const partes = [];
+      if (falta.length) partes.push("sin " + lista(falta, " ni "));
+      if (mal.length) partes.push("con " + lista(mal, " y ") + " " + gen(mal, "mal colocad"));
+      if (dan.length) partes.push("con " + lista(dan, " y ") + " " + gen(dan, "dañad"));
+      return punto(acentuar("Personal " + partes.join(" y ") + contexto(t, N, fin)));
+    }
+    if (/NO RESPET\w* (EL |LA )?(ACORDONAMIENTO|DELIMITACION|AREA)/.test(N)) return "No se respetó el acordonamiento del área.";
+    if (/(NO|SIN) (ESTA(BA)? |SE (TENIA|ENCONTRABA) )?(ACORDONAD|ACORDONAR|DELIMITAD|DELIMITAR)|NO ACORDONA|AREA NO ACORDONADA|ACORDONAMIENTO,? NO ESTABA/.test(N)) return /DELIMIT/.test(N) && !/ACORDON/.test(N) ? "Área de trabajo sin delimitar." : "Área no acordonada.";
+    if (/CELULAR|TELEFON/.test(N) && /(USA|USO|LLAMADA|CONTEST|ATENDER|HABLA)/.test(N)) return punto("Uso de celular" + (/CAMINA/.test(N) ? " mientras camina" : contexto(t, N, 0)));
+    m = /FUMA(NDO|BA|N)?\b/.exec(N); if (m) { const l = / EN (EL|LA|LOS|LAS) ([^,.;]{3,40})/.exec(N.slice(m.index)); return punto("Personal fumando" + (l ? " en " + t.substr(m.index + l.index + 4, l[0].length - 4).toLowerCase() : " en área no permitida")); }
+    // general: la desviacion, corta
+    let { s } = nucleo(t);
+    if (sujeto.test(s)) s = s.replace(sujeto, "Personal").replace(/^Personal\s+eventual\b/i, "Personal eventual");
+    s = s ? s[0].toUpperCase() + s.slice(1) : t;
+    if (s.length > 85) { const k = s.lastIndexOf(",", 85); s = k > 30 ? s.slice(0, k) : recorta(s, 85); }
+    return punto(s);
+  };
+  const relato = c => {
+    const t = acentuar(oracion(texto(c)));
+    let { pre, s } = nucleo(t);
+    if (!s) return punto(recorta(t, 230));
+    if (/^(?:estaba|se encontraba)\s/i.test(s)) s = "se observó a un trabajador " + s.replace(/^(?:estaba|se encontraba)\s+/i, "");
+    else if (/^(técnico|tecnico|trabajador|soldador|ayudante|maniobrista|operador)\b/i.test(s)) s = "se observó que un " + minus1(s);
+    else if (sujeto.test(s)) s = "se observó que " + minus1(s);
+    else if (pre) s = "se observó " + minus1(s);
+    let r = (pre ? pre + " " + s : s); r = r[0].toUpperCase() + r.slice(1);
+    if (r.length > 230) { const k = r.lastIndexOf(",", 230); r = k > 80 ? r.slice(0, k) : recorta(r, 230); }
+    return punto(r);
+  };
+
   const TDIA = B.tdia = {
-    F: null, G: {},
+    F: null, G: {}, resumen, relato,
     fechaTxt(f) { const d = U.fecha(f); return d.getDate() + " " + MES[d.getMonth()]; },
     clave(F) { return "dia:" + F.fecha + ":" + F.fu; },
     peso(c) {
@@ -7075,15 +7193,24 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
       const k = catDe(c), n = U.norm(texto(c)), m = /DEBAJO DE (UN|UNA|LA|EL|LOS|LAS) ([^\s,.;]+)/.exec(texto(c).toUpperCase());
       const sub = m ? "DEBAJO DE " + m[1] + " " + m[2] : ((SUB.find(([f]) => f(n)) || [])[1] || "");
       const cab = k ? k.top : String(c.std || "Observación").toUpperCase();
-      return { id: String(c.id), tit: cab + (sub && sub !== cab ? " | " + sub : ""), desc: punto(recorta(oracion(texto(c)), 230)), pot: k ? k.pot : "lesiones al personal." };
+      return { id: String(c.id), tit: cab + (sub && sub !== cab ? " | " + sub : ""), desc: relato(c), pot: k ? k.pot : "lesiones al personal." };
     },
-    vineta(c) { return punto(recorta(oracion(texto(c)).split(/(?<=[.!?])\s+/)[0], 80)); },
+    vineta(c) { return resumen(c); },
     sugerirTop(L) { return L.filter(esDeb).sort((a, b) => this.peso(b) - this.peso(a) || (+b.id || 0) - (+a.id || 0)).slice(0, 3).map(c => this.fila(c)); },
     propuesta(L, base) { return { t1: base.t1 || "OBSERVACIONES DE", t2: base.t2 || "SEGURIDAD INDUSTRIAL", k3: base.k3 || "DEBILIDADES DE SEGURIDAD INDUSTRIAL", kpi: {}, top: this.sugerirTop(L), cards: {}, msg: "", msgEd: false }; },
     // tarjetas que aparecieron despues de guardar (otro Excel): entran con su tema y su vineta propuestos
     completar(G, L) {
       G.cards = G.cards || {}; G.kpi = G.kpi || {}; G.top = Array.isArray(G.top) ? G.top : [];
       for (const c of L.filter(esDeb)) if (!G.cards[c.id]) { const k = catDe(c); G.cards[c.id] = { inc: true, cat: k ? k.n : String(c.std || "OTRAS").toUpperCase(), bul: this.vineta(c) }; }
+      // lo que se propuso en la 4.9 (el texto recortado, sin resumir) se cambia por la frase resumida; lo corregido a mano se respeta
+      const viejo = (c, n) => punto(recorta(oracion(texto(c)).split(/(?<=[.!?])\s+/)[0], n));
+      for (const c of L.filter(esDeb)) { const g = G.cards[c.id]; if (g && (g.bul === viejo(c, 80) || g.bul === viejo(c, 95))) g.bul = this.vineta(c); }
+      for (const r of G.top) { const c = L.find(x => String(x.id) === r.id); if (c && r.desc === punto(recorta(oracion(texto(c)), 230))) r.desc = relato(c); }
+    },
+    // vuelve a proponer las frases (las del TOP y las de cada debilidad) con las tarjetas
+    reFrases(G, L) {
+      for (const c of L.filter(esDeb)) if (G.cards[c.id]) G.cards[c.id].bul = this.vineta(c);
+      for (const r of G.top) { const c = L.find(x => String(x.id) === r.id); if (c) { const f = this.fila(c); r.desc = f.desc; r.tit = f.tit; } }
     },
     modelo(L, G) {
       const deb = L.filter(esDeb), cum = L.filter(esCum), num = (v, d) => String(v ?? "").trim() !== "" && !isNaN(+v) ? +v : d;
@@ -7094,21 +7221,23 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
       const grupos = [...m].map(([cat, cs]) => ({ cat, cs })).sort((a, b) => b.cs.length - a.cs.length || sev(b.cat) - sev(a.cat));
       return { n, cum: nc, deb: nd, grupos, top: G.top.filter(t => t && t.id), debs: deb };
     },
-    html(M, G, F) {
-      const top = M.top.map((t, i) => `<div class="ti-top"><div class="ti-tt"><div class="ti-num">${i + 1}</div><div class="ti-id">ID ${esc(t.id)}</div><div class="ti-ttl">${esc(t.tit)}</div></div>
-          ${t.desc ? `<p>${esc(t.desc)}</p>` : ""}${t.pot ? `<div class="ti-pot">${TRI}<div><b>Potencial:</b> ${esc(t.pot)}</div></div>` : ""}</div>`).join("");
-      const gr = M.grupos.map(g => `<div class="ti-g"><div class="ti-p">${esc(g.cat)}</div><br><div class="ti-p ids">ID${g.cs.length > 1 ? "s" : ""} ${esc(g.cs.map(x => x.id).join(", "))}</div>
-          ${g.cs.some(x => x.bul) ? `<ul>${g.cs.filter(x => x.bul).map(x => `<li>${esc(x.bul)}</li>`).join("")}</ul>` : ""}</div>`).join("");
-      return `<div class="ti"><div class="ti-cab"><div class="ti-fecha">${esc(this.fechaTxt(F.fecha))}</div><div class="ti-sep"></div><div class="ti-tit">${esc(G.t1)}<br>${esc(G.t2)}</div></div>
-        <div class="ti-kpis"><div class="ti-k az"><b>${M.n}</b><span>Observaciones<br>realizadas</span></div><div class="ti-k ve"><b>${M.cum}</b><span>Cumplieron<br>la expectativa</span></div>
-          <div class="ti-k ro"><b>${M.deb}</b><span>${esc(G.k3).replace(/^(\S+\s+DE)\s+/i, "$1<br>")}</span></div></div>
+    // ed = vista previa: cada texto se puede corregir tocandolo (data-e dice que dato es)
+    html(M, G, F, ed) {
+      const e = k => ed ? ` contenteditable="true" spellcheck="true" data-e="${esc(k)}"` : "";
+      const top = M.top.map((t, i) => `<div class="ti-top"><div class="ti-tt"><div class="ti-num">${i + 1}</div><div class="ti-id">ID ${esc(t.id)}</div><div class="ti-ttl"${e("top." + i + ".tit")}>${esc(t.tit)}</div></div>
+          ${t.desc || ed ? `<p${e("top." + i + ".desc")}>${esc(t.desc)}</p>` : ""}${t.pot || ed ? `<div class="ti-pot">${TRI}<div><b>Potencial:</b> <span${e("top." + i + ".pot")}>${esc(t.pot)}</span></div></div>` : ""}</div>`).join("");
+      const gr = M.grupos.map(g => `<div class="ti-g"><div class="ti-p"${e("cat." + g.cat)}>${esc(g.cat)}</div><br><div class="ti-p ids">ID${g.cs.length > 1 ? "s" : ""} ${esc(g.cs.map(x => x.id).join(", "))}</div>
+          ${g.cs.some(x => x.bul) || ed ? `<ul>${g.cs.filter(x => x.bul || ed).map(x => `<li${e("bul." + x.id)}>${esc(x.bul)}</li>`).join("")}</ul>` : ""}</div>`).join("");
+      return `<div class="ti"><div class="ti-cab"><div class="ti-fecha">${esc(this.fechaTxt(F.fecha))}</div><div class="ti-sep"></div><div class="ti-tit"><span${e("t1")}>${esc(G.t1)}</span><br><span${e("t2")}>${esc(G.t2)}</span></div></div>
+        <div class="ti-kpis"><div class="ti-k az"><b${e("kpi.n")}>${M.n}</b><span>Observaciones<br>realizadas</span></div><div class="ti-k ve"><b${e("kpi.cum")}>${M.cum}</b><span>Cumplieron<br>la expectativa</span></div>
+          <div class="ti-k ro"><b${e("kpi.deb")}>${M.deb}</b><span${e("k3")}>${esc(G.k3).replace(/^(\S+\s+DE)\s+/i, "$1<br>")}</span></div></div>
         ${M.top.length || M.grupos.length ? `<div class="ti-cols">${M.top.length ? `<div class="ti-izq"><div class="ti-h ro"><b>TOP ${M.top.length}</b><i></i><span>Observaciones con mayor<br>potencial de consecuencia</span></div>${top}</div>` : ""}
           ${M.grupos.length ? `<div class="ti-der"><div class="ti-h na"><span>Otras observaciones<br>(acciones repetitivas)</span></div>${gr}</div>` : ""}</div>`
         : `<div class="ti-nada">Todas las observaciones del día cumplieron la expectativa.</div>`}</div>`;
     },
     // mensaje para WhatsApp (negritas con *asteriscos*)
     mensaje(M, G, F) {
-      const AE = F.fu !== "SI", cats = [...new Set(M.grupos.map(g => g.cat))].map(porN).filter(Boolean).sort((a, b) => b.sev - a.sev), ks = cats.map(c => c.k);
+      const AE = F.fu !== "SI", cats = [...new Set(M.grupos.map(g => porN(g.cat) || catDe(M.debs.find(c => String(c.id) === g.cs[0].id) || {})).filter(Boolean))].sort((a, b) => b.sev - a.sev), ks = cats.map(c => c.k);
       const L = [`📋 *${G.t1} ${G.t2} · ${this.fechaTxt(F.fecha)}*`, "", `Se realizaron *${M.n} observaciones*:`, `✅ ${M.cum} cumplieron la expectativa (${pct(M.cum, M.n)}).`];
       if (!M.deb) return L.concat(["", "¡Excelente! No se identificaron debilidades. Sigamos verificando los controles de seguridad antes y durante las actividades.", "", "✅ ¡La seguridad es responsabilidad de todos!"]).join("\n");
       L.push(`⚠️ ${M.deb} debilidades identificadas (${pct(M.deb, M.n)}).`, "");
@@ -7182,15 +7311,16 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
             <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn chico sec" id="tdMas" ${G.top.length >= 5 || !debs.length ? "disabled" : ""}>${B.ico("mas")} Agregar</button><button class="btn chico sec" id="tdProp">${B.ico("reutilizar")} Proponer de nuevo</button></div></div>
           <div style="margin-top:12px">${G.top.length ? G.top.map(filaTop).join("") : `<p class="muted" style="margin:0">Sin observaciones en el TOP.${debs.length ? "" : " No hay debilidades en este día."}</p>`}</div></div>
         <div class="tarjeta"><h2 style="margin:0;font-size:17px">Otras observaciones (acciones repetitivas)</h2>
-          <p class="muted peque" style="margin:4px 0 10px">Cada debilidad del día va en un tema; las del mismo tema se juntan en un recuadro. Escribe el tema (o elige uno de la lista) y la frase corta que aparece en la imagen. Quita la marca para no incluirla.</p>
+          <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start"><p class="muted peque" style="margin:4px 0 10px;flex:1 1 300px">Cada debilidad del día va en un tema; las del mismo tema se juntan en un recuadro. La frase corta se propone resumiendo lo que capturaron; corrígela aquí o directo en la imagen. Quita la marca para no incluirla.</p>
+            <button class="btn chico sec" id="tdFrases" ${debs.length ? "" : "disabled"}>${B.ico("reutilizar")} Resumir las frases de nuevo</button></div>
           <datalist id="tdCats">${cats.map(n => `<option value="${esc(n)}">`).join("")}</datalist>
           ${debs.length ? `<div class="tabla-cont"><table class="tabla"><thead><tr><th style="width:34px"></th><th>ID</th><th style="width:28%">Tema</th><th>Frase en la imagen</th></tr></thead><tbody>
             ${debs.map(x => { const g = G.cards[x.id]; return `<tr data-cid="${esc(x.id)}"><td><input type="checkbox" data-c="inc" ${g.inc !== false ? "checked" : ""} style="width:18px;height:18px"></td>
               <td><a href="#" data-verc="${esc(x.id)}" title="${esc(recorta(texto(x), 300))}">#${esc(x.id)}</a><br><small class="muted">${esc(recorta(x.std || "", 26))}</small></td>
               <td><input class="inp" data-c="cat" list="tdCats" value="${esc(g.cat)}" style="text-transform:uppercase"></td><td><input class="inp" data-c="bul" value="${esc(g.bul)}" maxlength="140"></td></tr>`; }).join("")}</tbody></table></div>` : `<p class="muted" style="margin:0">No hay debilidades en este día.</p>`}</div>
-        <div class="tarjeta"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start"><div><h2 style="margin:0;font-size:17px">Imagen del día</h2><p class="muted peque" style="margin:4px 0 0">Copia la imagen y pégala en WhatsApp, o descárgala. En el celular, <b>Compartir</b> manda la imagen con el mensaje.</p></div>
+        <div class="tarjeta"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start"><div><h2 style="margin:0;font-size:17px">Imagen del día</h2><p class="muted peque" style="margin:4px 0 0">Copia la imagen y pégala en WhatsApp, o descárgala. En el celular, <b>Compartir</b> manda la imagen con el mensaje. <b>Toca cualquier texto de la imagen para corregirlo ahí mismo.</b></p></div>
             <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn sec" id="tdGuardar">${B.ico("ok")} Guardar</button><button class="btn" id="tdCopImg">${B.ico("doc")} Copiar imagen</button><button class="btn sec" id="tdPng">${B.ico("descargar")} Descargar imagen</button>${navigator.share ? `<button class="btn dorado" id="tdComp">${B.ico("subir")} Compartir</button>` : ""}</div></div>
-          <style>${CSS_IMG}</style><div id="tdPrevC" style="margin-top:12px;overflow:hidden;border:1px solid var(--borde,#e5e5e5);border-radius:10px"><div id="tdPrev"></div></div></div>
+          <style>${CSS_IMG} #tdPrev [data-e]{border-radius:4px;cursor:text;transition:outline-color .15s} #tdPrev [data-e]:hover{outline:2px dashed rgba(100,116,139,.7);outline-offset:2px} #tdPrev [data-e]:focus{outline:3px solid #2563EB;outline-offset:2px;background:rgba(255,255,255,.35)}</style><div id="tdPrevC" style="margin-top:12px;overflow:hidden;border:1px solid var(--borde,#e5e5e5);border-radius:10px"><div id="tdPrev"></div></div></div>
         <div class="tarjeta"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start"><div><h2 style="margin:0;font-size:17px">Mensaje para WhatsApp</h2><p class="muted peque" style="margin:4px 0 0" id="tdMsgNota">${G.msgEd ? "Mensaje corregido a mano: ya no se actualiza solo. «Proponer de nuevo» lo vuelve a armar con la imagen." : "Se arma solo con la imagen; si lo corriges, se guarda tal cual."}</p></div>
             <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn chico sec" id="tdMsgProp">${B.ico("reutilizar")} Proponer de nuevo</button><button class="btn chico verde" id="tdMsgCop">${B.ico("doc")} Copiar mensaje</button></div></div>
           <textarea class="inp" id="tdMsg" style="margin-top:10px;min-height:min(420px,52vh);font-family:inherit"></textarea></div>`;
@@ -7199,13 +7329,30 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
       let lista = null; const hacerPng = U.debounce(() => { const h = this.html(this.modelo(L, G), G, F); this.png(h).then(b => { lista = { h, b }; }).catch(() => { }); }, 700);
       const imagenYa = () => { const h = this.html(this.modelo(L, G), G, F); return lista && lista.h === h ? lista.b : this.png(h); };
       const prev = () => {
-        M = this.modelo(L, G); pv.innerHTML = this.html(M, G, F);
+        M = this.modelo(L, G); pv.innerHTML = this.html(M, G, F, true);
         const z = Math.min(1, (pc.clientWidth - 2) / 1080); pv.style.zoom = z;
         if (!G.msgEd) tm.value = this.mensaje(M, G, F);
         hacerPng();
       };
       const lento = U.debounce(prev, 350), repinta = () => Pv.pinta();
       if (G.msgEd) tm.value = G.msg || "";
+      // correcciones hechas directo en la imagen: se guardan en el dato y en su casilla de arriba
+      const casilla = sel => c.querySelector(sel);
+      const poner = (k, v) => {
+        v = v.replace(/\s+/g, " ").trim(); const [a, b, d] = k.split(".");
+        if (a === "t1" || a === "t2" || a === "k3") { G[a] = v.toUpperCase(); const i = casilla(`[data-g="${a}"]`); if (i) i.value = G[a]; }
+        else if (a === "kpi") { G.kpi[b] = v.replace(/\D/g, ""); const i = casilla(`[data-kpi="${b}"]`); if (i) i.value = G.kpi[b]; }
+        else if (a === "top" && G.top[+b]) { G.top[+b][d] = d === "tit" ? v.toUpperCase() : v; const i = casilla(`[data-top="${b}"] [data-tk="${d}"]`); if (i) i.value = G.top[+b][d]; }
+        else if (a === "bul" && G.cards[b]) { G.cards[b].bul = v; const i = casilla(`tr[data-cid="${b}"] [data-c="bul"]`); if (i) i.value = v; }
+        else if (a === "cat") { const viejo = k.slice(4), nuevo = v.toUpperCase() || "OTRAS"; for (const [id, g] of Object.entries(G.cards)) if (String(g.cat || "").toUpperCase() === viejo) { g.cat = nuevo; const i = casilla(`tr[data-cid="${id}"] [data-c="cat"]`); if (i) i.value = nuevo; } return "cat." + nuevo; }
+        return k;
+      };
+      const alCorregir = U.debounce(() => { M = this.modelo(L, G); if (!G.msgEd) tm.value = this.mensaje(M, G, F); hacerPng(); }, 400);
+      pv.addEventListener("input", ev => { const el = ev.target.closest("[data-e]"); if (!el) return; el.dataset.e = poner(el.dataset.e, el.innerText); alCorregir(); });
+      pv.addEventListener("keydown", ev => { if (ev.key === "Enter" && ev.target.closest("[data-e]")) { ev.preventDefault(); ev.target.closest("[data-e]").blur(); } });
+      pv.addEventListener("paste", ev => { if (!ev.target.closest("[data-e]")) return; ev.preventDefault(); document.execCommand("insertText", false, (ev.clipboardData || window.clipboardData).getData("text/plain").replace(/\s+/g, " ")); });
+      // al salir del texto se vuelve a dibujar (mayusculas, renglones); si se paso a otro texto de la imagen, se espera
+      pv.addEventListener("focusout", ev => { if (ev.relatedTarget && pv.contains(ev.relatedTarget)) return; setTimeout(() => { if (!pv.contains(document.activeElement)) prev(); }, 0); });
       c.querySelector("#tdFe").onchange = e => { F.fecha = e.target.value; repinta(); };
       c.querySelector("#tdFu").onchange = e => { F.fu = e.target.value; F.fecha = ""; repinta(); };
       c.querySelectorAll("[data-g]").forEach(i => i.oninput = () => { G[i.dataset.g] = i.value.trim().toUpperCase(); lento(); });
@@ -7220,6 +7367,7 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
           if (a === "quita") G.top.splice(i, 1); else { const j = a === "sube" ? i - 1 : i + 1; [G.top[i], G.top[j]] = [G.top[j], G.top[i]]; }
           repinta(); });
       });
+      c.querySelector("#tdFrases").onclick = async () => { if (await B.ui.confirmar("Se volverán a proponer las frases de la imagen (títulos y textos del TOP y la frase de cada debilidad) con lo que capturaron en las tarjetas. Lo que corregiste a mano en esas frases se reemplaza.", "Resumir las frases de nuevo", "Resumir")) { this.reFrases(G, L); repinta(); } };
       c.querySelector("#tdMas").onclick = () => { const t = debs.slice().sort((a, b) => this.peso(b) - this.peso(a)).find(y => !G.top.some(r => r.id === String(y.id))); if (t) { G.top.push(this.fila(t)); repinta(); } };
       c.querySelector("#tdProp").onclick = async () => { if (!G.top.length || await B.ui.confirmar("Se reemplazará el TOP (y sus textos) por el propuesto.", "Proponer de nuevo", "Reemplazar")) { G.top = this.sugerirTop(L); repinta(); } };
       c.querySelectorAll("tr[data-cid]").forEach(tr => { const g = G.cards[tr.dataset.cid];
@@ -8430,7 +8578,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "4.9", servidorViejo: false,
+  info: {}, VERSION: "4.9.1", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -8617,7 +8765,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "procedimientos" ? '<span class="contador oculto" id="cntProc"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.9")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.9.1")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
