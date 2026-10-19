@@ -803,7 +803,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.8.6", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.9", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -948,7 +948,7 @@ B.local = {
           if (+b.borrar) { if (L.some(x => +x.p === +b.borrar)) throw new Error("Primero mueve o elimina las áreas que dependen de esta."); o.nodos = L.filter(x => +x.id !== +b.borrar); }
           else { const d = b.nodo || {}; if (!String(d.n || "").trim()) throw new Error("Escribe el nombre del área."); let e = +d.id ? L.find(x => +x.id === +d.id) : null;
             if (!e) { e = { id: L.reduce((m, x) => Math.max(m, +x.id || 0), 0) + 1, f: "" }; L.push(e); }
-            Object.assign(e, { n: d.n, j: d.j || "", t: d.t || "default", p: +d.p || 0 }); if ("f" in d) e.f = d.f; }
+            Object.assign(e, { n: d.n, j: d.j || "", t: d.t || "default", p: +d.p || 0 }); if ("f" in d) e.f = d.f; if ("x" in d) e.x = String(d.x || ""); }
           o.mod = ahora(); o.por = s.ini; await this.escribir("organigrama", o); return { ok: true };
         }
         if (acc === "correosGuardar") { for (const [k, v] of Object.entries(b.mapa || {})) { if (String(v || "").trim()) T.correos[k] = String(v).trim(); else delete T.correos[k]; } for (const [k, v] of Object.entries(b.ubic || {})) { if (+v > 0) T.ubic[k.toUpperCase()] = +v; else delete T.ubic[k.toUpperCase()]; } }
@@ -960,7 +960,7 @@ B.local = {
       case "grafGuardar": {
         soloEd();
         const gk = String(b.clave || "");
-        if (gk !== "cfg" && !/^\d{4}-\d{2}$/.test(gk)) throw new Error("Clave no válida.");
+        if (gk !== "cfg" && gk !== "diacfg" && !/^\d{4}-\d{2}$/.test(gk) && !/^dia:\d{4}-\d{2}-\d{2}:(AE|SI|AS)$/.test(gk)) throw new Error("Clave no válida.");
         T.graf[gk] = Object.assign({}, b.datos, { por: s.ini, fh: ahora() });
         return fin();
       }
@@ -6267,7 +6267,15 @@ V.hoja = {
 
     /* ------------------------------------------------------------ PRESENTACION E+1 (en e1.js) */
     t_e1(c) { return B.e1.vista(this, c); },
-    t_graf(c) { return B.tend.vista(this, c); },
+    // graficas: el reporte semanal o la tendencia del dia (imagen y mensaje para WhatsApp)
+    t_graf(c) {
+      let m = this.grafModo; if (!m) { try { m = localStorage.getItem("b_graf_modo"); } catch (e) { } }
+      m = this.grafModo = m === "dia" ? "dia" : "sem";
+      c.innerHTML = `<div class="chips-ali" style="margin:0 0 12px">${[["sem", "Reporte semanal"], ["dia", "Tendencia del día (imagen y mensaje para WhatsApp)"]].map(([k, t]) => `<label class="chip-ali"><input type="radio" name="tjGm" value="${k}" ${m === k ? "checked" : ""}><span>${t}</span></label>`).join("")}</div><div id="tjGm"></div>`;
+      c.querySelectorAll("[name=tjGm]").forEach(i => i.onchange = () => { this.grafModo = i.value; try { localStorage.setItem("b_graf_modo", i.value); } catch (e) { } this.pinta(); });
+      const d = c.querySelector("#tjGm");
+      return m === "dia" ? B.tdia.vista(this, d) : B.tend.vista(this, d);
+    },
     t_tarj(c) { return B.correos.vista(this, c); },
     t_org(c) { return B.org.vista(this, c); },
 
@@ -6968,11 +6976,304 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
   };
 })();
 ;
+/* ---- tdia.js ---- */
+/* =====================================================================
+   BITACORA 24RU1 - LIDERES EN CAMPO: TENDENCIA DEL DIA (imagen y mensaje para WhatsApp)
+   Con las tarjetas de un dia (fecha de observacion) arma la infografia: totales,
+   TOP de observaciones con mayor potencial de consecuencia y las demas debilidades
+   agrupadas por tema; y el mensaje para mandar junto con la imagen. Todo se propone
+   solo y todo se puede corregir; lo corregido se guarda por dia y archivo.
+   La imagen se dibuja en el navegador (sin servidor ni internet).
+   ===================================================================== */
+(function () {
+  const TJ = B.tj, esc = s => U.esc(s);
+  const MES = ["ENE", "FEB", "MAR", "ABR", "MAY", "JUN", "JUL", "AGO", "SEP", "OCT", "NOV", "DIC"];
+  const DIAS = ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"];
+  /* temas: se buscan en este orden en lo que paso (primero el que mas pesa al leer la tarjeta);
+     sev = que tan grave puede ser (ordena el TOP y las acciones del mensaje) */
+  const CATS = [
+    { k: "alturas", n: "TRABAJOS EN ALTURA", top: "TRABAJOS EN ALTURA", sev: 9, re: /ARNES|ANDAMIO|ALTURA|LINEAS? DE VIDA|ESCALERA|PLATAFORMA|CANASTILLA|AZOTEA|TECHUMBRE/,
+      pot: "caída a diferente nivel, lesiones graves o muerte.", tema: "trabajos en altura", acc: "Reforzar la supervisión en trabajos en altura, verificando el uso correcto del arnés y el anclaje de las líneas de vida." },
+    { k: "epp", n: "USO DE EPP", top: "USO DE EPP", sev: 5, re: /TAPON|AUDITIV|GUANTE|CASCO|GAFAS|LENTES|CARETA|RESPIRADOR|MASCARILLA|BOTAS|CALZADO|\bEPP\b|PROTECCION (VISUAL|OCULAR|RESPIRATORIA)/,
+      pot: "lesiones por no contar con la protección requerida para la actividad.", tema: "el uso del equipo de protección personal", acc: "Verificar el uso del EPP requerido para cada actividad." },
+    { k: "equipos", n: "EQUIPOS Y VEHÍCULOS", top: "EXPOSICIÓN A EQUIPO INSEGURO", sev: 8, re: /MOVIL|VEHICUL|GRUA|MONTACARGA|CAMION|TRACTO|REMOLQUE|ANCLAJE|SIN ASEGURAR|INSEGUR|DEBAJO DE/,
+      pot: "golpe, atrapamiento o aplastamiento por movimiento o caída del equipo.", tema: "situaciones de exposición a equipos que no se encuentran asegurados", acc: "Asegurar que ningún trabajador permanezca debajo de equipos sin las medidas de aseguramiento correspondientes." },
+    { k: "areas", n: "CONTROL DE ÁREAS", top: "CONTROL DE ÁREAS", sev: 6, re: /ACORDON|DELIMIT|BARRICAD|SENALIZ|BARRERA|AREA NO/,
+      pot: "ingreso de personal no autorizado a una zona con peligro.", tema: "la delimitación de las áreas de trabajo", acc: "Verificar la correcta delimitación y señalización de las áreas de trabajo." },
+    { k: "electrico", n: "ENERGÍA ELÉCTRICA", top: "ENERGÍA ELÉCTRICA", sev: 9, re: /ELECTRIC|ENERGIZAD|TABLERO|VOLTAJE|LIBRANZA|BLOQUEO|CANDADO|ARCO/,
+      pot: "choque eléctrico, arco eléctrico o quemaduras graves.", tema: "trabajos con energía eléctrica", acc: "Verificar el bloqueo, el etiquetado y la ausencia de tensión antes de intervenir equipos eléctricos." },
+    { k: "izaje", n: "MANIOBRAS DE IZAJE", top: "MANIOBRAS DE IZAJE", sev: 8, re: /IZAJE|ESLINGA|GRILLETE|ESTROBO|POLIPASTO|CARGA SUSPENDIDA/,
+      pot: "caída de la carga, golpes o aplastamiento.", tema: "maniobras de izaje", acc: "Verificar que nadie se ubique bajo cargas suspendidas y que el área de maniobra esté delimitada." },
+    { k: "fuego", n: "MATERIALES INFLAMABLES", top: "MATERIALES INFLAMABLES", sev: 7, re: /INFLAMABLE|COMBUSTIBLE|CILINDRO|FUMA|SOLVENTE/,
+      pot: "incendio, explosión o quemaduras.", tema: "el manejo de materiales inflamables", acc: "Verificar el almacenamiento y manejo seguro de cilindros y materiales inflamables." },
+    { k: "herr", n: "MÁQUINAS Y HERRAMIENTAS", top: "MÁQUINAS Y HERRAMIENTAS", sev: 6, re: /HERRAMIENTA|ESMERIL|PULIDOR|TALADRO|GUARDA|DISCO|SOLDADURA|CORTE/,
+      pot: "cortes, golpes o proyección de partículas.", tema: "el uso de máquinas y herramientas", acc: "Verificar el buen estado y el uso correcto de máquinas y herramientas." },
+    { k: "orden", n: "ORDEN Y LIMPIEZA", top: "ORDEN Y LIMPIEZA", sev: 3, re: /ORDEN|LIMPIEZA|DERRAME|ENCHARCA|OBSTRU|BASURA/,
+      pot: "resbalones, tropiezos y caídas al mismo nivel.", tema: "el orden y la limpieza", acc: "Mantener el orden y la limpieza en las áreas de trabajo." }
+  ];
+  // si lo que paso no dice nada claro, manda el estandar de la tarjeta
+  const STD = { "TRABAJOS EN ALTURAS": "alturas", "USO DE EPP": "epp", "MANIOBRAS DE IZAJE Y TRASLADO": "izaje", "MANEJO DE EQUIPO ELECTRICO": "electrico", "ORDEN Y LIMPIEZA": "orden",
+    "USO DE MAQUINAS Y HERRAMIENTAS": "herr", "MANEJO DE CILINDROS": "fuego", "ALMACENAMIENTO TEMPORAL DE COMBUSTIBLES, INFLAMABLES Y CORROSIVOS": "fuego" };
+  // frase corta para el titulo de cada observacion del TOP
+  const SUB = [[n => /ANDAMIO/.test(n) && /SIN ANCLAR|LINEAS? DE VIDA|ANCLAJE/.test(n), "ANDAMIOS SIN ANCLAJE"], [n => /ARNES/.test(n), "SIN USO DE ARNÉS"],
+    [n => /TAPON|AUDITIV/.test(n), "SIN PROTECCIÓN AUDITIVA"], [n => /GUANTE/.test(n), "SIN GUANTES"], [n => /CASCO/.test(n), "SIN CASCO"], [n => /GAFAS|LENTES/.test(n), "SIN LENTES DE SEGURIDAD"],
+    [n => /ACORDON|DELIMIT/.test(n), "ÁREA SIN DELIMITAR"], [n => /ANCLAJE/.test(n), "EQUIPO SIN ANCLAJE"], [n => /ENERGIZAD/.test(n), "EQUIPO ENERGIZADO"], [n => /FUMA/.test(n), "FUMAR EN ÁREA NO PERMITIDA"]];
+  const porK = k => CATS.find(c => c.k === k), porN = n => CATS.find(c => U.norm(c.n) === U.norm(n));
+  const esDeb = c => /^DEBIL/i.test(c.si || ""), esCum = c => /^CUMPLE/i.test(c.si || "");
+  const texto = c => String(c.qp || c.doc || "").replace(/\s+/g, " ").replace(/^¿[^?]{0,90}\?\s*/, "").trim();
+  // lo capturado todo en mayusculas se pasa a oraciones normales
+  const oracion = t => { t = String(t || "").trim(); const may = (t.match(/[A-ZÁÉÍÓÚÑ]/g) || []).length, min = (t.match(/[a-záéíóúñ]/g) || []).length;
+    if (may > min * 2) t = t.toLowerCase().replace(/(^|[.!?]\s+)([a-záéíóúñ])/g, (m, a, b) => a + b.toUpperCase())
+      .replace(/[\wáéíóúñ-]*\d[\wáéíóúñ-]*/gi, w => w.toUpperCase()).replace(/\b(epp|cfe|pnd|loto|ii?)\b/gi, w => w.toUpperCase()); return t ? t[0].toUpperCase() + t.slice(1) : ""; };     // claves de equipo y siglas en mayusculas
+  const recorta = (t, n) => { t = String(t || "").trim(); return t.length <= n ? t : t.slice(0, n - 1).replace(/[\s,;:]+\S*$/, "") + "…"; };
+  const punto = t => t && !/[.!?…]$/.test(t) ? t + "." : t;
+  const catDe = c => { const t = U.norm(texto(c)); return CATS.find(k => k.re.test(t)) || porK(STD[U.norm(c.std)]) || null; };
+  const pct = (a, b) => (b ? Math.round(a / b * 100) : 0) + "%";
+  const FONT = "'Arial Narrow','Avenir Next Condensed','Roboto Condensed','sans-serif-condensed','Segoe UI',Arial,sans-serif";
+  const TRI = `<svg viewBox="0 0 64 56" width="58" height="51"><path d="M32 4 61 52H3z" fill="#E01F26" stroke="#E01F26" stroke-width="6" stroke-linejoin="round"/><rect x="28.5" y="17" width="7" height="21" rx="3.5" fill="#fff"/><circle cx="32" cy="45" r="4" fill="#fff"/></svg>`;
+  // estilos de la infografia (1080 px de ancho); los mismos para la vista previa y para la imagen
+  const CSS_IMG = `.ti{width:1080px;box-sizing:border-box;padding:18px;background:#fff;font-family:${FONT};color:#1F3B73;line-height:1.15}
+    .ti *{box-sizing:border-box}
+    .ti-cab{display:flex;align-items:center;gap:26px;background:linear-gradient(90deg,#1B4F9C,#1E5BB5);color:#fff;border-radius:12px;padding:14px 30px}
+    .ti-fecha{font-size:76px;font-weight:900;letter-spacing:-1px;white-space:nowrap} .ti-sep{width:3px;align-self:stretch;background:#fff;opacity:.85;margin:6px 0}
+    .ti-tit{font-size:36px;font-weight:800;line-height:1.08;text-transform:uppercase}
+    .ti-kpis{display:flex;gap:12px;margin:12px 0}
+    .ti-k{flex:1;display:flex;align-items:center;gap:14px;border:2px solid;border-radius:10px;padding:8px 18px}
+    .ti-k b{font-size:72px;font-weight:900;letter-spacing:-2px;line-height:1} .ti-k span{font-size:23px;font-weight:800;text-transform:uppercase;line-height:1.08}
+    .ti-k.az{background:#E4F0FB;border-color:#A8C9EC;color:#1B4F9C} .ti-k.ve{background:#E5F4EA;border-color:#9FD2AE;color:#1E7B3A} .ti-k.ro{background:#FDE8EA;border-color:#F3AAB1;color:#D7141E}
+    .ti-cols{display:flex;gap:14px;align-items:flex-start}
+    .ti-izq{flex:0 0 63%;min-width:0} .ti-der{flex:1;min-width:0}
+    .ti-h{display:flex;align-items:center;gap:16px;color:#fff;border-radius:10px 10px 0 0;padding:10px 18px;min-height:78px}
+    .ti-h.ro{background:linear-gradient(90deg,#D7141E,#E52A2A)} .ti-h.na{background:linear-gradient(90deg,#F28C1E,#F7A23B);justify-content:center;text-align:center}
+    .ti-h b{font-size:56px;font-weight:900;letter-spacing:-1px;white-space:nowrap} .ti-h i{width:3px;align-self:stretch;background:#fff;opacity:.85;margin:4px 0}
+    .ti-h span{font-size:26px;font-weight:800;text-transform:uppercase;line-height:1.08}
+    .ti-top{background:#FDECEE;border:2px solid #F4B8BE;border-radius:10px;padding:12px 16px 14px;margin-top:8px}
+    .ti-tt{display:flex;align-items:center;gap:14px}
+    .ti-num{flex:0 0 auto;width:70px;height:70px;border-radius:50%;background:#E01F26;color:#fff;font-size:50px;font-weight:900;display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 4px #fff,0 0 0 6px #F3A3AA}
+    .ti-id{flex:0 0 auto;background:#D7141E;color:#fff;font-size:28px;font-weight:800;border-radius:8px;padding:5px 14px;white-space:nowrap}
+    .ti-ttl{flex:1;color:#D7141E;font-size:24px;font-weight:800;text-transform:uppercase;line-height:1.1}
+    .ti-top p{margin:10px 0 0;font-size:23px;font-weight:500;line-height:1.25;color:#1F3B73}
+    .ti-pot{display:flex;align-items:center;gap:16px;background:#FAD6DA;border-radius:8px;padding:8px 14px;margin-top:10px;font-size:22px;color:#4A1D24;line-height:1.2}
+    .ti-pot svg{flex:0 0 auto} .ti-pot b{color:#D7141E;font-weight:800}
+    .ti-g{background:#FFF4E3;border:2px solid #F8D3A0;border-radius:10px;padding:10px 14px 12px;margin-top:8px}
+    .ti-p{display:inline-block;background:#F28C1E;color:#fff;font-size:24px;font-weight:800;text-transform:uppercase;border-radius:6px;padding:4px 14px;margin:0 0 6px} .ti-p.ids{text-transform:none}
+    .ti-g ul{margin:4px 0 0;padding-left:24px} .ti-g li{font-size:20.5px;font-weight:500;line-height:1.22;margin-top:3px;color:#1F3B73}
+    .ti-nada{background:#E5F4EA;border:2px solid #9FD2AE;border-radius:10px;padding:18px;font-size:24px;font-weight:700;color:#1E7B3A;margin-top:8px}`;
+
+  const TDIA = B.tdia = {
+    F: null, G: {},
+    fechaTxt(f) { const d = U.fecha(f); return d.getDate() + " " + MES[d.getMonth()]; },
+    clave(F) { return "dia:" + F.fecha + ":" + F.fu; },
+    peso(c) {
+      const t = U.norm(texto(c)), k = catDe(c); let p = k ? k.sev : 4;
+      if (/DEBAJO DE|BAJO (LA |UNA )?CARGA/.test(t)) p += 3;     // en la linea de fuego
+      if (/ARNES|SIN ANCLAR|LINEAS? DE VIDA/.test(t)) p += 2;
+      if (/ENERGIZAD/.test(t)) p += 2;
+      return p;
+    },
+    fila(c) {
+      const k = catDe(c), n = U.norm(texto(c)), m = /DEBAJO DE (UN|UNA|LA|EL|LOS|LAS) ([^\s,.;]+)/.exec(texto(c).toUpperCase());
+      const sub = m ? "DEBAJO DE " + m[1] + " " + m[2] : ((SUB.find(([f]) => f(n)) || [])[1] || "");
+      const cab = k ? k.top : String(c.std || "Observación").toUpperCase();
+      return { id: String(c.id), tit: cab + (sub && sub !== cab ? " | " + sub : ""), desc: punto(recorta(oracion(texto(c)), 230)), pot: k ? k.pot : "lesiones al personal." };
+    },
+    vineta(c) { return punto(recorta(oracion(texto(c)).split(/(?<=[.!?])\s+/)[0], 80)); },
+    sugerirTop(L) { return L.filter(esDeb).sort((a, b) => this.peso(b) - this.peso(a) || (+b.id || 0) - (+a.id || 0)).slice(0, 3).map(c => this.fila(c)); },
+    propuesta(L, base) { return { t1: base.t1 || "OBSERVACIONES DE", t2: base.t2 || "SEGURIDAD INDUSTRIAL", k3: base.k3 || "DEBILIDADES DE SEGURIDAD INDUSTRIAL", kpi: {}, top: this.sugerirTop(L), cards: {}, msg: "", msgEd: false }; },
+    // tarjetas que aparecieron despues de guardar (otro Excel): entran con su tema y su vineta propuestos
+    completar(G, L) {
+      G.cards = G.cards || {}; G.kpi = G.kpi || {}; G.top = Array.isArray(G.top) ? G.top : [];
+      for (const c of L.filter(esDeb)) if (!G.cards[c.id]) { const k = catDe(c); G.cards[c.id] = { inc: true, cat: k ? k.n : String(c.std || "OTRAS").toUpperCase(), bul: this.vineta(c) }; }
+    },
+    modelo(L, G) {
+      const deb = L.filter(esDeb), cum = L.filter(esCum), num = (v, d) => String(v ?? "").trim() !== "" && !isNaN(+v) ? +v : d;
+      const n = num(G.kpi.n, L.length), nc = num(G.kpi.cum, cum.length), nd = num(G.kpi.deb, deb.length);
+      const m = new Map();
+      for (const c of deb) { const x = G.cards[c.id]; if (!x || x.inc === false) continue; const k = String(x.cat || "OTRAS").trim().toUpperCase() || "OTRAS"; if (!m.has(k)) m.set(k, []); m.get(k).push({ id: String(c.id), bul: String(x.bul || "").trim() }); }
+      const sev = k => (porN(k) || { sev: 0 }).sev;
+      const grupos = [...m].map(([cat, cs]) => ({ cat, cs })).sort((a, b) => b.cs.length - a.cs.length || sev(b.cat) - sev(a.cat));
+      return { n, cum: nc, deb: nd, grupos, top: G.top.filter(t => t && t.id), debs: deb };
+    },
+    html(M, G, F) {
+      const top = M.top.map((t, i) => `<div class="ti-top"><div class="ti-tt"><div class="ti-num">${i + 1}</div><div class="ti-id">ID ${esc(t.id)}</div><div class="ti-ttl">${esc(t.tit)}</div></div>
+          ${t.desc ? `<p>${esc(t.desc)}</p>` : ""}${t.pot ? `<div class="ti-pot">${TRI}<div><b>Potencial:</b> ${esc(t.pot)}</div></div>` : ""}</div>`).join("");
+      const gr = M.grupos.map(g => `<div class="ti-g"><div class="ti-p">${esc(g.cat)}</div><br><div class="ti-p ids">ID${g.cs.length > 1 ? "s" : ""} ${esc(g.cs.map(x => x.id).join(", "))}</div>
+          ${g.cs.some(x => x.bul) ? `<ul>${g.cs.filter(x => x.bul).map(x => `<li>${esc(x.bul)}</li>`).join("")}</ul>` : ""}</div>`).join("");
+      return `<div class="ti"><div class="ti-cab"><div class="ti-fecha">${esc(this.fechaTxt(F.fecha))}</div><div class="ti-sep"></div><div class="ti-tit">${esc(G.t1)}<br>${esc(G.t2)}</div></div>
+        <div class="ti-kpis"><div class="ti-k az"><b>${M.n}</b><span>Observaciones<br>realizadas</span></div><div class="ti-k ve"><b>${M.cum}</b><span>Cumplieron<br>la expectativa</span></div>
+          <div class="ti-k ro"><b>${M.deb}</b><span>${esc(G.k3).replace(/^(\S+\s+DE)\s+/i, "$1<br>")}</span></div></div>
+        ${M.top.length || M.grupos.length ? `<div class="ti-cols">${M.top.length ? `<div class="ti-izq"><div class="ti-h ro"><b>TOP ${M.top.length}</b><i></i><span>Observaciones con mayor<br>potencial de consecuencia</span></div>${top}</div>` : ""}
+          ${M.grupos.length ? `<div class="ti-der"><div class="ti-h na"><span>Otras observaciones<br>(acciones repetitivas)</span></div>${gr}</div>` : ""}</div>`
+        : `<div class="ti-nada">Todas las observaciones del día cumplieron la expectativa.</div>`}</div>`;
+    },
+    // mensaje para WhatsApp (negritas con *asteriscos*)
+    mensaje(M, G, F) {
+      const AE = F.fu !== "SI", cats = [...new Set(M.grupos.map(g => g.cat))].map(porN).filter(Boolean).sort((a, b) => b.sev - a.sev), ks = cats.map(c => c.k);
+      const L = [`📋 *${G.t1} ${G.t2} · ${this.fechaTxt(F.fecha)}*`, "", `Se realizaron *${M.n} observaciones*:`, `✅ ${M.cum} cumplieron la expectativa (${pct(M.cum, M.n)}).`];
+      if (!M.deb) return L.concat(["", "¡Excelente! No se identificaron debilidades. Sigamos verificando los controles de seguridad antes y durante las actividades.", "", "✅ ¡La seguridad es responsabilidad de todos!"]).join("\n");
+      L.push(`⚠️ ${M.deb} debilidades identificadas (${pct(M.deb, M.n)}).`, "");
+      const temas = cats.slice(0, 2).map(c => c.tema);
+      L.push(`Continuamos identificando actos y condiciones inseguras en actividades relacionadas con ${AE ? "*Peligros de Alta Energía*" : "*Seguridad Industrial*"}${temas.length ? ", principalmente en " + temas.join(" y ") : ""}.`, "",
+        "⚠️ Estas desviaciones tienen el potencial de ocasionar lesiones graves, incapacitantes o fatales.", "", "Solicitamos su apoyo para:", "");
+      let acc = [];
+      for (const c of cats) { if (c.k === "areas" && ks.includes("epp")) continue; acc.push(c.k === "epp" && ks.includes("areas") ? "Verificar el uso del EPP requerido y la correcta delimitación de las áreas de trabajo." : c.acc); }
+      acc = acc.slice(0, 4).concat([AE ? "Retroalimentar al personal sobre los peligros de alta energía y corregir oportunamente las desviaciones identificadas." : "Retroalimentar al personal sobre los riesgos identificados y corregir oportunamente las desviaciones."]);
+      const NUM = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣"];
+      acc.forEach((a, i) => L.push(NUM[i] + " " + a, ""));
+      return L.concat(["⚠️ No debemos normalizar estas condiciones. Es fundamental que cada supervisor verifique los controles de seguridad antes y durante las actividades.", "",
+        "✅ Identificar, intervenir y corregir a tiempo puede evitar un accidente grave. ¡La seguridad es responsabilidad de todos!"]).join("\n");
+    },
+    // imagen PNG: el mismo HTML dentro de un SVG y de ahi a un lienzo
+    async png(html) {
+      const med = document.createElement("div"); med.style.cssText = "position:fixed;left:-20000px;top:0;width:1080px;zoom:1";
+      med.innerHTML = `<style>${CSS_IMG}</style>${html}`; document.body.appendChild(med);
+      const h = Math.ceil(med.querySelector(".ti").getBoundingClientRect().height); med.remove();
+      const caja = document.createElement("div"); caja.setAttribute("xmlns", "http://www.w3.org/1999/xhtml"); caja.innerHTML = `<style>${CSS_IMG}</style>${html}`;
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="${h}" viewBox="0 0 1080 ${h}"><foreignObject x="0" y="0" width="1080" height="${h}">${new XMLSerializer().serializeToString(caja)}</foreignObject></svg>`;
+      const img = new Image(); await new Promise((ok, mal) => { img.onload = ok; img.onerror = () => mal(new Error("No se pudo dibujar la imagen en este navegador.")); img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg); });
+      const cv = document.createElement("canvas"); cv.width = 1080; cv.height = h;
+      const cx = cv.getContext("2d"); cx.fillStyle = "#fff"; cx.fillRect(0, 0, cv.width, cv.height); cx.drawImage(img, 0, 0);
+      return await new Promise((ok, mal) => { try { cv.toBlob(b => b ? ok(b) : mal(new Error("No se pudo generar la imagen.")), "image/png"); } catch (e) { mal(new Error("Este navegador no permite generar la imagen.")); } });
+    },
+    async copiarTexto(txt, msg) {
+      try { await navigator.clipboard.writeText(txt); }
+      catch (e) { const a = document.createElement("textarea"); a.value = txt; document.body.appendChild(a); a.select(); document.execCommand("copy"); a.remove(); }
+      B.ui.toast(msg || "Mensaje copiado. Pégalo en WhatsApp.", "ok");
+    },
+
+    /* ------------------------------------------------------------ pantalla */
+    async vista(Pv, c) {
+      const D = TJ.datos, sems = Object.keys(D.semanas || {}).sort();
+      if (!sems.length) { c.innerHTML = `<div class="tarjeta">${B.ui.vacio("Primero carga los Excel de la semana en la pestaña <b>Tarjetas y tendencias</b>.", "doc")}</div>`; return; }
+      D.graf = D.graf || {};
+      const base = D.graf.diacfg || {}, F = this.F = this.F || { fu: ["AE", "SI", "AS"].includes(base.fu) ? base.fu : "AE", fecha: "" };
+      // tarjetas de las ultimas semanas cargadas (una observacion puede capturarse en la semana siguiente)
+      const todas = new Map(); for (const s of sems.slice(-5)) for (const x of await TJ.semana(s)) todas.set(String(x.id), x);
+      const pasa = x => F.fu === "AS" || String(x.fu || "").split(",").includes(F.fu), fo = x => String(x.fobs || "").slice(0, 10);
+      const cuenta = new Map(); for (const x of todas.values()) if (pasa(x) && /^\d{4}-\d{2}-\d{2}$/.test(fo(x))) cuenta.set(fo(x), (cuenta.get(fo(x)) || 0) + 1);
+      const fechas = [...cuenta.keys()].sort().reverse();
+      const selArch = `<div class="campo" style="flex:1 1 200px"><label>Archivo</label><select class="inp" id="tdFu">${[["AE", "Alta energía"], ["SI", "Seguridad Industrial (SEGIND)"], ["AS", "Ambos archivos"]].map(([k, t]) => `<option value="${k}" ${F.fu === k ? "selected" : ""}>${t}</option>`).join("")}</select></div>`;
+      if (!fechas.length) { c.innerHTML = `<div class="tarjeta"><div class="fila">${selArch}</div>${B.ui.vacio("No hay tarjetas de ese archivo en las semanas cargadas.", "doc")}</div>`; c.querySelector("#tdFu").onchange = e => { F.fu = e.target.value; Pv.pinta(); }; return; }
+      if (!fechas.includes(F.fecha)) { const ayer = U.sumar(U.iso(new Date()), -1); F.fecha = fechas.find(f => f <= ayer) || fechas[0]; }
+      const L = [...todas.values()].filter(x => pasa(x) && fo(x) === F.fecha).sort((a, b) => (+a.id || 0) - (+b.id || 0));
+      const clave = this.clave(F);
+      if (!this.G[clave]) this.G[clave] = D.graf[clave] ? JSON.parse(JSON.stringify(D.graf[clave])) : this.propuesta(L, base);
+      const G = this.G[clave]; this.completar(G, L);
+      let M = this.modelo(L, G);
+      const debs = M.debs, cats = CATS.map(k => k.n).concat([...new Set(Object.values(G.cards).map(x => String(x.cat || "").toUpperCase()))]).filter((v, i, a) => v && a.indexOf(v) === i);
+      const ftx = f => { const d = U.fecha(f); return DIAS[d.getDay()] + " " + d.getDate() + " " + MES[d.getMonth()].toLowerCase() + " " + d.getFullYear(); };
+      const inp = (k, t, ph, st) => `<div class="campo" style="${st || "flex:1 1 200px"}"><label>${t}</label><input class="inp" data-g="${k}" value="${esc(G[k] || "")}" placeholder="${esc(ph || "")}" style="text-transform:uppercase"></div>`;
+      const kp = (k, t, v) => `<div class="campo" style="flex:1 1 150px"><label>${t}</label><input class="inp" type="number" min="0" data-kpi="${k}" value="${esc(G.kpi[k] ?? "")}" placeholder="${v} (de las tarjetas)"></div>`;
+      const filaTop = (r, i) => `<div class="tarjeta" data-top="${i}" style="background:var(--fondo-2,#FAFAFA);padding:10px 12px;margin:0 0 8px">
+          <div class="fila" style="align-items:flex-end;gap:8px"><span class="badge r" style="margin-bottom:10px">${i + 1}</span>
+            <div class="campo" style="flex:0 0 200px;margin:0"><label>Tarjeta (ID)</label><select class="inp" data-tk="id">${(debs.some(x => String(x.id) === r.id) ? [] : [`<option value="${esc(r.id)}" selected>#${esc(r.id)} (no es de este día)</option>`]).concat(debs.map(x => `<option value="${esc(x.id)}" ${String(x.id) === r.id ? "selected" : ""}>#${esc(x.id)} · ${esc(recorta(x.std || "", 24))}</option>`)).join("")}</select></div>
+            <div class="campo" style="flex:1 1 300px;margin:0"><label>Título (tema | qué pasó)</label><input class="inp" data-tk="tit" value="${esc(r.tit)}" maxlength="90" style="text-transform:uppercase"></div>
+            <div style="display:flex;gap:4px;margin-bottom:2px"><button class="btn fantasma btn-icono" data-ta="ver" title="Ver la tarjeta completa">${B.ico("ojo")}</button><button class="btn fantasma btn-icono" data-ta="sube" title="Subir" ${i ? "" : "disabled"}>▲</button><button class="btn fantasma btn-icono" data-ta="baja" title="Bajar" ${i < G.top.length - 1 ? "" : "disabled"}>▼</button><button class="btn fantasma btn-icono" data-ta="quita" title="Quitar">${B.ico("basura")}</button></div></div>
+          <div class="fila" style="gap:8px;margin-top:8px"><div class="campo" style="flex:2 1 320px;margin:0"><label>Qué se observó</label><textarea class="inp" data-tk="desc" rows="2" maxlength="300">${esc(r.desc)}</textarea></div>
+            <div class="campo" style="flex:1 1 240px;margin:0"><label>Potencial</label><textarea class="inp" data-tk="pot" rows="2" maxlength="160">${esc(r.pot)}</textarea></div></div></div>`;
+      c.innerHTML = `
+        <div class="tarjeta"><h2 style="margin:0;font-size:17px">Tendencia del día</h2>
+          <p class="muted peque" style="margin:4px 0 0">Imagen con las observaciones de un día (por fecha de observación) y el mensaje para mandarla por WhatsApp. Todo se propone con las tarjetas; corrige lo que haga falta y <b>Guarda</b>.</p>
+          <div class="fila" style="margin-top:12px"><div class="campo" style="flex:1 1 230px"><label>Día observado</label><select class="inp" id="tdFe">${fechas.map(f => `<option value="${f}" ${f === F.fecha ? "selected" : ""}>${ftx(f)} · ${cuenta.get(f)} tarjeta(s)${D.graf[this.clave({ fecha: f, fu: F.fu })] ? " · guardada" : ""}</option>`).join("")}</select></div>${selArch}
+            ${inp("t1", "Título, renglón 1", "OBSERVACIONES DE")}${inp("t2", "Título, renglón 2", "SEGURIDAD INDUSTRIAL")}</div>
+          <div class="fila">${kp("n", "Observaciones realizadas", L.length)}${kp("cum", "Cumplieron la expectativa", L.filter(esCum).length)}${kp("deb", "Debilidades", debs.length)}${inp("k3", "Texto del recuadro de debilidades", "DEBILIDADES DE SEGURIDAD INDUSTRIAL", "flex:2 1 260px")}</div>
+          <p class="muted peque" style="margin:0">Los números vacíos se cuentan de las tarjetas; escribe uno solo si necesitas corregirlo.</p></div>
+        <div class="tarjeta"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start"><div><h2 style="margin:0;font-size:17px">TOP ${G.top.length} · observaciones con mayor potencial de consecuencia</h2><p class="muted peque" style="margin:4px 0 0">Se proponen las debilidades más graves (alturas, equipos sin asegurar, línea de fuego, energía eléctrica…). Cambia cuáles van, su orden y sus textos.</p></div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn chico sec" id="tdMas" ${G.top.length >= 5 || !debs.length ? "disabled" : ""}>${B.ico("mas")} Agregar</button><button class="btn chico sec" id="tdProp">${B.ico("reutilizar")} Proponer de nuevo</button></div></div>
+          <div style="margin-top:12px">${G.top.length ? G.top.map(filaTop).join("") : `<p class="muted" style="margin:0">Sin observaciones en el TOP.${debs.length ? "" : " No hay debilidades en este día."}</p>`}</div></div>
+        <div class="tarjeta"><h2 style="margin:0;font-size:17px">Otras observaciones (acciones repetitivas)</h2>
+          <p class="muted peque" style="margin:4px 0 10px">Cada debilidad del día va en un tema; las del mismo tema se juntan en un recuadro. Escribe el tema (o elige uno de la lista) y la frase corta que aparece en la imagen. Quita la marca para no incluirla.</p>
+          <datalist id="tdCats">${cats.map(n => `<option value="${esc(n)}">`).join("")}</datalist>
+          ${debs.length ? `<div class="tabla-cont"><table class="tabla"><thead><tr><th style="width:34px"></th><th>ID</th><th style="width:28%">Tema</th><th>Frase en la imagen</th></tr></thead><tbody>
+            ${debs.map(x => { const g = G.cards[x.id]; return `<tr data-cid="${esc(x.id)}"><td><input type="checkbox" data-c="inc" ${g.inc !== false ? "checked" : ""} style="width:18px;height:18px"></td>
+              <td><a href="#" data-verc="${esc(x.id)}" title="${esc(recorta(texto(x), 300))}">#${esc(x.id)}</a><br><small class="muted">${esc(recorta(x.std || "", 26))}</small></td>
+              <td><input class="inp" data-c="cat" list="tdCats" value="${esc(g.cat)}" style="text-transform:uppercase"></td><td><input class="inp" data-c="bul" value="${esc(g.bul)}" maxlength="140"></td></tr>`; }).join("")}</tbody></table></div>` : `<p class="muted" style="margin:0">No hay debilidades en este día.</p>`}</div>
+        <div class="tarjeta"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start"><div><h2 style="margin:0;font-size:17px">Imagen del día</h2><p class="muted peque" style="margin:4px 0 0">Copia la imagen y pégala en WhatsApp, o descárgala. En el celular, <b>Compartir</b> manda la imagen con el mensaje.</p></div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn sec" id="tdGuardar">${B.ico("ok")} Guardar</button><button class="btn" id="tdCopImg">${B.ico("doc")} Copiar imagen</button><button class="btn sec" id="tdPng">${B.ico("descargar")} Descargar imagen</button>${navigator.share ? `<button class="btn dorado" id="tdComp">${B.ico("subir")} Compartir</button>` : ""}</div></div>
+          <style>${CSS_IMG}</style><div id="tdPrevC" style="margin-top:12px;overflow:hidden;border:1px solid var(--borde,#e5e5e5);border-radius:10px"><div id="tdPrev"></div></div></div>
+        <div class="tarjeta"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start"><div><h2 style="margin:0;font-size:17px">Mensaje para WhatsApp</h2><p class="muted peque" style="margin:4px 0 0" id="tdMsgNota">${G.msgEd ? "Mensaje corregido a mano: ya no se actualiza solo. «Proponer de nuevo» lo vuelve a armar con la imagen." : "Se arma solo con la imagen; si lo corriges, se guarda tal cual."}</p></div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn chico sec" id="tdMsgProp">${B.ico("reutilizar")} Proponer de nuevo</button><button class="btn chico verde" id="tdMsgCop">${B.ico("doc")} Copiar mensaje</button></div></div>
+          <textarea class="inp" id="tdMsg" style="margin-top:10px;min-height:min(420px,52vh);font-family:inherit"></textarea></div>`;
+      const pv = c.querySelector("#tdPrev"), pc = c.querySelector("#tdPrevC"), tm = c.querySelector("#tdMsg");
+      // la imagen se deja hecha de antemano: el navegador solo deja copiarla si se hace en el instante del clic
+      let lista = null; const hacerPng = U.debounce(() => { const h = this.html(this.modelo(L, G), G, F); this.png(h).then(b => { lista = { h, b }; }).catch(() => { }); }, 700);
+      const imagenYa = () => { const h = this.html(this.modelo(L, G), G, F); return lista && lista.h === h ? lista.b : this.png(h); };
+      const prev = () => {
+        M = this.modelo(L, G); pv.innerHTML = this.html(M, G, F);
+        const z = Math.min(1, (pc.clientWidth - 2) / 1080); pv.style.zoom = z;
+        if (!G.msgEd) tm.value = this.mensaje(M, G, F);
+        hacerPng();
+      };
+      const lento = U.debounce(prev, 350), repinta = () => Pv.pinta();
+      if (G.msgEd) tm.value = G.msg || "";
+      c.querySelector("#tdFe").onchange = e => { F.fecha = e.target.value; repinta(); };
+      c.querySelector("#tdFu").onchange = e => { F.fu = e.target.value; F.fecha = ""; repinta(); };
+      c.querySelectorAll("[data-g]").forEach(i => i.oninput = () => { G[i.dataset.g] = i.value.trim().toUpperCase(); lento(); });
+      c.querySelectorAll("[data-kpi]").forEach(i => i.oninput = () => { G.kpi[i.dataset.kpi] = i.value.trim(); lento(); });
+      c.querySelectorAll("[data-top]").forEach(f => {
+        const i = +f.dataset.top, r = G.top[i];
+        f.querySelectorAll("[data-tk]").forEach(x => { const k = x.dataset.tk;
+          if (k === "id") x.onchange = () => { const t = debs.find(y => String(y.id) === x.value); if (t) { G.top[i] = this.fila(t); repinta(); } };
+          else x.oninput = () => { r[k] = k === "tit" ? x.value.trim().toUpperCase() : x.value.trim(); lento(); }; });
+        f.querySelectorAll("[data-ta]").forEach(b => b.onclick = () => { const a = b.dataset.ta;
+          if (a === "ver") { const t = todas.get(r.id); if (t) Pv.detalle(t, null, () => { }); return; }
+          if (a === "quita") G.top.splice(i, 1); else { const j = a === "sube" ? i - 1 : i + 1; [G.top[i], G.top[j]] = [G.top[j], G.top[i]]; }
+          repinta(); });
+      });
+      c.querySelector("#tdMas").onclick = () => { const t = debs.slice().sort((a, b) => this.peso(b) - this.peso(a)).find(y => !G.top.some(r => r.id === String(y.id))); if (t) { G.top.push(this.fila(t)); repinta(); } };
+      c.querySelector("#tdProp").onclick = async () => { if (!G.top.length || await B.ui.confirmar("Se reemplazará el TOP (y sus textos) por el propuesto.", "Proponer de nuevo", "Reemplazar")) { G.top = this.sugerirTop(L); repinta(); } };
+      c.querySelectorAll("tr[data-cid]").forEach(tr => { const g = G.cards[tr.dataset.cid];
+        tr.querySelectorAll("[data-c]").forEach(x => { const k = x.dataset.c; x[k === "inc" ? "onchange" : "oninput"] = () => { g[k] = k === "inc" ? x.checked : k === "cat" ? x.value.trim().toUpperCase() : x.value.trim(); lento(); }; }); });
+      c.querySelectorAll("[data-verc]").forEach(a => a.onclick = e => { e.preventDefault(); const t = todas.get(a.dataset.verc); if (t) Pv.detalle(t, null, () => { }); });
+      tm.oninput = () => { G.msg = tm.value; if (!G.msgEd) { G.msgEd = true; c.querySelector("#tdMsgNota").textContent = "Mensaje corregido a mano: ya no se actualiza solo. «Proponer de nuevo» lo vuelve a armar con la imagen."; } };
+      c.querySelector("#tdMsgProp").onclick = () => { G.msgEd = false; G.msg = ""; c.querySelector("#tdMsgNota").textContent = "Se arma solo con la imagen; si lo corriges, se guarda tal cual."; prev(); };
+      c.querySelector("#tdMsgCop").onclick = () => this.copiarTexto(tm.value);
+      const guardar = async callado => {
+        try {
+          if (G.msgEd) G.msg = tm.value;
+          await TJ.llamar("grafGuardar", { clave, datos: G });
+          const cfg = { fu: F.fu, t1: G.t1, t2: G.t2, k3: G.k3 };
+          await TJ.llamar("grafGuardar", { clave: "diacfg", datos: cfg });
+          D.graf[clave] = JSON.parse(JSON.stringify(G)); D.graf.diacfg = cfg;
+          if (!callado) B.ui.toast("Tendencia del día guardada.", "ok"); return true;
+        } catch (e) { if (!callado) B.ui.error(e); return false; }
+      };
+      const nombre = () => "TENDENCIA " + F.fecha + (F.fu === "AE" ? " ALTA ENERGIA" : F.fu === "SI" ? " SEGIND" : "") + ".png";
+      c.querySelector("#tdGuardar").onclick = () => guardar();
+      c.querySelector("#tdPng").onclick = async () => { guardar(true); try { U.descargar(nombre(), await this.png(this.html(this.modelo(L, G), G, F)), "image/png"); B.ui.toast("Imagen descargada: búscala en <b>Descargas</b>.", "ok", 6000); } catch (e) { B.ui.error(e); } };
+      c.querySelector("#tdCopImg").onclick = async () => {
+        guardar(true);
+        const blob = imagenYa();
+        try {
+          if (!(navigator.clipboard && window.ClipboardItem && window.isSecureContext)) throw new Error("sin portapapeles");
+          await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+          B.ui.toast("Imagen copiada. Pégala en WhatsApp (Ctrl+V) y después copia el mensaje.", "ok", 7000);
+        } catch (e) {
+          console.warn("Copiar imagen:", e);
+          // abierta desde otra PC de la red el navegador no deja copiar imagenes: se descarga
+          try { U.descargar(nombre(), await blob, "image/png"); B.ui.toast("Este navegador no deja copiar imágenes aquí: se descargó (búscala en <b>Descargas</b>) para adjuntarla.", "aviso", 8000); } catch (x) { B.ui.error(x); }
+        }
+      };
+      const comp = c.querySelector("#tdComp");
+      if (comp) comp.onclick = async () => {
+        guardar(true);
+        try {
+          const file = new File([await this.png(this.html(this.modelo(L, G), G, F))], nombre(), { type: "image/png" });
+          if (navigator.canShare && !navigator.canShare({ files: [file] })) throw new Error("Este navegador no permite compartir la imagen.");
+          await navigator.share({ files: [file], text: tm.value });
+        } catch (e) { if (e.name !== "AbortError") { await this.copiarTexto(tm.value, "No se pudo compartir la imagen (" + esc(e.message) + "). El mensaje quedó copiado; descarga la imagen y adjúntala."); } }
+      };
+      prev();
+    }
+  };
+})();
+;
 /* ---- organigrama.js ---- */
 /* =====================================================================
    BITACORA 24RU1 - LIDERES EN CAMPO: ORGANIGRAMA DE LA COORDINACION NUCLEAR
-   Recreado del "Organigrama Funcional" de la intranet: se navega igual (tocar un
-   area con "-> N areas" muestra sus areas; "Regresar" y la ruta de arriba vuelven).
+   Recreado del "Organigrama Funcional" de la intranet: se navega igual ("-> N areas"
+   muestra sus areas; "Regresar" y la ruta de arriba vuelven). Tocar una tarjeta la
+   voltea y muestra el correo y la extension del titular.
    Supervisores y tecnicos especializados pueden editar nombres, jefes, fotos y areas.
    Sirve tambien para saber a quien copiar en los correos de reconocimiento.
    Los datos viven en datos\organigrama.json (no van en la pagina publica).
@@ -6990,24 +7291,43 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
   .og-area{background:#F1F5F9;border:1px solid #E2E8F0;border-radius:12px;padding:18px 10px 24px;overflow-x:auto}
   .og-padre{display:flex;justify-content:center;margin-bottom:22px;position:relative}
   .og-padre:after{content:"";position:absolute;left:50%;bottom:-22px;height:22px;border-left:2px solid #CBD5E1}
-  .og-pcard{display:flex;align-items:center;gap:12px;background:linear-gradient(135deg,#1E6B4A,#27A35A);color:#fff;border-radius:10px;padding:10px 18px;box-shadow:0 4px 12px rgba(0,0,0,.15);min-width:240px;max-width:460px;position:relative}
+  .og-pcard{position:relative;min-width:240px;max-width:460px;perspective:900px;cursor:pointer}
+  .og-pcard .og-f{display:flex;align-items:center;gap:12px;background:linear-gradient(135deg,#1E6B4A,#27A35A);color:#fff;padding:10px 18px;box-shadow:0 4px 12px rgba(0,0,0,.15)}
   .og-pcard .og-foto{width:46px;height:46px;border-width:2px}
-  .og-pcard b{display:block;font-size:12.5px;line-height:1.25} .og-pcard small{display:block;font-size:10.5px;opacity:.92;margin-top:2px}
-  .og-hijos{display:flex;flex-wrap:wrap;justify-content:center;align-items:flex-start;gap:14px;border-top:2px solid #CBD5E1;padding-top:18px}
-  .og-card{position:relative;width:150px;background:#fff;border:2px solid var(--c);border-radius:10px;padding:12px 8px 10px;text-align:center;cursor:default;box-shadow:0 1px 4px rgba(0,0,0,.08)}
-  .og-card:before{content:"";position:absolute;left:50%;top:calc(-20px - var(--dy, 0px));height:calc(18px + var(--dy, 0px));border-left:2px solid #CBD5E1}
-  .og-card.drill{cursor:pointer} .og-card.drill:hover{box-shadow:0 4px 14px rgba(0,0,0,.18);transform:translateY(-1px)}
-  .og-card.luz{outline:3px solid #F59E0B;outline-offset:2px}
+  .og-pcard .og-f b{display:block;font-size:12.5px;line-height:1.25} .og-pcard .og-f small{display:block;font-size:10.5px;opacity:.92;margin-top:2px}
+  .og-hijos{--g:14px;display:flex;flex-wrap:wrap;justify-content:center;align-items:flex-start;gap:var(--g);padding-top:20px;position:relative}
+  .og-card{position:relative;width:150px;cursor:pointer;perspective:900px}
+  /* lineas como en la intranet: cada area sube a la barra y pone su tramo de barra; la primera y la ultima solo hasta su centro */
+  .og-card:before{content:"";position:absolute;left:50%;top:calc(-20px - var(--dy, 0px));height:calc(20px + var(--dy, 0px));border-left:2px solid #CBD5E1}
+  .og-hijos>.og-card:after,.og-hijos>.og-grupo:before{content:"";position:absolute;top:calc(-20px - var(--dy, 0px));left:calc(var(--g) / -2);right:calc(var(--g) / -2);border-top:2px solid #CBD5E1}
+  .og-hijos>.og-card:first-child:after,.og-hijos>.og-grupo:first-child:before{left:50%} .og-hijos>.og-card:last-child:after,.og-hijos>.og-grupo:last-child:before{right:50%}
+  /* tarjeta que gira: al frente el area y su titular; atras su correo y su extension */
+  .og-in{position:relative;transition:transform .55s cubic-bezier(.4,.2,.2,1);transform-style:preserve-3d}
+  .og-vuelta>.og-in{transform:rotateY(180deg)}
+  .og-f,.og-b{backface-visibility:hidden;-webkit-backface-visibility:hidden;border-radius:10px}
+  .og-card .og-f{background:#fff;border:2px solid var(--c);padding:12px 8px 10px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,.08);transition:box-shadow .15s}
+  .og-card:hover .og-f{box-shadow:0 4px 14px rgba(0,0,0,.2)}
+  .og-b{position:absolute;inset:0;transform:rotateY(180deg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;padding:8px;text-align:center;background:var(--c);color:#fff;overflow:hidden;box-shadow:0 4px 14px rgba(0,0,0,.2)}
+  .og-bt{font-size:9.5px;font-weight:800;line-height:1.2;text-transform:uppercase;opacity:.95}
+  .og-mail{color:#fff;font-size:10.5px;font-weight:600;word-break:break-all;line-height:1.25;text-decoration:underline}
+  .og-ext{font-size:12px;font-weight:800} .og-sin{font-size:10px;font-style:italic;opacity:.9;line-height:1.25}
+  .og-ver{border:0;background:#fff;color:var(--c);font-weight:800;font-size:10px;border-radius:999px;padding:3px 10px;cursor:pointer;margin-top:2px}
+  .og-pcard .og-b{flex-direction:row;flex-wrap:wrap;gap:4px 14px;padding:6px 14px}
+  .og-card.luz .og-f{outline:3px solid #F59E0B;outline-offset:2px}
   .og-foto{width:56px;height:56px;border-radius:50%;margin:0 auto 6px;overflow:hidden;border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.25);background:#8B1E2D;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:15px}
   .og-foto img{width:100%;height:100%;object-fit:cover}
   .og-n{font-size:10.5px;font-weight:800;color:#1f2937;line-height:1.25;text-transform:uppercase}
   .og-j{font-size:9.5px;color:#475569;margin-top:3px;line-height:1.2;text-transform:uppercase} .og-j.vac{color:#b91c1c;font-style:italic}
   .og-badge{display:inline-block;margin-top:6px;font-size:9.5px;font-weight:700;color:#1E8F55;border:1px solid #9AD3B2;border-radius:999px;padding:1px 8px;background:#F0FBF4}
-  .og-ed{position:absolute;top:4px;right:4px;border:0;background:#F1F5F9;border-radius:6px;width:24px;height:24px;cursor:pointer;font-size:12px}
+  .og-badge{cursor:pointer} .og-badge:hover{background:#DCF5E5}
+  .og-ed{position:absolute;z-index:3;top:4px;right:4px;border:0;background:#F1F5F9;border-radius:6px;width:24px;height:24px;cursor:pointer;font-size:12px}
   .og-grupo{display:flex;flex-direction:column;align-items:center;position:relative;align-self:flex-start}
-  .og-raiz{flex-wrap:nowrap;justify-content:flex-start;min-width:max-content;padding-left:8px;padding-right:8px} .og-raiz .og-card{width:142px} .og-raiz .og-grupo .og-hijos{gap:10px}
-  .og-supv{display:flex;justify-content:center;gap:14px;margin:-4px 0 22px;padding-left:260px;position:relative} .og-supv .og-card{width:142px} .og-supv .og-card:before{display:none}
-  .og-grupo .og-hijos{margin-top:22px;position:relative} .og-grupo>.og-card:after{content:"";position:absolute;left:50%;bottom:-24px;height:22px;border-left:2px solid #CBD5E1}
+  .og-raiz{flex-wrap:nowrap;justify-content:flex-start;min-width:max-content;padding-left:8px;padding-right:8px} .og-raiz .og-card{width:142px} .og-raiz .og-grupo .og-hijos{--g:10px}
+  /* la supervision cuelga a un lado de la linea que baja del coordinador */
+  .og-supv{display:flex;justify-content:flex-start;gap:14px;margin:-4px 0 22px;padding-left:calc(50% + 60px);position:relative}
+  .og-supv:before{content:"";position:absolute;left:50%;top:0;bottom:-22px;border-left:2px solid #CBD5E1}
+  .og-supv .og-card{width:142px} .og-supv .og-card:before{display:none} .og-supv .og-card:first-child:before{display:block;left:auto;right:100%;top:50%;width:60px;height:0;border-left:0;border-top:2px solid #CBD5E1}
+  .og-grupo .og-hijos{margin-top:22px} .og-grupo>.og-card:after{content:"";position:absolute;left:50%;bottom:-22px;height:22px;border-left:2px solid #CBD5E1}
   .og-res{position:absolute;right:0;z-index:30;background:#fff;color:#111;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.25);max-height:320px;overflow:auto;width:min(420px,90vw);margin-top:4px}
   .og-res a{display:block;padding:7px 12px;border-bottom:1px solid #eee;color:inherit;text-decoration:none;font-size:12.5px} .og-res a:hover{background:#F1F5F9} .og-res small{color:#64748b}
   .og-pie{font-size:11.5px;color:#64748b;margin-top:10px;text-align:center}
@@ -7023,13 +7343,22 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
     // area al nivel de subgerencia: la que depende de la gerencia, o la que depende directo de la coordinacion
     nivelSub(id) { const r = this.ruta(id), iG = r.findIndex(x => x.t === "gerencia"); if (iG >= 0) return r[iG + 1] || null; return r[1] || null; },
     iniciales(s) { return String(s || "").split(/\s+/).filter(Boolean).slice(0, 2).map(x => x[0]).join("") || "?"; },
+    // correo del titular (directorio de correos) y su extension (se captura al editar el area)
+    correo(n) { return n.j ? ((TJ.datos && TJ.datos.correos) || {})["N:" + U.norm(n.j)] || "" : ""; },
+    reverso(n, k) {
+      const cor = this.correo(n), ext = String(n.x || "").trim();
+      return `<div class="og-b"><div class="og-bt">${esc(n.j || "Sin titular")}</div>
+        ${cor ? `<a class="og-mail" href="mailto:${esc(cor)}" title="Escribirle un correo">✉ ${esc(cor)}</a>` : ""}${ext ? `<div class="og-ext">☎ Ext. ${esc(ext)}</div>` : ""}
+        ${!cor && !ext ? `<div class="og-sin">Sin correo ni extensión capturados${this.editar ? " · usa ✎ para agregarlos" : ""}</div>` : ""}
+        ${k ? `<button class="og-ver" data-ver="${n.id}">Ver ${k} área${k === 1 ? "" : "s"} →</button>` : ""}</div>`;
+    },
     card(n, extra, dy) {
       const k = this.hijos(n.id).length, c = "#" + (COL[n.t] || COL.default);
-      return `<div class="og-card ${k ? "drill" : ""} ${+this.luz === +n.id ? "luz" : ""}" data-id="${n.id}" style="--c:${c};${dy ? `margin-top:${dy}px;--dy:${dy}px` : ""}" title="${esc(n.n)}${k ? " · ver sus áreas" : ""}">
-        ${this.editar ? `<button class="og-ed" data-ed="${n.id}" title="Editar">✎</button>` : ""}
+      return `<div class="og-card ${+this.luz === +n.id ? "luz" : ""}" data-id="${n.id}" style="--c:${c};${dy ? `margin-top:${dy}px;--dy:${dy}px` : ""}" title="${esc(n.n)} · toca para ver su correo y extensión">
+        ${this.editar ? `<button class="og-ed" data-ed="${n.id}" title="Editar">✎</button>` : ""}<div class="og-in"><div class="og-f">
         <div class="og-foto">${n.f ? `<img src="${n.f}" alt="">` : esc(this.iniciales(n.j || n.n))}</div>
         <div class="og-n">${esc(n.n)}</div><div class="og-j ${n.j ? "" : "vac"}">${esc(n.j || "Sin titular")}</div>
-        ${k ? `<div class="og-badge">→ ${k} área${k === 1 ? "" : "s"}</div>` : ""}${extra || ""}</div>`;
+        ${k ? `<div class="og-badge" data-ver="${n.id}" title="Ver sus áreas">→ ${k} área${k === 1 ? "" : "s"}</div>` : ""}${extra || ""}</div>${this.reverso(n, k)}</div></div>`;
     },
     async vista(P, c) {
       try { await this.cargar(); } catch (e) { c.innerHTML = `<div class="aviso r">${B.ico("alerta")}<div>${esc(e.message)}</div></div>`; return; }
@@ -7053,14 +7382,19 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
         ${ruta.length > 1 ? `<div class="og-bc"><button class="btn chico sec" id="ogAtras">← Regresar</button>${ruta.map((n, i) => i < ruta.length - 1 ? `<a href="#" data-ir="${n.id}">${esc(n.n)}</a><i>›</i>` : `<b>${esc(n.n)}</b>`).join("")}</div>` : ""}
         ${this.editar ? `<div class="aviso a" style="margin-bottom:10px">${B.ico("editar")}<div><b>Modo edición:</b> toca ✎ en cualquier área para cambiar su nombre, el nombre de su titular, su foto o de quién depende. ${hij.length || cur ? `<a href="#" id="ogNuevo">+ Agregar un área que dependa de «${esc(cur.n)}»</a>` : ""}</div></div>` : ""}
         <div class="og-area">
-          <div class="og-padre"><div class="og-pcard" data-id="${cur.id}">${this.editar ? `<button class="og-ed" data-ed="${cur.id}" title="Editar" style="top:6px;right:6px">✎</button>` : ""}
-            <div class="og-foto">${cur.f ? `<img src="${cur.f}" alt="">` : esc(this.iniciales(cur.j || cur.n))}</div><div><b>${esc(cur.n)}</b><small>${esc(cur.j || "Sin titular")}</small></div></div></div>
+          <div class="og-padre"><div class="og-pcard" data-id="${cur.id}" style="--c:#1E6B4A" title="Toca para ver su correo y extensión">${this.editar ? `<button class="og-ed" data-ed="${cur.id}" title="Editar" style="top:6px;right:6px">✎</button>` : ""}
+            <div class="og-in"><div class="og-f"><div class="og-foto">${cur.f ? `<img src="${cur.f}" alt="">` : esc(this.iniciales(cur.j || cur.n))}</div><div><b>${esc(cur.n)}</b><small>${esc(cur.j || "Sin titular")}</small></div></div>${this.reverso(cur, 0)}</div></div></div>
           ${supv.length ? `<div class="og-supv">${supv.map(h => this.card(h)).join("")}</div>` : ""}
           ${resto.length ? `<div class="og-hijos ${enRaiz ? "og-raiz" : ""}">${filaHijos(resto)}</div>` : `<p class="muted" style="text-align:center;margin:0">Esta área no tiene áreas dependientes registradas.</p>`}
         </div>
         <div class="og-pie">${esc(this.meta.fuente || "")}${this.meta.mod ? " · última modificación " + esc(String(this.meta.mod).replace("T", " ").slice(0, 16)) + (this.meta.por && this.meta.por !== "CARGA" ? " por " + esc(this.meta.por) : "") : ""} · ${this.nodos.length} áreas</div>`;
       const ir = id => { this.cur = +id; this.luz = 0; P.pinta(); };
-      c.querySelectorAll(".og-card.drill").forEach(el => el.onclick = e => { if (e.target.closest("[data-ed]")) return; ir(el.dataset.id); });
+      // tocar una tarjeta la voltea (correo y extension); "→ N areas" o "Ver areas" abre sus areas
+      c.querySelectorAll(".og-card,.og-pcard").forEach(el => el.onclick = e => {
+        if (e.target.closest("[data-ed]") || e.target.closest("a")) return;
+        const v = e.target.closest("[data-ver]"); if (v) { e.stopPropagation(); ir(v.dataset.ver); return; }
+        const on = !el.classList.contains("og-vuelta"); c.querySelectorAll(".og-vuelta").forEach(x => x.classList.remove("og-vuelta")); el.classList.toggle("og-vuelta", on);
+      });
       c.querySelectorAll("[data-ir]").forEach(a => a.onclick = e => { e.preventDefault(); ir(a.dataset.ir); });
       const at = c.querySelector("#ogAtras"); if (at) at.onclick = () => ir(cur.p || 0);
       const be = c.querySelector("#ogEd"); if (be) be.onclick = () => { this.editar = !this.editar; P.pinta(); };
@@ -7093,14 +7427,15 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
             <label class="btn chico sec" style="cursor:pointer;margin-top:6px">Cambiar foto<input type="file" id="ogFotoIn" accept="image/*" hidden></label><br><a href="#" id="ogFotoX" class="peque">Quitar foto</a></div>
           <div style="flex:1;min-width:240px"><div class="campo"><label>Nombre del área</label><input class="inp" id="ogN" value="${esc(n.n)}" style="text-transform:uppercase"></div>
             <div class="campo"><label>Titular (jefe del área)</label><input class="inp" id="ogJ" value="${esc(n.j)}" style="text-transform:uppercase" placeholder="Vacío = sin titular"></div>
-            <div class="campo"><label>Correo del titular (para los correos de reconocimiento)</label><input class="inp" id="ogC" value="${esc(n.j ? C[clave(n.j)] || "" : "")}" placeholder="nombre@cfe.mx"></div>
+            <div class="grid2"><div class="campo"><label>Correo del titular</label><input class="inp" id="ogC" value="${esc(n.j ? C[clave(n.j)] || "" : "")}" placeholder="nombre@cfe.mx"></div>
+              <div class="campo"><label>Extensión telefónica</label><input class="inp" id="ogX" value="${esc(n.x || "")}" maxlength="30" placeholder="Ej. 4512"></div></div>
             <div class="grid2"><div class="campo"><label>Tipo</label><select class="inp" id="ogT">${TIPOS.map(([k, t]) => `<option value="${k}" ${n.t === k ? "selected" : ""}>${t}</option>`).join("")}</select></div>
               <div class="campo"><label>Depende de</label><select class="inp" id="ogP"><option value="0">— Ninguna (área principal)</option>${ops.map(([id, t]) => `<option value="${id}" ${+n.p === +id ? "selected" : ""}>${esc(t)}</option>`).join("")}</select></div></div></div></div>`,
         alAbrir: v => {
           v.querySelector("#ogFotoIn").onchange = async e => { const f = e.target.files[0]; if (!f) return; try { foto = await this.reducirFoto(f); v.querySelector("#ogFoto").innerHTML = `<img src="${foto}" alt="">`; } catch (x) { B.ui.error(x); } };
           v.querySelector("#ogFotoX").onclick = e => { e.preventDefault(); foto = ""; v.querySelector("#ogFoto").textContent = this.iniciales(v.querySelector("#ogJ").value || v.querySelector("#ogN").value); };
         },
-        botones: [{ t: "Cancelar", c: "sec", v: null }].concat(nuevo ? [] : [{ t: "Eliminar", c: "peligro", v: "borrar" }]).concat([{ t: "Guardar", c: "verde", v: v => ({ n: v.querySelector("#ogN").value.trim().toUpperCase(), j: v.querySelector("#ogJ").value.trim().toUpperCase(), c: v.querySelector("#ogC").value.trim(), t: v.querySelector("#ogT").value, p: +v.querySelector("#ogP").value }) }])
+        botones: [{ t: "Cancelar", c: "sec", v: null }].concat(nuevo ? [] : [{ t: "Eliminar", c: "peligro", v: "borrar" }]).concat([{ t: "Guardar", c: "verde", v: v => ({ n: v.querySelector("#ogN").value.trim().toUpperCase(), j: v.querySelector("#ogJ").value.trim().toUpperCase(), c: v.querySelector("#ogC").value.trim(), x: v.querySelector("#ogX").value.trim(), t: v.querySelector("#ogT").value, p: +v.querySelector("#ogP").value }) }])
       });
       if (!r) return;
       try {
@@ -7111,7 +7446,7 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
         } else {
           if (!r.n) { B.ui.toast("Escribe el nombre del área.", "error"); return; }
           if (r.c && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(r.c)) { B.ui.toast("El correo no parece válido.", "error"); return; }
-          await TJ.llamar("orgNodo", { nodo: { id: +n.id || 0, n: r.n, j: r.j, t: r.t, p: r.p, f: foto } });
+          await TJ.llamar("orgNodo", { nodo: { id: +n.id || 0, n: r.n, j: r.j, t: r.t, p: r.p, f: foto, x: r.x } });
           if (r.j && (r.c || "") !== ((TJ.datos.correos || {})[clave(r.j)] || "")) { await TJ.llamar("correosGuardar", { mapa: { [clave(r.j)]: r.c } }); (TJ.datos.correos = TJ.datos.correos || {})[clave(r.j)] = r.c; }
         }
         await this.cargar(true); B.ui.toast("Organigrama actualizado.", "ok", 2500); P.pinta();
@@ -8095,7 +8430,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "4.8.6", servidorViejo: false,
+  info: {}, VERSION: "4.9", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -8282,7 +8617,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "procedimientos" ? '<span class="contador oculto" id="cntProc"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.8.6")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.9")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
