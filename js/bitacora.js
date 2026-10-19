@@ -803,7 +803,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.8.5", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.8.6", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -6984,7 +6984,7 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
   const CSS = `
   .og-top{display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:linear-gradient(90deg,#1E6B4A,#27A35A);color:#fff;border-radius:12px;padding:12px 16px;margin-bottom:12px}
   .og-top h2{margin:0;font-size:16px;font-weight:800;letter-spacing:.02em;flex:1;min-width:220px}
-  .og-top .inp{max-width:300px;background:#fff}
+  .og-top .inp{max-width:300px;background:#fff;color:#1f2937} .og-top .inp::placeholder{color:#94a3b8}
   .og-bc{display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:#fff;border:1px solid var(--borde,#e5e5e5);border-radius:10px;padding:8px 12px;margin-bottom:12px;font-size:12.5px}
   .og-bc a{color:#1E8F55;font-weight:600;text-decoration:none} .og-bc b{color:#334155} .og-bc i{color:#94a3b8;font-style:normal}
   .og-area{background:#F1F5F9;border:1px solid #E2E8F0;border-radius:12px;padding:18px 10px 24px;overflow-x:auto}
@@ -7008,7 +7008,7 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
   .og-raiz{flex-wrap:nowrap;justify-content:flex-start;min-width:max-content;padding-left:8px;padding-right:8px} .og-raiz .og-card{width:142px} .og-raiz .og-grupo .og-hijos{gap:10px}
   .og-supv{display:flex;justify-content:center;gap:14px;margin:-4px 0 22px;padding-left:260px;position:relative} .og-supv .og-card{width:142px} .og-supv .og-card:before{display:none}
   .og-grupo .og-hijos{margin-top:22px;position:relative} .og-grupo>.og-card:after{content:"";position:absolute;left:50%;bottom:-24px;height:22px;border-left:2px solid #CBD5E1}
-  .og-res{position:absolute;z-index:30;background:#fff;color:#111;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.25);max-height:320px;overflow:auto;width:min(420px,90vw);margin-top:4px}
+  .og-res{position:absolute;right:0;z-index:30;background:#fff;color:#111;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.25);max-height:320px;overflow:auto;width:min(420px,90vw);margin-top:4px}
   .og-res a{display:block;padding:7px 12px;border-bottom:1px solid #eee;color:inherit;text-decoration:none;font-size:12.5px} .og-res a:hover{background:#F1F5F9} .og-res small{color:#64748b}
   .og-pie{font-size:11.5px;color:#64748b;margin-top:10px;text-align:center}
   @media (max-width:700px){.og-card{width:132px}.og-pcard{min-width:0}}`;
@@ -7145,8 +7145,11 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
   };
   // nombres de departamento del Excel que en el organigrama se llaman distinto
   // todo "Control de Calidad" (eléctrico, mecánico, I&C, recepción…) es del Departamento de Control de Calidad (Seguridad Nuclear)
-  const ALIAS = [[/DESEMPENO HUMANO/, "ESTANDARES DE DESEMPENO"], [/CONTROL (DE )?CALIDAD/, "DEPARTAMENTO DE CONTROL DE CALIDAD"]];
-  const tokens = s => U.norm(s).replace(/\(.*?\)/g, " ").replace(/[^A-Z0-9 ]/g, " ").split(" ").filter(w => w.length > 1 && !VACIAS.has(w));
+  const ALIAS = [[/DESEMPENO HUMANO/, "ESTANDARES DE DESEMPENO"], [/CONTROL (DE )?CALIDAD/, "DEPARTAMENTO DE CONTROL DE CALIDAD"],
+    [/^DTM$/, "DEPARTAMENTO TECNICO DE MANTENIMIENTO"], [/^I ?& ?C$|^I Y C$/, "DEPARTAMENTO DE INSTRUMENTACION Y CONTROL"],
+    [/PRODUCCION U(NIDAD)? ?1\b/, "DEPARTAMENTO DE PRODUCCION UNIDAD 1"], [/PRODUCCION U(NIDAD)? ?2\b/, "DEPARTAMENTO DE PRODUCCION UNIDAD 2"],
+    [/PLAN(ES)? DE EMERGENCIA/, "DEPARTAMENTO DEL PERE Y PEI"]];
+  const tokens = s => U.norm(s).replace(/\(.*?\)/g, " ").replace(/[^A-Z0-9 ]/g, " ").split(" ").filter(w => (w.length > 1 || /\d/.test(w)) && !VACIAS.has(w));
   const esAE = c => String(c.fu || "").split(",").includes("AE"), esDeb = c => /^DEBIL/i.test(c.si || "");
   const fechaCorta = f => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(f || ""); return m ? m[3] + "-" + MES[+m[2] - 1] + "-" + m[1].slice(2) : (f || ""); };
   const nombrePila = n => { const w = String(n || "").trim().split(/\s+/)[0] || ""; return w ? w[0].toUpperCase() + w.slice(1).toLowerCase() : ""; };
@@ -7177,14 +7180,15 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
       const dentro = (n, s) => desc(s).some(x => +x.id === +n.id) || +n.id === +s.id;
       // ¿lo que dice la tarjeta contradice al organigrama?
       const mal = n => { const s = nivel(n); if (sub) return !s || +s.id !== +sub.id; if (autonomo) return !!s && (s.t === "subgerencia" || s.t === "unidad"); return false; };
-      const error = n => mal(n) ? `La tarjeta dice «${c.area || "—"}${c.depto ? " · " + c.depto : ""}», pero en el organigrama ${n.n} depende de ${(nivel(n) || n).n}. Se usó el organigrama.` : "";
+      const error = n => mal(n) ? `La tarjeta dice «${c.area || "—"}${c.depto ? " · " + c.depto : ""}», pero en el organigrama ${n.n} ${nivel(n) && +nivel(n).id !== +n.id ? "depende de " + nivel(n).n : "no pertenece a ninguna subgerencia"}. Se usó el organigrama.` : "";
       const yo = N.find(n => valido(n) && n.j && U.norm(n.j) === U.norm(c.nom));
       if (yo) return { nodo: yo, seguro: true, titular: true, error: error(yo) };
       if (sub) { const d = elegir(desc(sub), depT); if (d) return { nodo: d, seguro: true, error: "" }; }
       // fuera de lo que dice la tarjeta solo se acepta un departamento u oficina con el mismo nombre (palabras exactas; "Mecánico"
       // o "Eléctrico" solos son ambiguos y no se buscan fuera de su subgerencia)
       const formal = n => ["departamento", "oficina", "unidad", "subgerencia", "supervision"].includes(n.t);
-      const g = (tokens(depT).length >= 2 || !sub) ? elegir(N.filter(n => valido(n) && formal(n) && !(sub && dentro(n, sub))), depT, true) : null;
+      const nT = tokens(depT).length;
+      const g = (nT >= 2 || !sub) ? elegir(N.filter(n => valido(n) && (formal(n) || nT >= 3) && !(sub && dentro(n, sub))), depT, true) : null;
       if (g) return { nodo: g, seguro: true, error: error(g) };
       if (sub) return { nodo: sub, seguro: false, soloSub: true, error: "" };
       return { nodo: null, seguro: false, error: "" };
@@ -8091,7 +8095,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "4.8.5", servidorViejo: false,
+  info: {}, VERSION: "4.8.6", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -8278,7 +8282,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "procedimientos" ? '<span class="contador oculto" id="cntProc"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.8.5")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.8.6")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
