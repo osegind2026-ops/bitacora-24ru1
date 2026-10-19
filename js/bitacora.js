@@ -803,7 +803,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.8.3", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.8.4", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -6993,9 +6993,9 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
   .og-pcard{display:flex;align-items:center;gap:12px;background:linear-gradient(135deg,#1E6B4A,#27A35A);color:#fff;border-radius:10px;padding:10px 18px;box-shadow:0 4px 12px rgba(0,0,0,.15);min-width:240px;max-width:460px;position:relative}
   .og-pcard .og-foto{width:46px;height:46px;border-width:2px}
   .og-pcard b{display:block;font-size:12.5px;line-height:1.25} .og-pcard small{display:block;font-size:10.5px;opacity:.92;margin-top:2px}
-  .og-hijos{display:flex;flex-wrap:wrap;justify-content:center;gap:14px;border-top:2px solid #CBD5E1;padding-top:18px}
+  .og-hijos{display:flex;flex-wrap:wrap;justify-content:center;align-items:flex-start;gap:14px;border-top:2px solid #CBD5E1;padding-top:18px}
   .og-card{position:relative;width:150px;background:#fff;border:2px solid var(--c);border-radius:10px;padding:12px 8px 10px;text-align:center;cursor:default;box-shadow:0 1px 4px rgba(0,0,0,.08)}
-  .og-card:before{content:"";position:absolute;left:50%;top:-20px;height:18px;border-left:2px solid #CBD5E1}
+  .og-card:before{content:"";position:absolute;left:50%;top:calc(-20px - var(--dy, 0px));height:calc(18px + var(--dy, 0px));border-left:2px solid #CBD5E1}
   .og-card.drill{cursor:pointer} .og-card.drill:hover{box-shadow:0 4px 14px rgba(0,0,0,.18);transform:translateY(-1px)}
   .og-card.luz{outline:3px solid #F59E0B;outline-offset:2px}
   .og-foto{width:56px;height:56px;border-radius:50%;margin:0 auto 6px;overflow:hidden;border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.25);background:#8B1E2D;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:15px}
@@ -7004,9 +7004,9 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
   .og-j{font-size:9.5px;color:#475569;margin-top:3px;line-height:1.2;text-transform:uppercase} .og-j.vac{color:#b91c1c;font-style:italic}
   .og-badge{display:inline-block;margin-top:6px;font-size:9.5px;font-weight:700;color:#1E8F55;border:1px solid #9AD3B2;border-radius:999px;padding:1px 8px;background:#F0FBF4}
   .og-ed{position:absolute;top:4px;right:4px;border:0;background:#F1F5F9;border-radius:6px;width:24px;height:24px;cursor:pointer;font-size:12px}
-  .og-grupo{display:flex;flex-direction:column;align-items:center;position:relative}
-  .og-raiz{flex-wrap:nowrap;justify-content:flex-start;min-width:max-content;padding-left:8px;padding-right:8px} .og-raiz .og-card{width:126px} .og-raiz .og-grupo .og-hijos{gap:10px}
-  .og-supv{display:flex;justify-content:center;gap:14px;margin:-4px 0 22px;padding-left:260px;position:relative} .og-supv .og-card{width:126px} .og-supv .og-card:before{display:none}
+  .og-grupo{display:flex;flex-direction:column;align-items:center;position:relative;align-self:flex-start}
+  .og-raiz{flex-wrap:nowrap;justify-content:flex-start;min-width:max-content;padding-left:8px;padding-right:8px} .og-raiz .og-card{width:142px} .og-raiz .og-grupo .og-hijos{gap:10px}
+  .og-supv{display:flex;justify-content:center;gap:14px;margin:-4px 0 22px;padding-left:260px;position:relative} .og-supv .og-card{width:142px} .og-supv .og-card:before{display:none}
   .og-grupo .og-hijos{margin-top:22px;position:relative} .og-grupo>.og-card:after{content:"";position:absolute;left:50%;bottom:-24px;height:22px;border-left:2px solid #CBD5E1}
   .og-res{position:absolute;z-index:30;background:#fff;color:#111;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.25);max-height:320px;overflow:auto;width:min(420px,90vw);margin-top:4px}
   .og-res a{display:block;padding:7px 12px;border-bottom:1px solid #eee;color:inherit;text-decoration:none;font-size:12.5px} .og-res a:hover{background:#F1F5F9} .og-res small{color:#64748b}
@@ -7023,9 +7023,9 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
     // area al nivel de subgerencia: la que depende de la gerencia, o la que depende directo de la coordinacion
     nivelSub(id) { const r = this.ruta(id), iG = r.findIndex(x => x.t === "gerencia"); if (iG >= 0) return r[iG + 1] || null; return r[1] || null; },
     iniciales(s) { return String(s || "").split(/\s+/).filter(Boolean).slice(0, 2).map(x => x[0]).join("") || "?"; },
-    card(n, extra) {
+    card(n, extra, dy) {
       const k = this.hijos(n.id).length, c = "#" + (COL[n.t] || COL.default);
-      return `<div class="og-card ${k ? "drill" : ""} ${+this.luz === +n.id ? "luz" : ""}" data-id="${n.id}" style="--c:${c}" title="${esc(n.n)}${k ? " · ver sus áreas" : ""}">
+      return `<div class="og-card ${k ? "drill" : ""} ${+this.luz === +n.id ? "luz" : ""}" data-id="${n.id}" style="--c:${c};${dy ? `margin-top:${dy}px;--dy:${dy}px` : ""}" title="${esc(n.n)}${k ? " · ver sus áreas" : ""}">
         ${this.editar ? `<button class="og-ed" data-ed="${n.id}" title="Editar">✎</button>` : ""}
         <div class="og-foto">${n.f ? `<img src="${n.f}" alt="">` : esc(this.iniciales(n.j || n.n))}</div>
         <div class="og-n">${esc(n.n)}</div><div class="og-j ${n.j ? "" : "vac"}">${esc(n.j || "Sin titular")}</div>
@@ -7039,8 +7039,13 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
       const ruta = this.ruta(cur.id), hij = this.hijos(cur.id);
       // vista principal como en la intranet: la supervision a un lado, y la gerencia con sus subgerencias junto a las demas areas
       const enRaiz = cur === R, supv = enRaiz ? hij.filter(h => h.t === "supervision") : [], resto = enRaiz ? hij.filter(h => h.t !== "supervision") : hij;
+      const RANGO = { gerencia: 0, supervision: 0, subgerencia: 0, unidad: 1, departamento: 2, oficina: 3, default: 4 }, rango = h => RANGO[h.t] ?? 4;
+      const hayGrupo = enRaiz && resto.some(h => h.t === "gerencia" && this.hijos(h.id).some(x => x.t === "subgerencia"));
+      const min = Math.min(...resto.map(rango));
+      // en la vista principal las demas areas quedan a la altura de las subgerencias y van bajando por nivel; dentro de un area, 25 px por nivel
+      const dy = h => hayGrupo ? (h.t === "gerencia" ? 0 : 214 + Math.max(0, rango(h) - 1) * 46) : (rango(h) - min) * 25;
       const filaHijos = lista => lista.map(h => enRaiz && h.t === "gerencia" && this.hijos(h.id).some(x => x.t === "subgerencia")
-        ? `<div class="og-grupo">${this.card(h)}<div class="og-hijos">${this.hijos(h.id).filter(x => x.t === "subgerencia").map(x => this.card(x)).join("")}</div></div>` : this.card(h)).join("");
+        ? `<div class="og-grupo">${this.card(h)}<div class="og-hijos">${this.hijos(h.id).filter(x => x.t === "subgerencia").map(x => this.card(x)).join("")}</div></div>` : this.card(h, "", dy(h))).join("");
       c.innerHTML = `<style>${CSS}</style>
         <div class="og-top"><h2>ORGANIGRAMA DE LA COORDINACIÓN NUCLEAR</h2>
           <div style="position:relative"><input class="inp" id="ogQ" placeholder="Buscar área o persona…" autocomplete="off"><div id="ogRes"></div></div>
@@ -8071,7 +8076,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "4.8.3", servidorViejo: false,
+  info: {}, VERSION: "4.8.4", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -8258,7 +8263,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "procedimientos" ? '<span class="contador oculto" id="cntProc"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.8.3")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.8.4")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
