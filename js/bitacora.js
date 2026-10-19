@@ -803,7 +803,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.8", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.8.1", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -7135,9 +7135,10 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
     cuerpo: "Buen día estimado(a) {nombre}\n\nGracias por tu participación en la identificación y reporte de desviaciones mediante la tarjeta de observación líderes de campo.\n\n" +
       "Para dar continuidad al seguimiento, te agradecería tu apoyo con la elaboración del Reporte de Desviación, anexo **PAG-28-14**, en coordinación con el jefe de departamento o supervisor responsable de la persona que realizó el acto inseguro, conforme al proceso establecido en el **Plan de Seguridad e Higiene y al diagrama del anexo PAG-28-13**.\n\n" +
       "Tu apoyo, como persona que identificó y documentó el evento, es de gran importancia para contar con una descripción clara de lo ocurrido y de las acciones inmediatas realizadas, así como para facilitar el seguimiento correspondiente.\nAnexo de referencia los anexos correspondientes.\n\n{tabla}\n\n" +
-      "Quedo atenta para cualquier duda que se presente.\n\nMuchas gracias por tu colaboración y compromiso con la seguridad.\n\nSaludos cordiales.",
-    firma: "{usuario}\nSeguridad Industrial\nCentral Nucleoeléctrica Laguna Verde"
+      "Quedo atenta para cualquier duda que se presente.\n\nMuchas gracias por tu colaboración y compromiso con la seguridad.\n\nSaludos cordiales."
   };
+  // nombres de departamento del Excel que en el organigrama se llaman distinto
+  const ALIAS = [[/DESEMPENO HUMANO/, "ESTANDARES DE DESEMPENO"]];
   const tokens = s => U.norm(s).replace(/\(.*?\)/g, " ").replace(/[^A-Z0-9 ]/g, " ").split(" ").filter(w => w.length > 1 && !VACIAS.has(w));
   const esAE = c => String(c.fu || "").split(",").includes("AE"), esDeb = c => /^DEBIL/i.test(c.si || "");
   const fechaCorta = f => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(f || ""); return m ? m[3] + "-" + MES[+m[2] - 1] + "-" + m[1].slice(2) : (f || ""); };
@@ -7145,25 +7146,41 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
 
   const CR = B.correos = {
     F: null, G: null, lim: 200,
-    base() { return { desde: "", hasta: "", fu: "", si: "", std: "", subg: "", dep: "", q: "", orden: "id" }; },
+    base() { return { desde: "", hasta: "", fu: "", si: "", std: "", subg: "", dep: "", err: "", q: "", orden: "id" }; },
     tpl() { return Object.assign({}, TPL, (TJ.datos && TJ.datos.correoTpl) || {}); },
     dir() { return (TJ.datos && TJ.datos.correos) || {}; },
     correoDe(p) { const D = this.dir(); return (p.rpe && D["R:" + U.ini(p.rpe)]) || D["N:" + U.norm(p.nom)] || ""; },
     // --------- en que area del organigrama esta el originador
+    /* Area del originador. Manda la jerarquia del ORGANIGRAMA: si la tarjeta dice una subgerencia pero su departamento pertenece a
+       otra, se toma la del organigrama y la tarjeta queda marcada con el error ("error"). Nunca se ubica en la gerencia ni en la
+       coordinacion: los departamentos y oficinas que dependen directo del gerente son su propio nivel. */
     ubicar(c) {
       const OG = B.org, N = OG.nodos || [], ub = (TJ.datos.ubic || {})[U.ini(c.rpe)];
-      if (ub && OG.por(ub)) return { nodo: OG.por(ub), seguro: true, manual: true };
-      const yo = N.find(n => n.j && U.norm(n.j) === U.norm(c.nom)); if (yo) return { nodo: yo, seguro: true, titular: true };
-      const elegir = (lista, texto) => { const t = tokens(texto); if (!t.length) return null; let mejor = null, m = 0;
-        for (const n of lista) { const nt = tokens(n.n); if (!t.every(w => nt.some(x => x === w || (w.length > 4 && x.startsWith(w.slice(0, 5)))))) continue; const extra = nt.length - t.length; if (!mejor || extra < m) { mejor = n; m = extra; } }
+      if (ub && OG.por(ub)) return { nodo: OG.por(ub), seguro: true, manual: true, error: "" };
+      // personal de compañías contratistas: no está en el organigrama de CFE
+      if (/CONTRATISTA/.test(U.norm(c.area))) return { nodo: null, seguro: false, contratista: true, error: "" };
+      const valido = n => n && +n.p && n.t !== "gerencia", nivel = n => OG.nivelSub(n.id);
+      const elegir = (lista, texto, estricto) => { const t = tokens(texto); if (!t.length) return null; let mejor = null, m = 0;
+        for (const n of lista) { const nt = tokens(n.n); if (!t.every(w => nt.some(x => x === w || (!estricto && w.length > 4 && x.startsWith(w.slice(0, 5)))))) continue; const extra = nt.length - t.length; if (!mejor || extra < m) { mejor = n; m = extra; } }
         return mejor; };
-      const subs = N.filter(n => { const s = OG.nivelSub(n.id); return s && +s.id === +n.id; });
-      const sub = elegir(subs, c.area);
+      let depT = c.depto || ""; for (const [re, v] of ALIAS) if (re.test(U.norm(depT))) depT = v;
+      const autonomo = /AUTONOM/.test(U.norm(c.area)), subs = N.filter(n => valido(n) && nivel(n) && +nivel(n).id === +n.id);
+      const sub = autonomo ? null : elegir(subs, c.area);
       const desc = s => { const r = [], pila = [s.id]; while (pila.length) { const x = pila.pop(); for (const h of OG.hijos(x)) { r.push(h); pila.push(h.id); } } return r; };
-      const dep = elegir(sub ? desc(sub) : N, c.depto);
-      if (dep) return { nodo: dep, seguro: !!sub || !!dep };
-      if (sub) return { nodo: sub, seguro: false, soloSub: true };
-      return { nodo: null, seguro: false };
+      const dentro = (n, s) => desc(s).some(x => +x.id === +n.id) || +n.id === +s.id;
+      // ¿lo que dice la tarjeta contradice al organigrama?
+      const mal = n => { const s = nivel(n); if (sub) return !s || +s.id !== +sub.id; if (autonomo) return !!s && (s.t === "subgerencia" || s.t === "unidad"); return false; };
+      const error = n => mal(n) ? `La tarjeta dice «${c.area || "—"}${c.depto ? " · " + c.depto : ""}», pero en el organigrama ${n.n} depende de ${(nivel(n) || n).n}. Se usó el organigrama.` : "";
+      const yo = N.find(n => valido(n) && n.j && U.norm(n.j) === U.norm(c.nom));
+      if (yo) return { nodo: yo, seguro: true, titular: true, error: error(yo) };
+      if (sub) { const d = elegir(desc(sub), depT); if (d) return { nodo: d, seguro: true, error: "" }; }
+      // fuera de lo que dice la tarjeta solo se acepta un departamento u oficina con el mismo nombre (palabras exactas; "Mecánico"
+      // o "Eléctrico" solos son ambiguos y no se buscan fuera de su subgerencia)
+      const formal = n => ["departamento", "oficina", "unidad", "subgerencia", "supervision"].includes(n.t);
+      const g = (tokens(depT).length >= 2 || !sub) ? elegir(N.filter(n => valido(n) && formal(n) && !(sub && dentro(n, sub))), depT, true) : null;
+      if (g) return { nodo: g, seguro: true, error: error(g) };
+      if (sub) return { nodo: sub, seguro: false, soloSub: true, error: "" };
+      return { nodo: null, seguro: false, error: "" };
     },
     // --------- destinatarios: Para el originador; CC su subgerente, Flores Cavanzo, sus jefes hacia abajo y STAFF SI
     destinatarios(o) {
@@ -7185,9 +7202,9 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
       const tabla = `<table style="border-collapse:collapse;font-family:Calibri,Arial,sans-serif;max-width:900px"><tr>${th("Id", "#70AD47")}${th("Fecha de la Observación", "#70AD47")}${th("RPE y Nombre Completo", "#70AD47")}${th("¿A qué Departamento/Oficina o Compañía contratista pertenece el trabajador que observaste?", "#70AD47")}${th("¿Qué pasó? (Comportamientos del trabajador)", "#44546A")}</tr>` +
         o.cards.map(c => `<tr>${td("<b>" + k(c.id) + "</b>")}${td(k(fechaCorta(c.fobs || c.fcap)), ";white-space:nowrap")}${td(k((c.rpe || "") + " " + (c.nom || "")))}${td(k(c.obsDepto))}${td(k(c.qp || c.doc))}</tr>`).join("") + `</table>`;
       const par = t => t.split(/\n{2,}/).map(p => p.trim() === "{tabla}" ? tabla : `<p style="margin:0 0 12px">${k(p).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/\n/g, "<br>")}</p>`).join("");
-      const cuerpo = tpl.cuerpo.replace(/\{nombre\}/g, nombrePila(o.nom)), firma = tpl.firma.replace(/\{usuario\}/g, B.usuario.nombre || B.usuario.ini);
-      const fl = firma.split("\n");
-      return `<html><head><meta charset="utf-8"></head><body style="font-family:Aptos,Calibri,Arial,sans-serif;font-size:11pt;color:#000">${par(cuerpo)}<p style="margin:18px 0 0"><b style="color:#691C32">${k(fl[0])}</b>${fl.length > 1 ? `<br><span style="color:#444;font-size:9.5pt">${fl.slice(1).map(k).join("<br>")}</span>` : ""}</p></body></html>`;
+      // sin firma: el correo lo puede enviar cualquier persona de Seguridad Industrial (su Outlook pone la suya)
+      const cuerpo = tpl.cuerpo.replace(/\{nombre\}/g, nombrePila(o.nom));
+      return `<html><head><meta charset="utf-8"></head><body style="font-family:Aptos,Calibri,Arial,sans-serif;font-size:11pt;color:#000">${par(cuerpo)}</body></html>`;
     },
     eml(o, tpl, adj) {
       const enc = s => /^[\x20-\x7E]*$/.test(s) ? '"' + s.replace(/"/g, "") + '"' : "=?UTF-8?B?" + btoa(unescape(encodeURIComponent(s))) + "?=";
@@ -7221,8 +7238,10 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
       const rango = sems.filter(s => s >= F.desde && s <= F.hasta), todas = [];
       for (const s of rango) for (const x of await TJ.semana(s)) todas.push(Object.assign({ sem: s }, x));
       const envios = D.envios || {}, q = U.norm(F.q);
+      // tarjetas capturadas con datos que contradicen al organigrama (subgerencia o departamento equivocados)
+      const errU = new Map(); for (const x of todas) { const k = U.ini(x.rpe) + "|" + U.norm(x.area) + "|" + U.norm(x.depto); if (!errU.has(k)) errU.set(k, this.ubicar(x).error); x._err = errU.get(k); }
       const ops = k => [...new Set(todas.map(x => String(x[k] || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
-      const L = todas.filter(x => (!F.fu || String(x.fu || "").split(",").includes(F.fu)) && (!F.si || (F.si === "D" ? esDeb(x) : !esDeb(x))) && (!F.std || x.std === F.std) && (!F.subg || x.subg === F.subg) && (!F.dep || x.depto === F.dep)
+      const L = todas.filter(x => (!F.fu || String(x.fu || "").split(",").includes(F.fu)) && (!F.si || (F.si === "D" ? esDeb(x) : !esDeb(x))) && (!F.std || x.std === F.std) && (!F.subg || x.subg === F.subg) && (!F.dep || x.depto === F.dep) && (!F.err || !!x._err)
         && (!q || U.norm([x.id, x.rpe, x.nom, x.qp, x.doc, x.obsDepto, x.std].join(" ")).includes(q)))
         .sort((a, b) => F.orden === "nom" ? String(a.nom).localeCompare(String(b.nom)) || (+a.id - +b.id) : F.orden === "fecha" ? String(b.fobs || "").localeCompare(String(a.fobs || "")) : (+b.id || 0) - (+a.id || 0));
       // originadores con tarjetas de ALTA ENERGIA que fueron DEBILIDAD (en las semanas elegidas)
@@ -7242,10 +7261,11 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
             ${opt("fu", "Archivo", [["AE", "Alta energía"], ["SI", "Seguridad Industrial (SEGIND)"]], "Ambos")}${opt("si", "Resultado", [["D", "Debilidad"], ["C", "Cumple expectativa"]], "Todos")}</div>
           <div class="fila">${opt("std", "Estándar", ops("std"), "Todos")}${opt("subg", "Subgerencia observada", ops("subg"), "Todas")}${opt("dep", "Departamento del originador", ops("depto"), "Todos")}
             <div class="campo" style="flex:1 1 150px"><label>Ordenar</label><select class="inp" data-f="orden"><option value="id" ${F.orden === "id" ? "selected" : ""}>ID (recientes)</option><option value="fecha" ${F.orden === "fecha" ? "selected" : ""}>Fecha de observación</option><option value="nom" ${F.orden === "nom" ? "selected" : ""}>Originador</option></select></div>
-            <div class="campo" style="flex:2 1 220px"><label>Buscar</label><input class="inp" id="crQ" value="${esc(F.q)}" placeholder="ID, nombre, RPE o texto de la tarjeta…"></div></div>
-          <p class="muted peque" style="margin:0 0 6px"><b>${L.length}</b> tarjeta(s) de ${todas.length} en ${rango.length} semana(s).</p>
+            <div class="campo" style="flex:2 1 220px"><label>Buscar</label><input class="inp" id="crQ" value="${esc(F.q)}" placeholder="ID, nombre, RPE o texto de la tarjeta…"></div>
+            ${opt("err", "Captura", [["1", "Con error de captura (" + todas.filter(x => x._err).length + ")"]], "Todas")}</div>
+          <p class="muted peque" style="margin:0 0 6px"><b>${L.length}</b> tarjeta(s) de ${todas.length} en ${rango.length} semana(s).${todas.some(x => x._err) ? ` <span style="color:#b45309">⚠ ${todas.filter(x => x._err).length} con error de captura: el área que pusieron no coincide con el organigrama (se usa el organigrama).</span>` : ""}</p>
           <div class="tabla-cont" style="max-height:440px;overflow:auto"><table class="tabla"><thead><tr><th>ID</th><th>Sem.</th><th>Fecha obs.</th><th>Originador</th><th>Su departamento</th><th>Archivo</th><th>Estándar</th><th>Resultado</th><th>¿Qué pasó?</th><th>Correo</th></tr></thead><tbody>
-            ${L.slice(0, this.lim).map(x => `<tr data-v="${esc(x.id)}" data-s="${x.sem}" style="cursor:pointer"><td><b>${esc(x.id)}</b></td><td>${+x.sem.slice(5)}</td><td class="tnum">${esc(fechaCorta(x.fobs))}</td><td>${esc(x.nom)}<div class="peque muted">${esc(x.rpe)}</div></td><td class="peque">${esc(x.depto)}</td><td>${esAE(x) ? '<span class="badge r">AE</span>' : ""}${String(x.fu || "").split(",").includes("SI") ? ' <span class="badge v">SI</span>' : ""}</td>
+            ${L.slice(0, this.lim).map(x => `<tr data-v="${esc(x.id)}" data-s="${x.sem}" style="cursor:pointer"><td><b>${esc(x.id)}</b></td><td>${+x.sem.slice(5)}</td><td class="tnum">${esc(fechaCorta(x.fobs))}</td><td>${esc(x.nom)}<div class="peque muted">${esc(x.rpe)}</div></td><td class="peque">${esc(x.depto)}${x._err ? `<div><span class="badge d" title="${esc(x._err)}">⚠ Revisar captura</span></div>` : ""}</td><td>${esAE(x) ? '<span class="badge r">AE</span>' : ""}${String(x.fu || "").split(",").includes("SI") ? ' <span class="badge v">SI</span>' : ""}</td>
               <td class="peque">${esc(x.std)}</td><td>${esDeb(x) ? '<span class="badge r">Debilidad</span>' : '<span class="badge v">Cumple</span>'}</td><td class="peque" style="min-width:220px">${esc(String(x.qp || x.doc || "").slice(0, 160))}</td>
               <td class="peque">${envios[x.id] ? "✓ " + esc(String(envios[x.id].fh || "").slice(0, 10)) : esAE(x) && esDeb(x) ? '<span style="color:#b45309">pendiente</span>' : "—"}</td></tr>`).join("") || `<tr><td colspan="10" class="muted">Sin tarjetas con ese filtro.</td></tr>`}</tbody></table></div>
           ${L.length > this.lim ? `<button class="btn chico sec" id="crMas" style="margin-top:8px">Ver ${Math.min(200, L.length - this.lim)} más</button>` : ""}</div>
@@ -7259,10 +7279,11 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
               <input type="checkbox" data-sel="${i}" ${sel.has(o.rpe) ? "checked" : ""} style="width:18px;height:18px;margin-top:3px">
               <div class="cuerpo" style="min-width:260px;flex:1"><div class="tit">${esc(o.nom)} <span class="muted peque">${esc(o.rpe)}</span> · ${o.cards.length} tarjeta(s): ${o.cards.map(x => "#" + esc(x.id)).join(", ")}
                 ${o.pend.length ? `<span class="badge d">pendiente</span>` : `<span class="badge v">correo generado</span>`}</div>
-                <div class="meta"><span>${o.ubic.nodo ? (o.ubic.seguro ? "" : "⚠ ") + esc(ruta(o) || o.ubic.nodo.n) : `<b style="color:#b45309">⚠ No encontré su área en el organigrama</b> (${esc(o.area || "")} · ${esc(o.depto || "")})`}</span><a href="#" data-ub="${i}">${o.ubic.nodo ? "Cambiar área" : "Elegir área"}</a></div>
+                <div class="meta"><span>${o.ubic.nodo ? (o.ubic.seguro ? "" : "⚠ ") + esc(ruta(o) || o.ubic.nodo.n) : o.ubic.contratista ? `<b>Personal de compañía contratista</b> (${esc(o.depto || "")}): no está en el organigrama` : `<b style="color:#b45309">⚠ No encontré su área en el organigrama</b> (${esc(o.area || "")} · ${esc(o.depto || "")})`}</span><a href="#" data-ub="${i}">${o.ubic.nodo ? "Cambiar área" : "Elegir área"}</a></div>
+                ${o.ubic.error ? `<div class="meta" style="color:#b45309"><span>⚠ Error de captura: ${esc(o.ubic.error)}</span></div>` : ""}
                 <div class="meta" style="gap:4px;flex-wrap:wrap;margin-top:6px"><b>Para:</b> ${chip(o.D.para)}</div>
                 <div class="meta" style="gap:4px;flex-wrap:wrap;margin-top:4px"><b>CC:</b> ${o.D.cc.map(chip).join(" ")}</div></div>
-              <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn chico" data-gen="${i}" ${B.modoLocal ? "disabled" : ""}>${B.ico("descargar")} Borrador</button><button class="btn chico sec" data-ver="${i}">Ver correo</button>
+              <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn chico" data-gen="${i}" ${B.modoLocal ? "disabled" : ""}>${B.ico("descargar")} Borrador</button><button class="btn chico sec" data-web="${i}" title="Para enviarlo desde Outlook en el navegador (Office 365)">Copiar para Outlook web</button><button class="btn chico sec" data-ver="${i}">Ver correo</button>
                 ${o.pend.length ? `<button class="btn chico fantasma" data-env="${i}" title="Marcar como enviado sin generar el borrador">Marcar enviado</button>` : `<button class="btn chico fantasma" data-noenv="${i}">Quitar marca</button>`}</div></div>`).join("")}</div>`
             : `<p class="muted" style="margin:10px 0 0">No hay tarjetas de alta energía con debilidad en las semanas elegidas.</p>`}</div>`;
       const repinta = () => P.pinta();
@@ -7293,11 +7314,49 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
       c.querySelectorAll("[data-env]").forEach(b => b.onclick = async () => { try { await marcar(O[+b.dataset.env].cards.map(x => String(x.id)), true); repinta(); } catch (e) { B.ui.error(e); } });
       c.querySelectorAll("[data-noenv]").forEach(b => b.onclick = async () => { try { await marcar(O[+b.dataset.noenv].cards.map(x => String(x.id)), false); repinta(); } catch (e) { B.ui.error(e); } });
       c.querySelectorAll("[data-ver]").forEach(b => b.onclick = () => this.ver(O[+b.dataset.ver]));
+      c.querySelectorAll("[data-web]").forEach(b => b.onclick = () => this.web(O[+b.dataset.web], marcar, repinta));
       c.querySelectorAll("[data-ub]").forEach(a => a.onclick = e => { e.preventDefault(); this.elegirArea(O[+a.dataset.ub], P); });
       c.querySelector("#crTpl").onclick = () => this.editarTpl(P);
       c.querySelector("#crDir").onclick = () => this.directorio(O, P);
       const ba = c.querySelector("#crAdj");
       if (ba) ba.onchange = async e => { const f = e.target.files[0]; if (!f) return; try { const r = await (await fetch("/api/adjunto?nombre=" + encodeURIComponent(f.name), { method: "POST", headers: { "X-Token": B.token }, body: f })).json(); if (!r.ok) throw new Error(r.error); this._adj = null; B.ui.toast("PDF adjunto actualizado: <b>" + esc(r.nombre) + "</b>.", "ok"); repinta(); } catch (x) { B.ui.error(x); } };
+    },
+    /* Outlook en el navegador (Office 365) no abre los borradores .eml: se copia cada parte para pegarla en un correo nuevo
+       (destinatarios, asunto y el mensaje con su formato y la tabla) y se descarga el PDF para adjuntarlo. */
+    async copiarTexto(t) {
+      try { if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(t); return true; } } catch (e) { }
+      const a = document.createElement("textarea"); a.value = t; a.style.cssText = "position:fixed;left:-9999px"; document.body.appendChild(a); a.select(); const ok = document.execCommand("copy"); a.remove(); return ok;
+    },
+    async copiarHtml(html, texto) {
+      try { if (navigator.clipboard && window.ClipboardItem && window.isSecureContext) { await navigator.clipboard.write([new ClipboardItem({ "text/html": new Blob([html], { type: "text/html" }), "text/plain": new Blob([texto], { type: "text/plain" }) })]); return true; } } catch (e) { }
+      // pagina abierta por la red (http): se copia seleccionando el mensaje ya dibujado, con su formato
+      const d = document.createElement("div"); d.contentEditable = "true"; d.style.cssText = "position:fixed;left:-9999px;top:0;background:#fff"; d.innerHTML = html; document.body.appendChild(d);
+      const r = document.createRange(); r.selectNodeContents(d); const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+      const ok = document.execCommand("copy"); s.removeAllRanges(); d.remove(); return ok;
+    },
+    async web(o, marcar, repinta) {
+      const D = o.D, tpl = this.tpl(), todos = [D.para].concat(D.cc), falta = todos.filter(p => !p.correo);
+      const dir = ps => ps.map(p => p.correo || p.nom).join("; "), cuerpo = (this.html(o, tpl).match(/<body[^>]*>([\s\S]*)<\/body>/) || [])[1] || "";
+      const adj = await this.adjunto().catch(() => null);
+      const paso = (n, t, det, id, btn) => `<div class="item" style="align-items:center"><span class="badge v" style="min-width:26px;text-align:center">${n}</span><div class="cuerpo"><div class="tit">${t}</div>${det ? `<div class="meta"><span>${det}</span></div>` : ""}</div><button class="btn chico" data-cp="${id}">${btn}</button></div>`;
+      await B.ui.modal({ titulo: "Copiar para Outlook web · " + esc(o.nom), icono: "doc", ancho: true,
+        html: `<p style="margin:0 0 10px;line-height:1.5">Abre <b>Outlook en el navegador</b> → <b>Correo nuevo</b>. Copia aquí cada parte y pégala en su lugar (Ctrl+V).</p>
+          ${falta.length ? `<div class="aviso d" style="margin-bottom:10px">${B.ico("alerta")}<div>Faltan los correos de <b>${falta.map(p => esc(p.nom)).join(", ")}</b>: se copian con su nombre y tendrás que buscarlos en Outlook. Captúralos en <b>Correos electrónicos</b> para la próxima.</div></div>` : ""}
+          <div class="lista">${paso(1, "Para", esc(dir([D.para])), "para", "Copiar")}${paso(2, "CC", esc(dir(D.cc)), "cc", "Copiar")}${paso(3, "Asunto", esc(tpl.asunto), "asunto", "Copiar")}
+            ${paso(4, "Mensaje", "Con su formato y la tabla de tarjetas. Pégalo en el cuerpo del correo.", "msg", "Copiar")}
+            ${paso(5, "Adjunto", adj ? esc(adj.nombre) + " · se descarga; adjúntalo con el clip" : "No hay PDF cargado", "pdf", "Descargar")}</div>
+          <p class="muted peque" style="margin:10px 0 0">Cuando lo envíes, toca <b>Ya lo envié</b> para marcar sus tarjetas.</p>`,
+        alAbrir: v => v.querySelectorAll("[data-cp]").forEach(b => b.onclick = async () => {
+          const k = b.dataset.cp; let ok = true;
+          if (k === "para") ok = await this.copiarTexto(dir([D.para]));
+          else if (k === "cc") ok = await this.copiarTexto(dir(D.cc));
+          else if (k === "asunto") ok = await this.copiarTexto(tpl.asunto);
+          else if (k === "msg") ok = await this.copiarHtml(cuerpo, cuerpo.replace(/<br>/g, "\n").replace(/<\/p>/g, "\n\n").replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " "));
+          else if (k === "pdf") { if (!adj) return B.ui.toast("No hay PDF para adjuntar.", "error"); U.descargar(adj.nombre, adj.bytes, "application/pdf"); }
+          if (k !== "pdf") { b.textContent = ok ? "✓ Copiado" : "No se pudo copiar"; b.classList.toggle("verde", ok); }
+        }),
+        botones: [{ t: "Cerrar", c: "sec", v: null }, { t: "Ya lo envié", c: "verde", antes: async () => { try { await marcar(o.cards.map(x => String(x.id)), true); B.ui.toast("Tarjetas marcadas con correo enviado.", "ok"); } catch (e) { B.ui.error(e); return false; } }, v: true }] });
+      repinta();
     },
     ver(o) {
       const D = o.D, nom = p => esc(p.nom) + (p.correo ? " &lt;" + esc(p.correo) + "&gt;" : " <i style='color:#b45309'>(sin correo)</i>");
@@ -7322,8 +7381,8 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
       const r = await B.ui.modal({ titulo: "Texto del correo de reconocimiento", icono: "editar", ancho: true,
         html: `<div class="campo"><label>Asunto</label><input class="inp" id="tAs" value="${esc(t.asunto)}"></div>
           <div class="campo"><label>Mensaje · <b>{nombre}</b> = nombre del originador · <b>{tabla}</b> = tabla de sus tarjetas · entre **dobles asteriscos** va en negritas</label><textarea class="inp" id="tCu" style="min-height:300px">${esc(t.cuerpo)}</textarea></div>
-          <div class="campo"><label>Firma · <b>{usuario}</b> = tu nombre</label><textarea class="inp" id="tFi" rows="3">${esc(t.firma)}</textarea></div>`,
-        botones: [{ t: "Cancelar", c: "sec", v: null }, { t: "Volver al original", c: "fantasma", v: "orig" }, { t: "Guardar", c: "verde", v: v => ({ asunto: v.querySelector("#tAs").value.trim(), cuerpo: v.querySelector("#tCu").value, firma: v.querySelector("#tFi").value }) }] });
+          <p class="muted peque" style="margin:0">El correo no lleva firma: quien lo envía usa la de su Outlook.</p>`,
+        botones: [{ t: "Cancelar", c: "sec", v: null }, { t: "Volver al original", c: "fantasma", v: "orig" }, { t: "Guardar", c: "verde", v: v => ({ asunto: v.querySelector("#tAs").value.trim(), cuerpo: v.querySelector("#tCu").value }) }] });
       if (!r) return;
       const tpl = r === "orig" ? {} : r;
       if (tpl.cuerpo && !tpl.cuerpo.includes("{tabla}") && !(await B.ui.confirmar("El mensaje no tiene <b>{tabla}</b>: el correo saldrá sin la tabla de tarjetas. ¿Guardar así?", "Sin tabla", "Guardar"))) return;
@@ -7984,7 +8043,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "4.8", servidorViejo: false,
+  info: {}, VERSION: "4.8.1", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -8171,7 +8230,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "procedimientos" ? '<span class="contador oculto" id="cntProc"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.8")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.8.1")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
