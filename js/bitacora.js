@@ -803,7 +803,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.7.4", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.8", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -827,7 +827,7 @@ B.local = {
      En el celular los datos llegan en el paquete de la PC; lo que se hace aqui se anota en pendientes y viaja a la PC. */
   async tarjLeer() {
     const T = (await this.leer("tarjetas")) || {};
-    for (const k of ["marcas", "sem", "hist", "cfg", "semanas", "graf"]) if (!T[k] || typeof T[k] !== "object") T[k] = {};
+    for (const k of ["marcas", "sem", "hist", "cfg", "semanas", "graf", "correos", "envios", "ubic", "correoTpl"]) if (!T[k] || typeof T[k] !== "object") T[k] = {};
     T.decl = Array.isArray(T.decl) ? T.decl : [];
     for (const d of T.decl) if (!d.uid) d.uid = "d" + d.id;
     return T;
@@ -856,7 +856,7 @@ B.local = {
     switch (acc) {
       case "ver": {
         const r = { ok: true, editor: ed, esp: ed && !sup, editores: eds, cfg: T.cfg };
-        if (ed) Object.assign(r, { decl: T.decl, marcas: T.marcas, sem: T.sem, hist: T.hist, semanas: T.semanas, graf: T.graf });
+        if (ed) Object.assign(r, { decl: T.decl, marcas: T.marcas, sem: T.sem, hist: T.hist, semanas: T.semanas, graf: T.graf, correos: T.correos, envios: T.envios, ubic: T.ubic, correoTpl: T.correoTpl });
         else r.decl = T.decl.filter(x => U.ini(x.ini) === s.ini || x.est === "C").map(x => U.ini(x.ini) === s.ini ? x : { ini: x.ini, f: x.f, t: x.t, est: "C" });
         return r;
       }
@@ -938,6 +938,23 @@ B.local = {
         else if (["A", "C", "D"].includes(m)) T.marcas[id] = { m, nota: String(b.nota || ""), sem, por: s.ini, fh: ahora() };
         else throw new Error("Marca no válida.");
         return fin();
+      }
+      case "org": { soloEd(); const o = (await this.leer("organigrama")) || {}; let n = Array.isArray(o.nodos) ? o.nodos : []; if (b.sinFotos) n = n.map(x => { const y = Object.assign({}, x); delete y.f; return y; }); return { ok: true, nodos: n, fuente: o.fuente || "", mod: o.mod || "" }; }
+      case "orgNodo": case "correosGuardar": case "envio": case "tplGuardar": {
+        soloEd();
+        if (B.modoMovil) throw new Error("El organigrama y los correos se editan en la bitácora de la PC.");
+        if (acc === "orgNodo") {
+          const o = (await this.leer("organigrama")) || { nodos: [] }, L = o.nodos = o.nodos || [];
+          if (+b.borrar) { if (L.some(x => +x.p === +b.borrar)) throw new Error("Primero mueve o elimina las áreas que dependen de esta."); o.nodos = L.filter(x => +x.id !== +b.borrar); }
+          else { const d = b.nodo || {}; if (!String(d.n || "").trim()) throw new Error("Escribe el nombre del área."); let e = +d.id ? L.find(x => +x.id === +d.id) : null;
+            if (!e) { e = { id: L.reduce((m, x) => Math.max(m, +x.id || 0), 0) + 1, f: "" }; L.push(e); }
+            Object.assign(e, { n: d.n, j: d.j || "", t: d.t || "default", p: +d.p || 0 }); if ("f" in d) e.f = d.f; }
+          o.mod = ahora(); o.por = s.ini; await this.escribir("organigrama", o); return { ok: true };
+        }
+        if (acc === "correosGuardar") { for (const [k, v] of Object.entries(b.mapa || {})) { if (String(v || "").trim()) T.correos[k] = String(v).trim(); else delete T.correos[k]; } for (const [k, v] of Object.entries(b.ubic || {})) { if (+v > 0) T.ubic[k.toUpperCase()] = +v; else delete T.ubic[k.toUpperCase()]; } }
+        if (acc === "envio") for (const id of b.ids || []) { if (b.on) T.envios[id] = { fh: ahora(), por: s.ini }; else delete T.envios[id]; }
+        if (acc === "tplGuardar") T.correoTpl = b.tpl || {};
+        await this.escribir("tarjetas", T); return { ok: true };
       }
       case "grafGuardar": {
         soloEd();
@@ -5967,8 +5984,8 @@ V.hoja = {
     pinta() {
       const c = this.c, D = TJ.datos, sup = B.dom.esSup(), comp = this.completa(), y0 = window.scrollY;
       c.style.minHeight = c.offsetHeight + "px";
-      const tabs = [["marcador", "Marcador"], ["mias", "Mis tarjetas"]].concat(!D.editor ? [] : comp ? [["tend", "Tarjetas y tendencias"], ["graf", "Gráficas y reportes"], ["e1", "Presentación E+1"]] : [["res", "Resumen"]]).concat(sup ? [["ajustes", "Ajustes"]] : D.editor && comp ? [["ajustes", "Semanas cargadas"]] : []);
-      if (!tabs.some(x => x[0] === this.tab)) this.tab = this.tab === "tend" || this.tab === "e1" || this.tab === "graf" ? "res" : this.tab === "res" ? "tend" : "marcador";
+      const tabs = [["marcador", "Marcador"], ["mias", "Mis tarjetas"]].concat(!D.editor ? [] : comp ? [["tend", "Tarjetas y tendencias"], ["tarj", "Tarjetas y correos"], ["graf", "Gráficas y reportes"], ["e1", "Presentación E+1"], ["org", "Organigrama"]] : [["res", "Resumen"], ["org", "Organigrama"]]).concat(sup ? [["ajustes", "Ajustes"]] : D.editor && comp ? [["ajustes", "Semanas cargadas"]] : []);
+      if (!tabs.some(x => x[0] === this.tab)) this.tab = this.tab === "tend" || this.tab === "e1" || this.tab === "graf" || this.tab === "tarj" ? "res" : this.tab === "res" ? "tend" : "marcador";
       c.innerHTML = `${B.modoMovil && D.editor ? `<div class="tj-modo"><span>${comp ? "<b>Vista completa</b>: trabajo remoto con todas las funciones." : "<b>Vista resumida</b> para celular."}</span><a href="#" id="tjModo">${comp ? "Cambiar a la vista resumida" : "Usar la vista completa (trabajo remoto)"}</a></div>` : ""}
         <div class="pestanas">${tabs.map(([k, t]) => `<button data-t="${k}" class="${k === this.tab ? "on" : ""}">${t}</button>`).join("")}</div><div id="tjCuerpo"></div>`;
       const mo = c.querySelector("#tjModo"); if (mo) mo.onclick = e => { e.preventDefault(); try { localStorage.setItem("b_tj_completa", comp ? "0" : "1"); } catch (x) { } this.pinta(); };
@@ -6250,6 +6267,8 @@ V.hoja = {
     /* ------------------------------------------------------------ PRESENTACION E+1 (en e1.js) */
     t_e1(c) { return B.e1.vista(this, c); },
     t_graf(c) { return B.tend.vista(this, c); },
+    t_tarj(c) { return B.correos.vista(this, c); },
+    t_org(c) { return B.org.vista(this, c); },
 
     /* ------------------------------------------------------------ AJUSTES (supervisor) */
     t_ajustes(c) {
@@ -6948,6 +6967,389 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
   };
 })();
 ;
+/* ---- organigrama.js ---- */
+/* =====================================================================
+   BITACORA 24RU1 - LIDERES EN CAMPO: ORGANIGRAMA DE LA COORDINACION NUCLEAR
+   Recreado del "Organigrama Funcional" de la intranet: se navega igual (tocar un
+   area con "-> N areas" muestra sus areas; "Regresar" y la ruta de arriba vuelven).
+   Supervisores y tecnicos especializados pueden editar nombres, jefes, fotos y areas.
+   Sirve tambien para saber a quien copiar en los correos de reconocimiento.
+   Los datos viven en datos\organigrama.json (no van en la pagina publica).
+   ===================================================================== */
+(function () {
+  const TJ = B.tj, esc = s => U.esc(s);
+  const COL = { gerencia: "1E6B4A", subgerencia: "6B2C91", unidad: "0F6E5C", departamento: "E05A12", oficina: "7A1F4E", supervision: "2563EB", default: "64748B" };
+  const TIPOS = [["default", "Área o grupo"], ["supervision", "Supervisión"], ["gerencia", "Gerencia"], ["subgerencia", "Subgerencia"], ["unidad", "Unidad"], ["departamento", "Departamento"], ["oficina", "Oficina"]];
+  const CSS = `
+  .og-top{display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:linear-gradient(90deg,#1E6B4A,#27A35A);color:#fff;border-radius:12px;padding:12px 16px;margin-bottom:12px}
+  .og-top h2{margin:0;font-size:16px;font-weight:800;letter-spacing:.02em;flex:1;min-width:220px}
+  .og-top .inp{max-width:300px;background:#fff}
+  .og-bc{display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:#fff;border:1px solid var(--borde,#e5e5e5);border-radius:10px;padding:8px 12px;margin-bottom:12px;font-size:12.5px}
+  .og-bc a{color:#1E8F55;font-weight:600;text-decoration:none} .og-bc b{color:#334155} .og-bc i{color:#94a3b8;font-style:normal}
+  .og-area{background:#F1F5F9;border:1px solid #E2E8F0;border-radius:12px;padding:18px 10px 24px;overflow-x:auto}
+  .og-padre{display:flex;justify-content:center;margin-bottom:22px;position:relative}
+  .og-padre:after{content:"";position:absolute;left:50%;bottom:-22px;height:22px;border-left:2px solid #CBD5E1}
+  .og-pcard{display:flex;align-items:center;gap:12px;background:linear-gradient(135deg,#1E6B4A,#27A35A);color:#fff;border-radius:10px;padding:10px 18px;box-shadow:0 4px 12px rgba(0,0,0,.15);min-width:240px;max-width:460px;position:relative}
+  .og-pcard .og-foto{width:46px;height:46px;border-width:2px}
+  .og-pcard b{display:block;font-size:12.5px;line-height:1.25} .og-pcard small{display:block;font-size:10.5px;opacity:.92;margin-top:2px}
+  .og-hijos{display:flex;flex-wrap:wrap;justify-content:center;gap:14px;border-top:2px solid #CBD5E1;padding-top:18px}
+  .og-card{position:relative;width:150px;background:#fff;border:2px solid var(--c);border-radius:10px;padding:12px 8px 10px;text-align:center;cursor:default;box-shadow:0 1px 4px rgba(0,0,0,.08)}
+  .og-card:before{content:"";position:absolute;left:50%;top:-20px;height:18px;border-left:2px solid #CBD5E1}
+  .og-card.drill{cursor:pointer} .og-card.drill:hover{box-shadow:0 4px 14px rgba(0,0,0,.18);transform:translateY(-1px)}
+  .og-card.luz{outline:3px solid #F59E0B;outline-offset:2px}
+  .og-foto{width:56px;height:56px;border-radius:50%;margin:0 auto 6px;overflow:hidden;border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.25);background:#8B1E2D;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:15px}
+  .og-foto img{width:100%;height:100%;object-fit:cover}
+  .og-n{font-size:10.5px;font-weight:800;color:#1f2937;line-height:1.25;text-transform:uppercase}
+  .og-j{font-size:9.5px;color:#475569;margin-top:3px;line-height:1.2;text-transform:uppercase} .og-j.vac{color:#b91c1c;font-style:italic}
+  .og-badge{display:inline-block;margin-top:6px;font-size:9.5px;font-weight:700;color:#1E8F55;border:1px solid #9AD3B2;border-radius:999px;padding:1px 8px;background:#F0FBF4}
+  .og-ed{position:absolute;top:4px;right:4px;border:0;background:#F1F5F9;border-radius:6px;width:24px;height:24px;cursor:pointer;font-size:12px}
+  .og-grupo{display:flex;flex-direction:column;align-items:center;position:relative}
+  .og-raiz{flex-wrap:nowrap;justify-content:flex-start;min-width:max-content;padding-left:8px;padding-right:8px} .og-raiz .og-card{width:126px} .og-raiz .og-grupo .og-hijos{gap:10px}
+  .og-supv{display:flex;justify-content:center;gap:14px;margin:-4px 0 22px;padding-left:260px;position:relative} .og-supv .og-card{width:126px} .og-supv .og-card:before{display:none}
+  .og-grupo .og-hijos{margin-top:22px;position:relative} .og-grupo>.og-card:after{content:"";position:absolute;left:50%;bottom:-24px;height:22px;border-left:2px solid #CBD5E1}
+  .og-res{position:absolute;z-index:30;background:#fff;color:#111;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.25);max-height:320px;overflow:auto;width:min(420px,90vw);margin-top:4px}
+  .og-res a{display:block;padding:7px 12px;border-bottom:1px solid #eee;color:inherit;text-decoration:none;font-size:12.5px} .og-res a:hover{background:#F1F5F9} .og-res small{color:#64748b}
+  .og-pie{font-size:11.5px;color:#64748b;margin-top:10px;text-align:center}
+  @media (max-width:700px){.og-card{width:132px}.og-pcard{min-width:0}}`;
+
+  const OG = B.org = {
+    nodos: null, cur: 0, editar: false, luz: 0, meta: {},
+    async cargar(forzar) { if (!this.nodos || forzar) { const r = await TJ.llamar("org"); this.nodos = r.nodos || []; this.meta = r; } return this.nodos; },
+    por(id) { return (this.nodos || []).find(x => +x.id === +id); },
+    hijos(id) { return (this.nodos || []).filter(x => +x.p === +id).sort((a, b) => (+a.o || 0) - (+b.o || 0) || +a.id - +b.id); },
+    raiz() { return (this.nodos || []).find(x => !+x.p); },
+    ruta(id) { const r = []; let n = this.por(id), g = 0; while (n && g++ < 60) { r.unshift(n); n = +n.p ? this.por(n.p) : null; } return r; },
+    // area al nivel de subgerencia: la que depende de la gerencia, o la que depende directo de la coordinacion
+    nivelSub(id) { const r = this.ruta(id), iG = r.findIndex(x => x.t === "gerencia"); if (iG >= 0) return r[iG + 1] || null; return r[1] || null; },
+    iniciales(s) { return String(s || "").split(/\s+/).filter(Boolean).slice(0, 2).map(x => x[0]).join("") || "?"; },
+    card(n, extra) {
+      const k = this.hijos(n.id).length, c = "#" + (COL[n.t] || COL.default);
+      return `<div class="og-card ${k ? "drill" : ""} ${+this.luz === +n.id ? "luz" : ""}" data-id="${n.id}" style="--c:${c}" title="${esc(n.n)}${k ? " · ver sus áreas" : ""}">
+        ${this.editar ? `<button class="og-ed" data-ed="${n.id}" title="Editar">✎</button>` : ""}
+        <div class="og-foto">${n.f ? `<img src="${n.f}" alt="">` : esc(this.iniciales(n.j || n.n))}</div>
+        <div class="og-n">${esc(n.n)}</div><div class="og-j ${n.j ? "" : "vac"}">${esc(n.j || "Sin titular")}</div>
+        ${k ? `<div class="og-badge">→ ${k} área${k === 1 ? "" : "s"}</div>` : ""}${extra || ""}</div>`;
+    },
+    async vista(P, c) {
+      try { await this.cargar(); } catch (e) { c.innerHTML = `<div class="aviso r">${B.ico("alerta")}<div>${esc(e.message)}</div></div>`; return; }
+      const ed = B.dom.esSup() || (TJ.datos && TJ.datos.editor);
+      if (!this.nodos.length) { c.innerHTML = `<style>${CSS}</style><div class="og-top"><h2>ORGANIGRAMA DE LA COORDINACIÓN NUCLEAR</h2></div>${B.ui.vacio(B.modoMovil ? "El organigrama llega con el paquete de datos de la PC." : "Todavía no hay organigrama cargado.", "usuarios")}`; return; }
+      const R = this.raiz(); let cur = this.por(this.cur) || R; if (!cur) return;
+      const ruta = this.ruta(cur.id), hij = this.hijos(cur.id);
+      // vista principal como en la intranet: la supervision a un lado, y la gerencia con sus subgerencias junto a las demas areas
+      const enRaiz = cur === R, supv = enRaiz ? hij.filter(h => h.t === "supervision") : [], resto = enRaiz ? hij.filter(h => h.t !== "supervision") : hij;
+      const filaHijos = lista => lista.map(h => enRaiz && h.t === "gerencia" && this.hijos(h.id).some(x => x.t === "subgerencia")
+        ? `<div class="og-grupo">${this.card(h)}<div class="og-hijos">${this.hijos(h.id).filter(x => x.t === "subgerencia").map(x => this.card(x)).join("")}</div></div>` : this.card(h)).join("");
+      c.innerHTML = `<style>${CSS}</style>
+        <div class="og-top"><h2>ORGANIGRAMA DE LA COORDINACIÓN NUCLEAR</h2>
+          <div style="position:relative"><input class="inp" id="ogQ" placeholder="Buscar área o persona…" autocomplete="off"><div id="ogRes"></div></div>
+          ${ed && !B.modoMovil ? `<button class="btn chico ${this.editar ? "dorado" : "sec"}" id="ogEd">${B.ico("editar")} ${this.editar ? "Terminar edición" : "Editar"}</button>` : ""}</div>
+        ${ruta.length > 1 ? `<div class="og-bc"><button class="btn chico sec" id="ogAtras">← Regresar</button>${ruta.map((n, i) => i < ruta.length - 1 ? `<a href="#" data-ir="${n.id}">${esc(n.n)}</a><i>›</i>` : `<b>${esc(n.n)}</b>`).join("")}</div>` : ""}
+        ${this.editar ? `<div class="aviso a" style="margin-bottom:10px">${B.ico("editar")}<div><b>Modo edición:</b> toca ✎ en cualquier área para cambiar su nombre, el nombre de su titular, su foto o de quién depende. ${hij.length || cur ? `<a href="#" id="ogNuevo">+ Agregar un área que dependa de «${esc(cur.n)}»</a>` : ""}</div></div>` : ""}
+        <div class="og-area">
+          <div class="og-padre"><div class="og-pcard" data-id="${cur.id}">${this.editar ? `<button class="og-ed" data-ed="${cur.id}" title="Editar" style="top:6px;right:6px">✎</button>` : ""}
+            <div class="og-foto">${cur.f ? `<img src="${cur.f}" alt="">` : esc(this.iniciales(cur.j || cur.n))}</div><div><b>${esc(cur.n)}</b><small>${esc(cur.j || "Sin titular")}</small></div></div></div>
+          ${supv.length ? `<div class="og-supv">${supv.map(h => this.card(h)).join("")}</div>` : ""}
+          ${resto.length ? `<div class="og-hijos ${enRaiz ? "og-raiz" : ""}">${filaHijos(resto)}</div>` : `<p class="muted" style="text-align:center;margin:0">Esta área no tiene áreas dependientes registradas.</p>`}
+        </div>
+        <div class="og-pie">${esc(this.meta.fuente || "")}${this.meta.mod ? " · última modificación " + esc(String(this.meta.mod).replace("T", " ").slice(0, 16)) + (this.meta.por && this.meta.por !== "CARGA" ? " por " + esc(this.meta.por) : "") : ""} · ${this.nodos.length} áreas</div>`;
+      const ir = id => { this.cur = +id; this.luz = 0; P.pinta(); };
+      c.querySelectorAll(".og-card.drill").forEach(el => el.onclick = e => { if (e.target.closest("[data-ed]")) return; ir(el.dataset.id); });
+      c.querySelectorAll("[data-ir]").forEach(a => a.onclick = e => { e.preventDefault(); ir(a.dataset.ir); });
+      const at = c.querySelector("#ogAtras"); if (at) at.onclick = () => ir(cur.p || 0);
+      const be = c.querySelector("#ogEd"); if (be) be.onclick = () => { this.editar = !this.editar; P.pinta(); };
+      c.querySelectorAll("[data-ed]").forEach(b => b.onclick = e => { e.stopPropagation(); this.editarNodo(this.por(b.dataset.ed), P); });
+      const nv = c.querySelector("#ogNuevo"); if (nv) nv.onclick = e => { e.preventDefault(); this.editarNodo({ id: 0, p: cur.id, n: "", j: "", t: "default", f: "" }, P); };
+      // buscador: area o persona; lleva al area donde aparece y la resalta
+      const q = c.querySelector("#ogQ"), res = c.querySelector("#ogRes");
+      q.oninput = () => {
+        const t = U.norm(q.value); if (t.length < 2) { res.innerHTML = ""; return; }
+        const L = this.nodos.filter(n => U.norm(n.n).includes(t) || U.norm(n.j).includes(t)).slice(0, 30);
+        res.innerHTML = `<div class="og-res">${L.length ? L.map(n => `<a href="#" data-va="${n.id}"><b>${esc(n.j || "Sin titular")}</b><br><small>${esc(this.ruta(n.id).slice(1).map(x => x.n).join(" › ") || n.n)}</small></a>`).join("") : `<a>Sin coincidencias</a>`}</div>`;
+        res.querySelectorAll("[data-va]").forEach(a => a.onclick = e => { e.preventDefault(); const n = this.por(a.dataset.va); this.cur = this.hijos(n.id).length ? n.id : (+n.p || n.id); this.luz = n.id; P.pinta(); });
+      };
+    },
+    // foto: se reduce a 112 px para que el organigrama no pese
+    async reducirFoto(file) {
+      const url = await new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = no; r.readAsDataURL(file); });
+      const img = await new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => no(new Error("No se pudo leer la imagen.")); i.src = url; });
+      const k = Math.min(1, 112 / Math.max(img.width, img.height)), cv = document.createElement("canvas"); cv.width = Math.round(img.width * k); cv.height = Math.round(img.height * k);
+      cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height); return cv.toDataURL("image/jpeg", 0.8);
+    },
+    async editarNodo(n, P) {
+      if (!n) return;
+      const nuevo = !+n.id, C = (TJ.datos && TJ.datos.correos) || {}, clave = j => "N:" + U.norm(j);
+      const desc = new Set(); if (!nuevo) { const pila = [n.id]; while (pila.length) { const x = pila.pop(); for (const h of this.hijos(x)) { desc.add(+h.id); pila.push(h.id); } } }
+      const ops = this.nodos.filter(x => +x.id !== +n.id && !desc.has(+x.id)).map(x => [x.id, this.ruta(x.id).map(y => y.n).join(" › ")]).sort((a, b) => a[1].localeCompare(b[1]));
+      let foto = n.f || "";
+      const r = await B.ui.modal({ titulo: nuevo ? "Agregar área" : "Editar área", icono: "editar", ancho: true,
+        html: `<div class="fila" style="align-items:flex-start;gap:16px"><div style="text-align:center;flex:0 0 120px"><div class="og-foto" id="ogFoto" style="width:96px;height:96px;font-size:24px">${foto ? `<img src="${foto}" alt="">` : esc(this.iniciales(n.j || n.n))}</div>
+            <label class="btn chico sec" style="cursor:pointer;margin-top:6px">Cambiar foto<input type="file" id="ogFotoIn" accept="image/*" hidden></label><br><a href="#" id="ogFotoX" class="peque">Quitar foto</a></div>
+          <div style="flex:1;min-width:240px"><div class="campo"><label>Nombre del área</label><input class="inp" id="ogN" value="${esc(n.n)}" style="text-transform:uppercase"></div>
+            <div class="campo"><label>Titular (jefe del área)</label><input class="inp" id="ogJ" value="${esc(n.j)}" style="text-transform:uppercase" placeholder="Vacío = sin titular"></div>
+            <div class="campo"><label>Correo del titular (para los correos de reconocimiento)</label><input class="inp" id="ogC" value="${esc(n.j ? C[clave(n.j)] || "" : "")}" placeholder="nombre@cfe.mx"></div>
+            <div class="grid2"><div class="campo"><label>Tipo</label><select class="inp" id="ogT">${TIPOS.map(([k, t]) => `<option value="${k}" ${n.t === k ? "selected" : ""}>${t}</option>`).join("")}</select></div>
+              <div class="campo"><label>Depende de</label><select class="inp" id="ogP"><option value="0">— Ninguna (área principal)</option>${ops.map(([id, t]) => `<option value="${id}" ${+n.p === +id ? "selected" : ""}>${esc(t)}</option>`).join("")}</select></div></div></div></div>`,
+        alAbrir: v => {
+          v.querySelector("#ogFotoIn").onchange = async e => { const f = e.target.files[0]; if (!f) return; try { foto = await this.reducirFoto(f); v.querySelector("#ogFoto").innerHTML = `<img src="${foto}" alt="">`; } catch (x) { B.ui.error(x); } };
+          v.querySelector("#ogFotoX").onclick = e => { e.preventDefault(); foto = ""; v.querySelector("#ogFoto").textContent = this.iniciales(v.querySelector("#ogJ").value || v.querySelector("#ogN").value); };
+        },
+        botones: [{ t: "Cancelar", c: "sec", v: null }].concat(nuevo ? [] : [{ t: "Eliminar", c: "peligro", v: "borrar" }]).concat([{ t: "Guardar", c: "verde", v: v => ({ n: v.querySelector("#ogN").value.trim().toUpperCase(), j: v.querySelector("#ogJ").value.trim().toUpperCase(), c: v.querySelector("#ogC").value.trim(), t: v.querySelector("#ogT").value, p: +v.querySelector("#ogP").value }) }])
+      });
+      if (!r) return;
+      try {
+        if (r === "borrar") {
+          if (this.hijos(n.id).length) { B.ui.toast("Esa área tiene áreas que dependen de ella: muévelas o elimínalas primero.", "error", 7000); return; }
+          if (!(await B.ui.confirmar(`Se eliminará <b>${esc(n.n)}</b> del organigrama.`, "Eliminar área", "Eliminar", true))) return;
+          await TJ.llamar("orgNodo", { borrar: n.id });
+        } else {
+          if (!r.n) { B.ui.toast("Escribe el nombre del área.", "error"); return; }
+          if (r.c && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(r.c)) { B.ui.toast("El correo no parece válido.", "error"); return; }
+          await TJ.llamar("orgNodo", { nodo: { id: +n.id || 0, n: r.n, j: r.j, t: r.t, p: r.p, f: foto } });
+          if (r.j && (r.c || "") !== ((TJ.datos.correos || {})[clave(r.j)] || "")) { await TJ.llamar("correosGuardar", { mapa: { [clave(r.j)]: r.c } }); (TJ.datos.correos = TJ.datos.correos || {})[clave(r.j)] = r.c; }
+        }
+        await this.cargar(true); B.ui.toast("Organigrama actualizado.", "ok", 2500); P.pinta();
+      } catch (e) { B.ui.error(e); }
+    }
+  };
+})();
+;
+/* ---- correos.js ---- */
+/* =====================================================================
+   BITACORA 24RU1 - LIDERES EN CAMPO: TARJETAS Y CORREOS DE RECONOCIMIENTO
+   1) Todas las tarjetas de los Excel cargados, con filtros, busqueda y orden.
+   2) Correo de reconocimiento para cada originador de tarjetas del archivo de
+      ALTA ENERGIA que resultaron DEBILIDAD (un correo por originador): se genera un
+      borrador de Outlook (.eml) con el texto, la tabla de sus tarjetas y el PDF del
+      PAG-28 adjunto. Para: el originador. CC: su subgerente, el Subgerente de
+      Seguridad Nuclear, sus jefes en orden jerarquico y STAFF SEGURIDAD INDUSTRIAL.
+      La jerarquia sale del organigrama (pestana Organigrama).
+   ===================================================================== */
+(function () {
+  const TJ = B.tj, esc = s => U.esc(s);
+  const STAFF = "STAFF SEGURIDAD INDUSTRIAL";
+  const VACIAS = new Set(["DE", "DEL", "LA", "LAS", "LOS", "EL", "Y", "E", "EN", "A", "AL", "PARA", "POR", "CON", "DEPARTAMENTO", "DEPARTAMENTOS", "OFICINA", "SUBGERENCIA", "UNIDAD", "GRUPO", "AREA", "AREAS", "COORDINACION"]);
+  const MES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+  const TPL = {
+    asunto: "SOLICITUD DE REPORTE DE DESVIACION DE ACUERDO AL PAG-28-14",
+    cuerpo: "Buen día estimado(a) {nombre}\n\nGracias por tu participación en la identificación y reporte de desviaciones mediante la tarjeta de observación líderes de campo.\n\n" +
+      "Para dar continuidad al seguimiento, te agradecería tu apoyo con la elaboración del Reporte de Desviación, anexo **PAG-28-14**, en coordinación con el jefe de departamento o supervisor responsable de la persona que realizó el acto inseguro, conforme al proceso establecido en el **Plan de Seguridad e Higiene y al diagrama del anexo PAG-28-13**.\n\n" +
+      "Tu apoyo, como persona que identificó y documentó el evento, es de gran importancia para contar con una descripción clara de lo ocurrido y de las acciones inmediatas realizadas, así como para facilitar el seguimiento correspondiente.\nAnexo de referencia los anexos correspondientes.\n\n{tabla}\n\n" +
+      "Quedo atenta para cualquier duda que se presente.\n\nMuchas gracias por tu colaboración y compromiso con la seguridad.\n\nSaludos cordiales.",
+    firma: "{usuario}\nSeguridad Industrial\nCentral Nucleoeléctrica Laguna Verde"
+  };
+  const tokens = s => U.norm(s).replace(/\(.*?\)/g, " ").replace(/[^A-Z0-9 ]/g, " ").split(" ").filter(w => w.length > 1 && !VACIAS.has(w));
+  const esAE = c => String(c.fu || "").split(",").includes("AE"), esDeb = c => /^DEBIL/i.test(c.si || "");
+  const fechaCorta = f => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(f || ""); return m ? m[3] + "-" + MES[+m[2] - 1] + "-" + m[1].slice(2) : (f || ""); };
+  const nombrePila = n => { const w = String(n || "").trim().split(/\s+/)[0] || ""; return w ? w[0].toUpperCase() + w.slice(1).toLowerCase() : ""; };
+
+  const CR = B.correos = {
+    F: null, G: null, lim: 200,
+    base() { return { desde: "", hasta: "", fu: "", si: "", std: "", subg: "", dep: "", q: "", orden: "id" }; },
+    tpl() { return Object.assign({}, TPL, (TJ.datos && TJ.datos.correoTpl) || {}); },
+    dir() { return (TJ.datos && TJ.datos.correos) || {}; },
+    correoDe(p) { const D = this.dir(); return (p.rpe && D["R:" + U.ini(p.rpe)]) || D["N:" + U.norm(p.nom)] || ""; },
+    // --------- en que area del organigrama esta el originador
+    ubicar(c) {
+      const OG = B.org, N = OG.nodos || [], ub = (TJ.datos.ubic || {})[U.ini(c.rpe)];
+      if (ub && OG.por(ub)) return { nodo: OG.por(ub), seguro: true, manual: true };
+      const yo = N.find(n => n.j && U.norm(n.j) === U.norm(c.nom)); if (yo) return { nodo: yo, seguro: true, titular: true };
+      const elegir = (lista, texto) => { const t = tokens(texto); if (!t.length) return null; let mejor = null, m = 0;
+        for (const n of lista) { const nt = tokens(n.n); if (!t.every(w => nt.some(x => x === w || (w.length > 4 && x.startsWith(w.slice(0, 5)))))) continue; const extra = nt.length - t.length; if (!mejor || extra < m) { mejor = n; m = extra; } }
+        return mejor; };
+      const subs = N.filter(n => { const s = OG.nivelSub(n.id); return s && +s.id === +n.id; });
+      const sub = elegir(subs, c.area);
+      const desc = s => { const r = [], pila = [s.id]; while (pila.length) { const x = pila.pop(); for (const h of OG.hijos(x)) { r.push(h); pila.push(h.id); } } return r; };
+      const dep = elegir(sub ? desc(sub) : N, c.depto);
+      if (dep) return { nodo: dep, seguro: !!sub || !!dep };
+      if (sub) return { nodo: sub, seguro: false, soloSub: true };
+      return { nodo: null, seguro: false };
+    },
+    // --------- destinatarios: Para el originador; CC su subgerente, Flores Cavanzo, sus jefes hacia abajo y STAFF SI
+    destinatarios(o) {
+      const OG = B.org, yoN = U.norm(o.nom), cc = [], ya = new Set([yoN]);
+      const pon = (nom, area) => { const k = U.norm(nom); if (!k || ya.has(k)) return; ya.add(k); cc.push({ nom, area, correo: this.dir()["N:" + k] || "" }); };
+      const u = o.ubic.nodo, sub = u ? OG.nivelSub(u.id) : null;
+      if (sub) pon(sub.j, sub.n);
+      // el Subgerente de Seguridad Nuclear: el titular de esa subgerencia en el organigrama
+      const ssn = (OG.nodos || []).find(n => U.norm(n.n) === "SUBGERENCIA DE SEGURIDAD NUCLEAR"); if (ssn && ssn.j) pon(ssn.j, ssn.n);
+      if (u && sub) { const r = OG.ruta(u.id), i = r.findIndex(x => +x.id === +sub.id); for (const n of r.slice(i + 1)) pon(n.j, n.n); }
+      pon(STAFF, "Lista de distribución");
+      return { para: { nom: o.nom, area: u ? u.n : (o.depto || ""), correo: this.correoDe(o) }, cc };
+    },
+    // --------- borrador de Outlook (.eml): Outlook lo abre listo para revisar y enviar
+    b64(u8) { let s = ""; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s).replace(/.{76}/g, "$&\r\n"); },
+    html(o, tpl) {
+      const k = v => esc(v ?? ""), th = (t, bg) => `<th style="background:${bg};color:#fff;font-size:8pt;font-weight:bold;border:1px solid #BFBFBF;padding:4px;text-align:left;vertical-align:bottom">${t}</th>`;
+      const td = (t, x) => `<td style="border:1px solid #BFBFBF;padding:4px;font-size:8.5pt;vertical-align:top${x || ""}">${t}</td>`;
+      const tabla = `<table style="border-collapse:collapse;font-family:Calibri,Arial,sans-serif;max-width:900px"><tr>${th("Id", "#70AD47")}${th("Fecha de la Observación", "#70AD47")}${th("RPE y Nombre Completo", "#70AD47")}${th("¿A qué Departamento/Oficina o Compañía contratista pertenece el trabajador que observaste?", "#70AD47")}${th("¿Qué pasó? (Comportamientos del trabajador)", "#44546A")}</tr>` +
+        o.cards.map(c => `<tr>${td("<b>" + k(c.id) + "</b>")}${td(k(fechaCorta(c.fobs || c.fcap)), ";white-space:nowrap")}${td(k((c.rpe || "") + " " + (c.nom || "")))}${td(k(c.obsDepto))}${td(k(c.qp || c.doc))}</tr>`).join("") + `</table>`;
+      const par = t => t.split(/\n{2,}/).map(p => p.trim() === "{tabla}" ? tabla : `<p style="margin:0 0 12px">${k(p).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/\n/g, "<br>")}</p>`).join("");
+      const cuerpo = tpl.cuerpo.replace(/\{nombre\}/g, nombrePila(o.nom)), firma = tpl.firma.replace(/\{usuario\}/g, B.usuario.nombre || B.usuario.ini);
+      const fl = firma.split("\n");
+      return `<html><head><meta charset="utf-8"></head><body style="font-family:Aptos,Calibri,Arial,sans-serif;font-size:11pt;color:#000">${par(cuerpo)}<p style="margin:18px 0 0"><b style="color:#691C32">${k(fl[0])}</b>${fl.length > 1 ? `<br><span style="color:#444;font-size:9.5pt">${fl.slice(1).map(k).join("<br>")}</span>` : ""}</p></body></html>`;
+    },
+    eml(o, tpl, adj) {
+      const enc = s => /^[\x20-\x7E]*$/.test(s) ? '"' + s.replace(/"/g, "") + '"' : "=?UTF-8?B?" + btoa(unescape(encodeURIComponent(s))) + "?=";
+      const ascii = s => String(s).normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^\x20-\x7E]/g, "");
+      const dirr = p => p.correo ? enc(p.nom) + " <" + p.correo + ">" : ascii(p.nom);      // sin correo: Outlook lo busca por nombre al enviar
+      const D = this.destinatarios(o), bnd = "----=_B24_" + Date.now().toString(36);
+      const te = new TextEncoder(), h = [
+        "X-Unsent: 1", "To: " + dirr(D.para), D.cc.length ? "Cc: " + D.cc.map(dirr).join(", ") : "", "Subject: =?UTF-8?B?" + btoa(unescape(encodeURIComponent(tpl.asunto))) + "?=",
+        "MIME-Version: 1.0", 'Content-Type: multipart/mixed; boundary="' + bnd + '"'].filter(Boolean).join("\r\n");
+      let s = h + "\r\n\r\n--" + bnd + '\r\nContent-Type: text/html; charset="utf-8"\r\nContent-Transfer-Encoding: base64\r\n\r\n' + this.b64(te.encode(this.html(o, tpl))) + "\r\n";
+      if (adj) s += "--" + bnd + '\r\nContent-Type: application/pdf; name="' + ascii(adj.nombre) + '"\r\nContent-Disposition: attachment; filename="' + ascii(adj.nombre) + '"\r\nContent-Transfer-Encoding: base64\r\n\r\n' + this.b64(adj.bytes) + "\r\n";
+      return s + "--" + bnd + "--\r\n";
+    },
+    async adjunto() {
+      if (this._adj) return this._adj;
+      if (B.modoLocal) return null;
+      const r = await fetch("/api/adjunto", { headers: { "X-Token": B.token } });
+      if (!r.ok) return null;
+      return (this._adj = { nombre: decodeURIComponent(r.headers.get("X-Nombre") || "adjunto.pdf"), bytes: new Uint8Array(await r.arrayBuffer()) });
+    },
+    nombreEml(o) { return ("Correo " + o.nom + " " + o.cards.map(c => c.id).join("-")).replace(/[\\/:*?"<>|]/g, "-").slice(0, 90) + ".eml"; },
+
+    /* ---------------------------------------------------------------- pantalla */
+    async vista(P, c) {
+      const D = TJ.datos, sems = Object.keys(D.semanas || {}).sort();
+      if (!sems.length) { c.innerHTML = `<div class="tarjeta">${B.ui.vacio("Primero carga los Excel de la semana en la pestaña <b>Tarjetas y tendencias</b>.", "doc")}</div>`; return; }
+      try { await B.org.cargar(); } catch (e) { }
+      const F = this.F = this.F || this.base();
+      if (!sems.includes(F.hasta)) F.hasta = sems[sems.length - 1];
+      if (!sems.includes(F.desde) || F.desde > F.hasta) F.desde = F.hasta;
+      const rango = sems.filter(s => s >= F.desde && s <= F.hasta), todas = [];
+      for (const s of rango) for (const x of await TJ.semana(s)) todas.push(Object.assign({ sem: s }, x));
+      const envios = D.envios || {}, q = U.norm(F.q);
+      const ops = k => [...new Set(todas.map(x => String(x[k] || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+      const L = todas.filter(x => (!F.fu || String(x.fu || "").split(",").includes(F.fu)) && (!F.si || (F.si === "D" ? esDeb(x) : !esDeb(x))) && (!F.std || x.std === F.std) && (!F.subg || x.subg === F.subg) && (!F.dep || x.depto === F.dep)
+        && (!q || U.norm([x.id, x.rpe, x.nom, x.qp, x.doc, x.obsDepto, x.std].join(" ")).includes(q)))
+        .sort((a, b) => F.orden === "nom" ? String(a.nom).localeCompare(String(b.nom)) || (+a.id - +b.id) : F.orden === "fecha" ? String(b.fobs || "").localeCompare(String(a.fobs || "")) : (+b.id || 0) - (+a.id || 0));
+      // originadores con tarjetas de ALTA ENERGIA que fueron DEBILIDAD (en las semanas elegidas)
+      const grupos = new Map();
+      for (const x of todas.filter(x => esAE(x) && esDeb(x))) { const k = U.ini(x.rpe) || U.norm(x.nom); if (!grupos.has(k)) grupos.set(k, { rpe: x.rpe, nom: x.nom, area: x.area, depto: x.depto, cards: [] }); grupos.get(k).cards.push(x); }
+      const O = [...grupos.values()].map(o => { o.cards.sort((a, b) => +a.id - +b.id); o.ubic = this.ubicar(o); o.pend = o.cards.filter(c => !envios[c.id]); o.D = this.destinatarios(o); return o; })
+        .sort((a, b) => (!a.pend.length - !b.pend.length) || String(a.nom).localeCompare(String(b.nom)));      // primero los pendientes
+      const sel = this.sel = this.sel || new Set();
+      const semOp = v => sems.map(s => `<option value="${s}" ${s === v ? "selected" : ""}>${TJ.semTxt(s)}</option>`).join("");
+      const opt = (k, t, lista, todos) => `<div class="campo" style="flex:1 1 170px"><label>${t}</label><select class="inp" data-f="${k}"><option value="">${todos}</option>${lista.map(o => { const v = Array.isArray(o) ? o[0] : o, e = Array.isArray(o) ? o[1] : o; return `<option value="${esc(v)}" ${F[k] === v ? "selected" : ""}>${esc(e)}</option>`; }).join("")}</select></div>`;
+      const chip = p => `<span class="chip-per" title="${esc(p.area || "")}" style="${p.correo ? "" : "background:#FFF4E5;border-color:#F0B35A"}">${esc(p.nom)} ${p.correo ? `<small class="muted">${esc(p.correo)}</small>` : `<small style="color:#b45309">sin correo</small>`}</span>`;
+      const ruta = o => o.ubic.nodo ? B.org.ruta(o.ubic.nodo.id).slice(1).map(x => x.n).join(" › ") : "";
+      const adj = await this.adjunto().catch(() => null);
+      c.innerHTML = `
+        <div class="tarjeta"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap"><div><h2 style="margin:0;font-size:17px">Tarjetas de los Excel cargados</h2><p class="muted peque" style="margin:4px 0 0">Filtra, busca y ordena. Toca una tarjeta para verla completa.</p></div></div>
+          <div class="fila" style="margin-top:10px"><div class="campo" style="flex:1 1 220px"><label>Desde la semana</label><select class="inp" data-f="desde">${semOp(F.desde)}</select></div><div class="campo" style="flex:1 1 220px"><label>Hasta la semana</label><select class="inp" data-f="hasta">${semOp(F.hasta)}</select></div>
+            ${opt("fu", "Archivo", [["AE", "Alta energía"], ["SI", "Seguridad Industrial (SEGIND)"]], "Ambos")}${opt("si", "Resultado", [["D", "Debilidad"], ["C", "Cumple expectativa"]], "Todos")}</div>
+          <div class="fila">${opt("std", "Estándar", ops("std"), "Todos")}${opt("subg", "Subgerencia observada", ops("subg"), "Todas")}${opt("dep", "Departamento del originador", ops("depto"), "Todos")}
+            <div class="campo" style="flex:1 1 150px"><label>Ordenar</label><select class="inp" data-f="orden"><option value="id" ${F.orden === "id" ? "selected" : ""}>ID (recientes)</option><option value="fecha" ${F.orden === "fecha" ? "selected" : ""}>Fecha de observación</option><option value="nom" ${F.orden === "nom" ? "selected" : ""}>Originador</option></select></div>
+            <div class="campo" style="flex:2 1 220px"><label>Buscar</label><input class="inp" id="crQ" value="${esc(F.q)}" placeholder="ID, nombre, RPE o texto de la tarjeta…"></div></div>
+          <p class="muted peque" style="margin:0 0 6px"><b>${L.length}</b> tarjeta(s) de ${todas.length} en ${rango.length} semana(s).</p>
+          <div class="tabla-cont" style="max-height:440px;overflow:auto"><table class="tabla"><thead><tr><th>ID</th><th>Sem.</th><th>Fecha obs.</th><th>Originador</th><th>Su departamento</th><th>Archivo</th><th>Estándar</th><th>Resultado</th><th>¿Qué pasó?</th><th>Correo</th></tr></thead><tbody>
+            ${L.slice(0, this.lim).map(x => `<tr data-v="${esc(x.id)}" data-s="${x.sem}" style="cursor:pointer"><td><b>${esc(x.id)}</b></td><td>${+x.sem.slice(5)}</td><td class="tnum">${esc(fechaCorta(x.fobs))}</td><td>${esc(x.nom)}<div class="peque muted">${esc(x.rpe)}</div></td><td class="peque">${esc(x.depto)}</td><td>${esAE(x) ? '<span class="badge r">AE</span>' : ""}${String(x.fu || "").split(",").includes("SI") ? ' <span class="badge v">SI</span>' : ""}</td>
+              <td class="peque">${esc(x.std)}</td><td>${esDeb(x) ? '<span class="badge r">Debilidad</span>' : '<span class="badge v">Cumple</span>'}</td><td class="peque" style="min-width:220px">${esc(String(x.qp || x.doc || "").slice(0, 160))}</td>
+              <td class="peque">${envios[x.id] ? "✓ " + esc(String(envios[x.id].fh || "").slice(0, 10)) : esAE(x) && esDeb(x) ? '<span style="color:#b45309">pendiente</span>' : "—"}</td></tr>`).join("") || `<tr><td colspan="10" class="muted">Sin tarjetas con ese filtro.</td></tr>`}</tbody></table></div>
+          ${L.length > this.lim ? `<button class="btn chico sec" id="crMas" style="margin-top:8px">Ver ${Math.min(200, L.length - this.lim)} más</button>` : ""}</div>
+        <div class="tarjeta"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap"><div><h2 style="margin:0;font-size:17px">Correos de reconocimiento (alta energía · debilidad)</h2>
+            <p class="muted peque" style="margin:4px 0 0">Un correo por originador con todas sus tarjetas de alta energía que fueron debilidad en las semanas elegidas. Se genera un <b>borrador de Outlook</b> con el ${adj ? "PDF <b>" + esc(adj.nombre) + "</b> adjunto" : "adjunto"}: ábrelo, revísalo y presiona <b>Enviar</b>.</p></div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-start"><button class="btn chico sec" id="crTpl">${B.ico("editar")} Texto del correo</button><button class="btn chico sec" id="crDir">${B.ico("usuarios")} Correos electrónicos</button>${B.dom.esSup() && !B.modoLocal ? `<label class="btn chico sec" style="cursor:pointer" title="PDF que se adjunta a todos los correos">${B.ico("subir")} Cambiar PDF adjunto<input type="file" id="crAdj" accept="application/pdf" hidden></label>` : ""}</div></div>
+          ${B.modoLocal ? `<div class="aviso a" style="margin-top:10px">${B.ico("info")}<div>Los borradores con el PDF adjunto se generan en la bitácora de la PC (con el servidor).</div></div>` : ""}
+          ${O.length ? `<div class="fila" style="align-items:center;margin:10px 0"><label class="chip-ali" style="margin:0"><input type="checkbox" id="crTodos"><span>Marcar los pendientes (${O.filter(o => o.pend.length).length})</span></label>
+              <button class="btn verde" id="crGen" ${B.modoLocal ? "disabled" : ""}>${B.ico("descargar")} Generar borradores de los marcados</button><span class="muted peque" id="crN"></span></div>
+            <div class="lista">${O.map((o, i) => `<div class="item" style="flex-wrap:wrap;align-items:flex-start;${o.pend.length ? "" : "opacity:.65"}" data-o="${i}">
+              <input type="checkbox" data-sel="${i}" ${sel.has(o.rpe) ? "checked" : ""} style="width:18px;height:18px;margin-top:3px">
+              <div class="cuerpo" style="min-width:260px;flex:1"><div class="tit">${esc(o.nom)} <span class="muted peque">${esc(o.rpe)}</span> · ${o.cards.length} tarjeta(s): ${o.cards.map(x => "#" + esc(x.id)).join(", ")}
+                ${o.pend.length ? `<span class="badge d">pendiente</span>` : `<span class="badge v">correo generado</span>`}</div>
+                <div class="meta"><span>${o.ubic.nodo ? (o.ubic.seguro ? "" : "⚠ ") + esc(ruta(o) || o.ubic.nodo.n) : `<b style="color:#b45309">⚠ No encontré su área en el organigrama</b> (${esc(o.area || "")} · ${esc(o.depto || "")})`}</span><a href="#" data-ub="${i}">${o.ubic.nodo ? "Cambiar área" : "Elegir área"}</a></div>
+                <div class="meta" style="gap:4px;flex-wrap:wrap;margin-top:6px"><b>Para:</b> ${chip(o.D.para)}</div>
+                <div class="meta" style="gap:4px;flex-wrap:wrap;margin-top:4px"><b>CC:</b> ${o.D.cc.map(chip).join(" ")}</div></div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn chico" data-gen="${i}" ${B.modoLocal ? "disabled" : ""}>${B.ico("descargar")} Borrador</button><button class="btn chico sec" data-ver="${i}">Ver correo</button>
+                ${o.pend.length ? `<button class="btn chico fantasma" data-env="${i}" title="Marcar como enviado sin generar el borrador">Marcar enviado</button>` : `<button class="btn chico fantasma" data-noenv="${i}">Quitar marca</button>`}</div></div>`).join("")}</div>`
+            : `<p class="muted" style="margin:10px 0 0">No hay tarjetas de alta energía con debilidad en las semanas elegidas.</p>`}</div>`;
+      const repinta = () => P.pinta();
+      c.querySelectorAll("[data-f]").forEach(s => s.onchange = () => { F[s.dataset.f] = s.value; this.lim = 200; repinta(); });
+      const qi = c.querySelector("#crQ"); qi.onchange = () => { F.q = qi.value.trim(); repinta(); };
+      const mas = c.querySelector("#crMas"); if (mas) mas.onclick = () => { this.lim += 200; repinta(); };
+      c.querySelectorAll("tr[data-v]").forEach(tr => tr.onclick = () => { const x = todas.find(y => String(y.id) === tr.dataset.v && y.sem === tr.dataset.s); if (x) P.detalle(x, null, () => P.pinta()); });
+      const cuenta = () => { const n = c.querySelector("#crN"); if (n) n.textContent = sel.size ? sel.size + " marcado(s)" : ""; };
+      c.querySelectorAll("[data-sel]").forEach(ch => ch.onchange = () => { const o = O[+ch.dataset.sel]; ch.checked ? sel.add(o.rpe) : sel.delete(o.rpe); cuenta(); });
+      const ct = c.querySelector("#crTodos"); if (ct) ct.onchange = () => { sel.clear(); if (ct.checked) O.filter(o => o.pend.length).forEach(o => sel.add(o.rpe)); c.querySelectorAll("[data-sel]").forEach(ch => ch.checked = sel.has(O[+ch.dataset.sel].rpe)); cuenta(); };
+      cuenta();
+      const marcar = async (ids, on) => { await TJ.llamar("envio", { ids, on }); D.envios = D.envios || {}; for (const id of ids) { if (on) D.envios[id] = { fh: U.ahoraISO(), por: B.usuario.ini }; else delete D.envios[id]; } };
+      const generar = async lista => {
+        const sinPara = lista.filter(o => !o.D.para.correo), sinCc = lista.filter(o => o.D.cc.some(p => !p.correo));
+        if ((sinPara.length || sinCc.length) && !(await B.ui.confirmar(`Faltan correos electrónicos de ${[...new Set(lista.flatMap(o => [o.D.para].concat(o.D.cc)).filter(p => !p.correo).map(p => p.nom))].length} persona(s). En el borrador irán solo con su nombre y <b>Outlook los buscará en la libreta de direcciones</b> al enviar (si no los encuentra, te lo dirá). Puedes capturarlos en <b>Correos electrónicos</b> para que salgan completos.<br><br>¿Generar de todos modos?`, "Correos faltantes", "Generar"))) return;
+        try {
+          const a = await this.adjunto(), tpl = this.tpl();
+          if (!a && !(await B.ui.confirmar("No hay PDF para adjuntar. ¿Generar el borrador sin adjunto?", "Sin adjunto", "Generar"))) return;
+          if (lista.length === 1) U.descargar(this.nombreEml(lista[0]), this.eml(lista[0], tpl, a), "message/rfc822");
+          else U.descargar("Correos reconocimiento Lideres en Campo " + U.ahoraISO().slice(0, 10) + ".zip", await B.e1.zip(lista.map(o => ({ n: this.nombreEml(o), d: this.eml(o, tpl, a) }))), "application/zip");
+          await marcar(lista.flatMap(o => o.cards.map(x => String(x.id))), true);
+          B.ui.toast(lista.length === 1 ? "Borrador descargado. Ábrelo (doble clic): Outlook lo muestra listo para revisar y <b>Enviar</b>." : `${lista.length} borradores en un .zip: descomprímelo y abre cada uno con doble clic; Outlook los muestra listos para <b>Enviar</b>.`, "ok", 10000);
+          sel.clear(); repinta();
+        } catch (e) { B.ui.error(e); }
+      };
+      const bg = c.querySelector("#crGen"); if (bg) bg.onclick = () => { const l = O.filter(o => sel.has(o.rpe)); if (!l.length) { B.ui.toast("Marca al menos un originador.", "error"); return; } generar(l); };
+      c.querySelectorAll("[data-gen]").forEach(b => b.onclick = () => generar([O[+b.dataset.gen]]));
+      c.querySelectorAll("[data-env]").forEach(b => b.onclick = async () => { try { await marcar(O[+b.dataset.env].cards.map(x => String(x.id)), true); repinta(); } catch (e) { B.ui.error(e); } });
+      c.querySelectorAll("[data-noenv]").forEach(b => b.onclick = async () => { try { await marcar(O[+b.dataset.noenv].cards.map(x => String(x.id)), false); repinta(); } catch (e) { B.ui.error(e); } });
+      c.querySelectorAll("[data-ver]").forEach(b => b.onclick = () => this.ver(O[+b.dataset.ver]));
+      c.querySelectorAll("[data-ub]").forEach(a => a.onclick = e => { e.preventDefault(); this.elegirArea(O[+a.dataset.ub], P); });
+      c.querySelector("#crTpl").onclick = () => this.editarTpl(P);
+      c.querySelector("#crDir").onclick = () => this.directorio(O, P);
+      const ba = c.querySelector("#crAdj");
+      if (ba) ba.onchange = async e => { const f = e.target.files[0]; if (!f) return; try { const r = await (await fetch("/api/adjunto?nombre=" + encodeURIComponent(f.name), { method: "POST", headers: { "X-Token": B.token }, body: f })).json(); if (!r.ok) throw new Error(r.error); this._adj = null; B.ui.toast("PDF adjunto actualizado: <b>" + esc(r.nombre) + "</b>.", "ok"); repinta(); } catch (x) { B.ui.error(x); } };
+    },
+    ver(o) {
+      const D = o.D, nom = p => esc(p.nom) + (p.correo ? " &lt;" + esc(p.correo) + "&gt;" : " <i style='color:#b45309'>(sin correo)</i>");
+      B.ui.modal({ titulo: "Correo para " + esc(o.nom), icono: "doc", ancho: true,
+        html: `<p style="margin:0 0 4px"><b>Para:</b> ${nom(D.para)}</p><p style="margin:0 0 4px"><b>CC:</b> ${D.cc.map(nom).join("; ")}</p><p style="margin:0 0 10px"><b>Asunto:</b> ${esc(this.tpl().asunto)}</p>
+          <iframe style="width:100%;height:52vh;border:1px solid var(--borde,#ddd);border-radius:8px;background:#fff"></iframe>`,
+        alAbrir: v => { v.querySelector("iframe").srcdoc = this.html(o, this.tpl()); },
+        botones: [{ t: "Cerrar", c: "sec", v: null }] });
+    },
+    async elegirArea(o, P) {
+      const OG = B.org, ops = (OG.nodos || []).map(n => [n.id, OG.ruta(n.id).slice(1).map(x => x.n).join(" › ") || n.n]).sort((a, b) => a[1].localeCompare(b[1]));
+      const r = await B.ui.modal({ titulo: "Área de " + esc(o.nom), icono: "usuarios", ancho: true,
+        html: `<p class="muted peque" style="margin:0 0 8px">En el Excel dice: <b>${esc(o.area || "—")}</b> · <b>${esc(o.depto || "—")}</b>. Elige su área en el organigrama; de ahí salen su subgerente y sus jefes para las copias. Se recuerda para sus siguientes correos.</p>
+          <input class="inp" id="eaQ" placeholder="Buscar área…" style="margin-bottom:8px"><select class="inp" id="eaS" size="12" style="height:auto">${ops.map(([id, t]) => `<option value="${id}" ${o.ubic.nodo && +o.ubic.nodo.id === +id ? "selected" : ""}>${esc(t)}</option>`).join("")}</select>`,
+        alAbrir: v => { const qq = v.querySelector("#eaQ"), s = v.querySelector("#eaS"); qq.oninput = () => { const t = U.norm(qq.value); [...s.options].forEach(op => op.hidden = t && !U.norm(op.text).includes(t)); }; },
+        botones: [{ t: "Cancelar", c: "sec", v: null }, { t: "Quitar (automático)", c: "fantasma", v: -1 }, { t: "Guardar", c: "verde", v: v => +v.querySelector("#eaS").value || null }] });
+      if (r == null) return;
+      try { await TJ.llamar("correosGuardar", { ubic: { [U.ini(o.rpe)]: r > 0 ? r : 0 } }); TJ.datos.ubic = TJ.datos.ubic || {}; if (r > 0) TJ.datos.ubic[U.ini(o.rpe)] = r; else delete TJ.datos.ubic[U.ini(o.rpe)]; P.pinta(); } catch (e) { B.ui.error(e); }
+    },
+    async editarTpl(P) {
+      const t = this.tpl();
+      const r = await B.ui.modal({ titulo: "Texto del correo de reconocimiento", icono: "editar", ancho: true,
+        html: `<div class="campo"><label>Asunto</label><input class="inp" id="tAs" value="${esc(t.asunto)}"></div>
+          <div class="campo"><label>Mensaje · <b>{nombre}</b> = nombre del originador · <b>{tabla}</b> = tabla de sus tarjetas · entre **dobles asteriscos** va en negritas</label><textarea class="inp" id="tCu" style="min-height:300px">${esc(t.cuerpo)}</textarea></div>
+          <div class="campo"><label>Firma · <b>{usuario}</b> = tu nombre</label><textarea class="inp" id="tFi" rows="3">${esc(t.firma)}</textarea></div>`,
+        botones: [{ t: "Cancelar", c: "sec", v: null }, { t: "Volver al original", c: "fantasma", v: "orig" }, { t: "Guardar", c: "verde", v: v => ({ asunto: v.querySelector("#tAs").value.trim(), cuerpo: v.querySelector("#tCu").value, firma: v.querySelector("#tFi").value }) }] });
+      if (!r) return;
+      const tpl = r === "orig" ? {} : r;
+      if (tpl.cuerpo && !tpl.cuerpo.includes("{tabla}") && !(await B.ui.confirmar("El mensaje no tiene <b>{tabla}</b>: el correo saldrá sin la tabla de tarjetas. ¿Guardar así?", "Sin tabla", "Guardar"))) return;
+      try { await TJ.llamar("tplGuardar", { tpl }); TJ.datos.correoTpl = tpl; B.ui.toast("Texto del correo guardado.", "ok"); P.pinta(); } catch (e) { B.ui.error(e); }
+    },
+    // directorio: correos de los originadores (por RPE) y de jefes y listas (por nombre)
+    async directorio(O, P) {
+      const Dr = this.dir(), filas = new Map();
+      for (const o of O) { filas.set("R:" + U.ini(o.rpe), { nom: o.nom, det: "Originador · " + (o.rpe || "") }); for (const p of o.D.cc) filas.set("N:" + U.norm(p.nom), { nom: p.nom, det: p.area || "" }); }
+      for (const n of (B.org.nodos || [])) if (n.j && !filas.has("N:" + U.norm(n.j))) filas.set("N:" + U.norm(n.j), { nom: n.j, det: n.n });
+      const L = [...filas.entries()].sort((a, b) => (!!Dr[a[0]] - !!Dr[b[0]]) || a[1].nom.localeCompare(b[1].nom));
+      const r = await B.ui.modal({ titulo: "Correos electrónicos", icono: "usuarios", ancho: true,
+        html: `<p class="muted peque" style="margin:0 0 8px">Se capturan una vez y se usan en todos los correos. Primero aparecen los que faltan. Para STAFF SEGURIDAD INDUSTRIAL escribe el correo de la lista de distribución.</p>
+          <input class="inp" id="dQ" placeholder="Buscar…" style="margin-bottom:8px"><div class="tabla-cont" style="max-height:52vh;overflow:auto"><table class="tabla"><thead><tr><th>Nombre</th><th>Área</th><th>Correo electrónico</th></tr></thead><tbody>
+          ${L.map(([k, f]) => `<tr data-n="${esc(U.norm(f.nom + " " + f.det))}"><td><b>${esc(f.nom)}</b></td><td class="peque muted">${esc(f.det)}</td><td><input class="inp" data-k="${esc(k)}" value="${esc(Dr[k] || "")}" placeholder="nombre@cfe.mx" style="min-width:220px;padding:6px 8px"></td></tr>`).join("")}</tbody></table></div>`,
+        alAbrir: v => { const qq = v.querySelector("#dQ"); qq.oninput = () => { const t = U.norm(qq.value); v.querySelectorAll("tr[data-n]").forEach(tr => tr.style.display = !t || tr.dataset.n.includes(t) ? "" : "none"); }; },
+        botones: [{ t: "Cancelar", c: "sec", v: null }, { t: "Guardar", c: "verde", v: v => { const m = {}; v.querySelectorAll("[data-k]").forEach(i => { if ((i.value.trim()) !== (Dr[i.dataset.k] || "")) m[i.dataset.k] = i.value.trim(); }); return m; } }] });
+      if (!r) return;
+      const malos = Object.values(r).filter(x => x && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x));
+      if (malos.length) { B.ui.toast("Revisa estos correos: " + malos.map(esc).join(", "), "error", 8000); return; }
+      if (!Object.keys(r).length) { B.ui.toast("Sin cambios.", ""); return; }
+      try { await TJ.llamar("correosGuardar", { mapa: r }); TJ.datos.correos = Object.assign(TJ.datos.correos || {}, r); for (const [k, v] of Object.entries(r)) if (!v) delete TJ.datos.correos[k]; B.ui.toast(Object.keys(r).length + " correo(s) guardados.", "ok"); P.pinta(); } catch (e) { B.ui.error(e); }
+    }
+  };
+})();
+;
 /* ---- movil.js ---- */
 /* =========================================================================
    BITACORA 24RU1 - VERSION PARA CELULAR e intercambio por archivo (WhatsApp / correo)
@@ -7226,6 +7628,7 @@ B.inter = {
       // permiso especial: quien elabora la E+1 tambien puede entrar a la version de celular
       db.config.celPermitidos = [...new Set((db.config.celPermitidos || []).concat(ver.editores).map(U.ini))];
       db.tarjetas.hist = Object.assign({}, B.E1_SEMILLA || {}, db.tarjetas.hist);
+      try { const og = await B.tj.llamar("org", { sinFotos: true }); db.organigrama = { nodos: og.nodos, fuente: og.fuente, mod: og.mod }; } catch (e) { }
     }
     db._paquete = { tipo: "b24-paquete", generado: U.ahoraISO(), version: B.app.VERSION, por: B.usuario.ini, periodo: B.t.periodo() };
     if (completo) db._paquete.completo = true;
@@ -7251,6 +7654,7 @@ B.inter = {
       await L.escribir("paquete", db._paquete);
       B.EC_GRUPOS = db.ecGrupos || []; B.ecLista = B.ecArmar();
       if (Array.isArray(db.poe) && db.poe.length) { await L.escribir("poe", db.poe); B.POE = db.poe; }
+      if (db.organigrama && Array.isArray(db.organigrama.nodos)) await L.escribir("organigrama", db.organigrama);
       if (db.tarjetas) {
         // el celular conserva las semanas que ya tenia; el indice solo anuncia las que si estan guardadas aqui
         const tiene = new Set((await L.leer("tarjetas_sems")) || []);
@@ -7580,7 +7984,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "4.7.4", servidorViejo: false,
+  info: {}, VERSION: "4.8", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -7767,7 +8171,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "procedimientos" ? '<span class="contador oculto" id="cntProc"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.7.4")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.8")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
