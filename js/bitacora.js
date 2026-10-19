@@ -803,7 +803,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.8.1", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.8.2", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -7138,7 +7138,8 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
       "Quedo atenta para cualquier duda que se presente.\n\nMuchas gracias por tu colaboración y compromiso con la seguridad.\n\nSaludos cordiales."
   };
   // nombres de departamento del Excel que en el organigrama se llaman distinto
-  const ALIAS = [[/DESEMPENO HUMANO/, "ESTANDARES DE DESEMPENO"]];
+  // todo "Control de Calidad" (eléctrico, mecánico, I&C, recepción…) es del Departamento de Control de Calidad (Seguridad Nuclear)
+  const ALIAS = [[/DESEMPENO HUMANO/, "ESTANDARES DE DESEMPENO"], [/CONTROL (DE )?CALIDAD/, "DEPARTAMENTO DE CONTROL DE CALIDAD"]];
   const tokens = s => U.norm(s).replace(/\(.*?\)/g, " ").replace(/[^A-Z0-9 ]/g, " ").split(" ").filter(w => w.length > 1 && !VACIAS.has(w));
   const esAE = c => String(c.fu || "").split(",").includes("AE"), esDeb = c => /^DEBIL/i.test(c.si || "");
   const fechaCorta = f => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(f || ""); return m ? m[3] + "-" + MES[+m[2] - 1] + "-" + m[1].slice(2) : (f || ""); };
@@ -8043,7 +8044,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "4.8.1", servidorViejo: false,
+  info: {}, VERSION: "4.8.2", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -8230,7 +8231,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "procedimientos" ? '<span class="contador oculto" id="cntProc"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.8.1")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.8.2")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
