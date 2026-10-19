@@ -803,7 +803,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.8.4", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.8.5", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -7192,14 +7192,14 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
     // --------- destinatarios: Para el originador; CC su subgerente, Flores Cavanzo, sus jefes hacia abajo y STAFF SI
     destinatarios(o) {
       const OG = B.org, yoN = U.norm(o.nom), cc = [], ya = new Set([yoN]);
-      const pon = (nom, area) => { const k = U.norm(nom); if (!k || ya.has(k)) return; ya.add(k); cc.push({ nom, area, correo: this.dir()["N:" + k] || "" }); };
+      const pon = (nom, area) => { const k = U.norm(nom); if (!k || ya.has(k)) return; ya.add(k); cc.push({ nom, area, clave: "N:" + k, correo: this.dir()["N:" + k] || "" }); };
       const u = o.ubic.nodo, sub = u ? OG.nivelSub(u.id) : null;
       if (sub) pon(sub.j, sub.n);
       // el Subgerente de Seguridad Nuclear: el titular de esa subgerencia en el organigrama
       const ssn = (OG.nodos || []).find(n => U.norm(n.n) === "SUBGERENCIA DE SEGURIDAD NUCLEAR"); if (ssn && ssn.j) pon(ssn.j, ssn.n);
       if (u && sub) { const r = OG.ruta(u.id), i = r.findIndex(x => +x.id === +sub.id); for (const n of r.slice(i + 1)) pon(n.j, n.n); }
       pon(STAFF, "Lista de distribución");
-      return { para: { nom: o.nom, area: u ? u.n : (o.depto || ""), correo: this.correoDe(o) }, cc };
+      return { para: { nom: o.nom, area: u ? u.n : (o.depto || ""), clave: o.rpe ? "R:" + U.ini(o.rpe) : "N:" + U.norm(o.nom), correo: this.correoDe(o) }, cc };
     },
     // --------- borrador de Outlook (.eml): Outlook lo abre listo para revisar y enviar
     b64(u8) { let s = ""; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s).replace(/.{76}/g, "$&\r\n"); },
@@ -7261,7 +7261,9 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
       const sel = this.sel = this.sel || new Set();
       const semOp = v => sems.map(s => `<option value="${s}" ${s === v ? "selected" : ""}>${TJ.semTxt(s)}</option>`).join("");
       const opt = (k, t, lista, todos) => `<div class="campo" style="flex:1 1 170px"><label>${t}</label><select class="inp" data-f="${k}"><option value="">${todos}</option>${lista.map(o => { const v = Array.isArray(o) ? o[0] : o, e = Array.isArray(o) ? o[1] : o; return `<option value="${esc(v)}" ${F[k] === v ? "selected" : ""}>${esc(e)}</option>`; }).join("")}</select></div>`;
-      const chip = p => `<span class="chip-per" title="${esc(p.area || "")}" style="${p.correo ? "" : "background:#FFF4E5;border-color:#F0B35A"}">${esc(p.nom)} ${p.correo ? `<small class="muted">${esc(p.correo)}</small>` : `<small style="color:#b45309">sin correo</small>`}</span>`;
+      const chip = p => `<span class="chip-per" title="${esc(p.area || "")}" style="${p.correo ? "" : "background:#FFF4E5;border-color:#F0B35A"}">${esc(p.nom)} ${p.correo
+        ? `<a href="#" data-mail="${esc(p.clave)}" data-nom="${esc(p.nom)}" class="muted peque" title="Corregir el correo" style="text-decoration:none">${esc(p.correo)} ✎</a>`
+        : `<a href="#" data-mail="${esc(p.clave)}" data-nom="${esc(p.nom)}" class="peque" style="color:#b45309;font-weight:700" title="Capturar su correo">sin correo · agregar</a>`}</span>`;
       const ruta = o => o.ubic.nodo ? B.org.ruta(o.ubic.nodo.id).slice(1).map(x => x.n).join(" › ") : "";
       const adj = await this.adjunto().catch(() => null);
       c.innerHTML = `
@@ -7325,6 +7327,7 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
       c.querySelectorAll("[data-ver]").forEach(b => b.onclick = () => this.ver(O[+b.dataset.ver]));
       c.querySelectorAll("[data-web]").forEach(b => b.onclick = () => this.web(O[+b.dataset.web], marcar, repinta));
       c.querySelectorAll("[data-desc]").forEach(b => b.onclick = () => this.noAplica(O[+b.dataset.desc], repinta));
+      c.querySelectorAll("[data-mail]").forEach(a => a.onclick = e => { e.preventDefault(); this.capturarCorreo(a.dataset.mail, a.dataset.nom, repinta); });
       c.querySelectorAll("[data-ub]").forEach(a => a.onclick = e => { e.preventDefault(); this.elegirArea(O[+a.dataset.ub], P); });
       c.querySelector("#crTpl").onclick = () => this.editarTpl(P);
       c.querySelector("#crDir").onclick = () => this.directorio(O, P);
@@ -7367,6 +7370,18 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
         }),
         botones: [{ t: "Cerrar", c: "sec", v: null }, { t: "Ya lo envié", c: "verde", antes: async () => { try { await marcar(o.cards.map(x => String(x.id)), true); B.ui.toast("Tarjetas marcadas con correo enviado.", "ok"); } catch (e) { B.ui.error(e); return false; } }, v: true }] });
       repinta();
+    },
+    // correo de una persona, capturado desde su nombre en la lista (se guarda en el directorio y sirve para todos sus correos)
+    async capturarCorreo(clave, nom, repinta) {
+      const D = TJ.datos, ant = (D.correos || {})[clave] || "";
+      const r = await B.ui.modal({ titulo: "Correo de " + esc(nom), icono: "usuarios",
+        html: `<div class="campo" style="margin:0"><label>Correo electrónico</label><input class="inp" id="cmC" value="${esc(ant)}" placeholder="nombre@cfe.mx" autocomplete="off"></div>
+          <p class="muted peque" style="margin:8px 0 0">Se guarda en <b>Correos electrónicos</b> y se usa en todos los correos donde aparezca. Vacío = quitarlo.</p>`,
+        alAbrir: v => { const i = v.querySelector("#cmC"); setTimeout(() => i.focus(), 50); i.onkeydown = e => { if (e.key === "Enter") { const b = [...v.querySelectorAll("button")].find(x => x.textContent.trim() === "Guardar"); if (b) b.click(); } }; },
+        botones: [{ t: "Cancelar", c: "sec", v: null }, { t: "Guardar", c: "verde", antes: v => { const x = v.querySelector("#cmC").value.trim(); if (x && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x)) { B.ui.toast("El correo no parece válido.", "error"); return false; } }, v: v => ({ c: v.querySelector("#cmC").value.trim() }) }] });
+      if (!r || r.c === ant) return;
+      try { await TJ.llamar("correosGuardar", { mapa: { [clave]: r.c } }); D.correos = D.correos || {}; if (r.c) D.correos[clave] = r.c; else delete D.correos[clave]; B.ui.toast(r.c ? "Correo guardado." : "Correo quitado.", "ok", 2500); repinta(); }
+      catch (e) { B.ui.error(e); }
     },
     // descartar tarjetas: debilidades de alta energia que no requieren el correo ni la informacion de los anexos
     async noAplica(o, repinta) {
@@ -8076,7 +8091,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "4.8.4", servidorViejo: false,
+  info: {}, VERSION: "4.8.5", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -8263,7 +8278,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "procedimientos" ? '<span class="contador oculto" id="cntProc"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.8.4")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.8.5")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
