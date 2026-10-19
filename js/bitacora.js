@@ -803,7 +803,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.9.1", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.9.2", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -7492,9 +7492,10 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
     nivelSub(id) { const r = this.ruta(id), iG = r.findIndex(x => x.t === "gerencia"); if (iG >= 0) return r[iG + 1] || null; return r[1] || null; },
     iniciales(s) { return String(s || "").split(/\s+/).filter(Boolean).slice(0, 2).map(x => x[0]).join("") || "?"; },
     // correo del titular (directorio de correos) y su extension (se captura al editar el area)
-    correo(n) { return n.j ? ((TJ.datos && TJ.datos.correos) || {})["N:" + U.norm(n.j)] || "" : ""; },
+    correo(n) { return n.j && B.correos ? B.correos.correoDe({ nom: n.j }) : ""; },
+    ext(n) { return String((n.j && B.correos ? B.correos.extDe({ nom: n.j }) : "") || n.x || "").trim(); },
     reverso(n, k) {
-      const cor = this.correo(n), ext = String(n.x || "").trim();
+      const cor = this.correo(n), ext = this.ext(n);
       return `<div class="og-b"><div class="og-bt">${esc(n.j || "Sin titular")}</div>
         ${cor ? `<a class="og-mail" href="mailto:${esc(cor)}" title="Escribirle un correo">✉ ${esc(cor)}</a>` : ""}${ext ? `<div class="og-ext">☎ Ext. ${esc(ext)}</div>` : ""}
         ${!cor && !ext ? `<div class="og-sin">Sin correo ni extensión capturados${this.editar ? " · usa ✎ para agregarlos" : ""}</div>` : ""}
@@ -7575,8 +7576,8 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
             <label class="btn chico sec" style="cursor:pointer;margin-top:6px">Cambiar foto<input type="file" id="ogFotoIn" accept="image/*" hidden></label><br><a href="#" id="ogFotoX" class="peque">Quitar foto</a></div>
           <div style="flex:1;min-width:240px"><div class="campo"><label>Nombre del área</label><input class="inp" id="ogN" value="${esc(n.n)}" style="text-transform:uppercase"></div>
             <div class="campo"><label>Titular (jefe del área)</label><input class="inp" id="ogJ" value="${esc(n.j)}" style="text-transform:uppercase" placeholder="Vacío = sin titular"></div>
-            <div class="grid2"><div class="campo"><label>Correo del titular</label><input class="inp" id="ogC" value="${esc(n.j ? C[clave(n.j)] || "" : "")}" placeholder="nombre@cfe.mx"></div>
-              <div class="campo"><label>Extensión telefónica</label><input class="inp" id="ogX" value="${esc(n.x || "")}" maxlength="30" placeholder="Ej. 4512"></div></div>
+            <div class="grid2"><div class="campo"><label>Correo del titular</label><input class="inp" id="ogC" value="${esc(this.correo(n))}" placeholder="nombre@cfe.mx"></div>
+              <div class="campo"><label>Extensión telefónica</label><input class="inp" id="ogX" value="${esc(this.ext(n))}" maxlength="30" placeholder="Ej. 4512"></div></div>
             <div class="grid2"><div class="campo"><label>Tipo</label><select class="inp" id="ogT">${TIPOS.map(([k, t]) => `<option value="${k}" ${n.t === k ? "selected" : ""}>${t}</option>`).join("")}</select></div>
               <div class="campo"><label>Depende de</label><select class="inp" id="ogP"><option value="0">— Ninguna (área principal)</option>${ops.map(([id, t]) => `<option value="${id}" ${+n.p === +id ? "selected" : ""}>${esc(t)}</option>`).join("")}</select></div></div></div></div>`,
         alAbrir: v => {
@@ -7594,8 +7595,9 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
         } else {
           if (!r.n) { B.ui.toast("Escribe el nombre del área.", "error"); return; }
           if (r.c && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(r.c)) { B.ui.toast("El correo no parece válido.", "error"); return; }
-          await TJ.llamar("orgNodo", { nodo: { id: +n.id || 0, n: r.n, j: r.j, t: r.t, p: r.p, f: foto, x: r.x } });
-          if (r.j && (r.c || "") !== ((TJ.datos.correos || {})[clave(r.j)] || "")) { await TJ.llamar("correosGuardar", { mapa: { [clave(r.j)]: r.c } }); (TJ.datos.correos = TJ.datos.correos || {})[clave(r.j)] = r.c; }
+          await TJ.llamar("orgNodo", { nodo: { id: +n.id || 0, n: r.n, j: r.j, t: r.t, p: r.p, f: foto, x: r.j ? "" : r.x } });
+          // correo y extension del titular: en el directorio de correos (por persona), para que sirvan en todos lados
+          if (r.j && ((r.c || "") !== B.correos.correoDe({ nom: r.j }) || (r.x || "") !== B.correos.extDe({ nom: r.j }))) await B.correos.guardarPersona(r.j, "", r.c, r.x);
         }
         await this.cargar(true); B.ui.toast("Organigrama actualizado.", "ok", 2500); P.pinta();
       } catch (e) { B.ui.error(e); }
@@ -7642,7 +7644,21 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
     base() { return { desde: "", hasta: "", fu: "", si: "", std: "", subg: "", dep: "", err: "", q: "", orden: "id" }; },
     tpl() { return Object.assign({}, TPL, (TJ.datos && TJ.datos.correoTpl) || {}); },
     dir() { return (TJ.datos && TJ.datos.correos) || {}; },
-    correoDe(p) { const D = this.dir(); return (p.rpe && D["R:" + U.ini(p.rpe)]) || D["N:" + U.norm(p.nom)] || ""; },
+    /* Directorio por PERSONA (un jefe tambien puede ser originador): el correo se guarda con su nombre (N:) y, si se sabe,
+       tambien con su RPE (R:), asi cualquier lugar donde aparezca lo encuentra; la extension va en X:<NOMBRE>.
+       alias = nombre -> RPE de los originadores de las tarjetas cargadas. */
+    alias: new Map(),
+    rpeDe(nom, rpe) { return U.ini(rpe || "") || this.alias.get(U.norm(nom)) || ""; },
+    claves(nom, rpe) { const n = U.norm(nom), r = this.rpeDe(nom, rpe); return (n ? ["N:" + n] : []).concat(r ? ["R:" + r] : []); },
+    correoDe(p) { const D = this.dir(), n = U.norm(p.nom), r = this.rpeDe(p.nom, p.rpe); return (n && D["N:" + n]) || (r && D["R:" + r]) || ""; },
+    extDe(p) { const D = this.dir(); return D["X:" + U.norm(p.nom)] || ""; },
+    async guardarPersona(nom, rpe, correo, ext) {
+      const m = {}; for (const k of this.claves(nom, rpe)) m[k] = correo || "";
+      if (ext !== undefined && U.norm(nom)) m["X:" + U.norm(nom)] = ext || "";
+      await TJ.llamar("correosGuardar", { mapa: m });
+      const D = TJ.datos.correos = TJ.datos.correos || {}; for (const [k, v] of Object.entries(m)) { if (v) D[k] = v; else delete D[k]; }
+    },
+    aprenderAlias(cartas) { for (const x of cartas) if (x.rpe && x.nom) this.alias.set(U.norm(x.nom), U.ini(x.rpe)); },
     // --------- en que area del organigrama esta el originador
     /* Area del originador. Manda la jerarquia del ORGANIGRAMA: si la tarjeta dice una subgerencia pero su departamento pertenece a
        otra, se toma la del organigrama y la tarjeta queda marcada con el error ("error"). Nunca se ubica en la gerencia ni en la
@@ -7679,14 +7695,14 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
     // --------- destinatarios: Para el originador; CC su subgerente, Flores Cavanzo, sus jefes hacia abajo y STAFF SI
     destinatarios(o) {
       const OG = B.org, yoN = U.norm(o.nom), cc = [], ya = new Set([yoN]);
-      const pon = (nom, area) => { const k = U.norm(nom); if (!k || ya.has(k)) return; ya.add(k); cc.push({ nom, area, clave: "N:" + k, correo: this.dir()["N:" + k] || "" }); };
+      const pon = (nom, area) => { const k = U.norm(nom); if (!k || ya.has(k)) return; ya.add(k); cc.push({ nom, area, rpe: this.rpeDe(nom), correo: this.correoDe({ nom }) }); };
       const u = o.ubic.nodo, sub = u ? OG.nivelSub(u.id) : null;
       if (sub) pon(sub.j, sub.n);
       // el Subgerente de Seguridad Nuclear: el titular de esa subgerencia en el organigrama
       const ssn = (OG.nodos || []).find(n => U.norm(n.n) === "SUBGERENCIA DE SEGURIDAD NUCLEAR"); if (ssn && ssn.j) pon(ssn.j, ssn.n);
       if (u && sub) { const r = OG.ruta(u.id), i = r.findIndex(x => +x.id === +sub.id); for (const n of r.slice(i + 1)) pon(n.j, n.n); }
       pon(STAFF, "Lista de distribución");
-      return { para: { nom: o.nom, area: u ? u.n : (o.depto || ""), clave: o.rpe ? "R:" + U.ini(o.rpe) : "N:" + U.norm(o.nom), correo: this.correoDe(o) }, cc };
+      return { para: { nom: o.nom, area: u ? u.n : (o.depto || ""), rpe: o.rpe || "", correo: this.correoDe(o) }, cc };
     },
     // --------- borrador de Outlook (.eml): Outlook lo abre listo para revisar y enviar
     b64(u8) { let s = ""; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s).replace(/.{76}/g, "$&\r\n"); },
@@ -7732,6 +7748,12 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
       const rango = sems.filter(s => s >= F.desde && s <= F.hasta), todas = [];
       for (const s of rango) for (const x of await TJ.semana(s)) todas.push(Object.assign({ sem: s }, x));
       const envios = D.envios || {}, q = U.norm(F.q);
+      this.aprenderAlias(todas);
+      if (D.editor && !B.modoLocal) {
+        const Dc = D.correos || {}, falta = {};
+        for (const [n, r] of this.alias) { if (Dc["R:" + r] && !Dc["N:" + n]) falta["N:" + n] = Dc["R:" + r]; }
+        if (Object.keys(falta).length) try { await TJ.llamar("correosGuardar", { mapa: falta }); D.correos = Object.assign(Dc, falta); } catch (e) { }
+      }
       // tarjetas capturadas con datos que contradicen al organigrama (subgerencia o departamento equivocados)
       const errU = new Map(); for (const x of todas) { const k = U.ini(x.rpe) + "|" + U.norm(x.area) + "|" + U.norm(x.depto); if (!errU.has(k)) errU.set(k, this.ubicar(x).error); x._err = errU.get(k); }
       const ops = k => [...new Set(todas.map(x => String(x[k] || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
@@ -7749,8 +7771,8 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
       const semOp = v => sems.map(s => `<option value="${s}" ${s === v ? "selected" : ""}>${TJ.semTxt(s)}</option>`).join("");
       const opt = (k, t, lista, todos) => `<div class="campo" style="flex:1 1 170px"><label>${t}</label><select class="inp" data-f="${k}"><option value="">${todos}</option>${lista.map(o => { const v = Array.isArray(o) ? o[0] : o, e = Array.isArray(o) ? o[1] : o; return `<option value="${esc(v)}" ${F[k] === v ? "selected" : ""}>${esc(e)}</option>`; }).join("")}</select></div>`;
       const chip = p => `<span class="chip-per" title="${esc(p.area || "")}" style="${p.correo ? "" : "background:#FFF4E5;border-color:#F0B35A"}">${esc(p.nom)} ${p.correo
-        ? `<a href="#" data-mail="${esc(p.clave)}" data-nom="${esc(p.nom)}" class="muted peque" title="Corregir el correo" style="text-decoration:none">${esc(p.correo)} ✎</a>`
-        : `<a href="#" data-mail="${esc(p.clave)}" data-nom="${esc(p.nom)}" class="peque" style="color:#b45309;font-weight:700" title="Capturar su correo">sin correo · agregar</a>`}</span>`;
+        ? `<a href="#" data-mail="${esc(p.rpe || "")}" data-nom="${esc(p.nom)}" class="muted peque" title="Corregir el correo" style="text-decoration:none">${esc(p.correo)} ✎</a>`
+        : `<a href="#" data-mail="${esc(p.rpe || "")}" data-nom="${esc(p.nom)}" class="peque" style="color:#b45309;font-weight:700" title="Capturar su correo">sin correo · agregar</a>`}</span>`;
       const ruta = o => o.ubic.nodo ? B.org.ruta(o.ubic.nodo.id).slice(1).map(x => x.n).join(" › ") : "";
       const adj = await this.adjunto().catch(() => null);
       c.innerHTML = `
@@ -7814,7 +7836,7 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
       c.querySelectorAll("[data-ver]").forEach(b => b.onclick = () => this.ver(O[+b.dataset.ver]));
       c.querySelectorAll("[data-web]").forEach(b => b.onclick = () => this.web(O[+b.dataset.web], marcar, repinta));
       c.querySelectorAll("[data-desc]").forEach(b => b.onclick = () => this.noAplica(O[+b.dataset.desc], repinta));
-      c.querySelectorAll("[data-mail]").forEach(a => a.onclick = e => { e.preventDefault(); this.capturarCorreo(a.dataset.mail, a.dataset.nom, repinta); });
+      c.querySelectorAll("[data-mail]").forEach(a => a.onclick = e => { e.preventDefault(); this.capturarCorreo(a.dataset.nom, a.dataset.mail, repinta); });
       c.querySelectorAll("[data-ub]").forEach(a => a.onclick = e => { e.preventDefault(); this.elegirArea(O[+a.dataset.ub], P); });
       c.querySelector("#crTpl").onclick = () => this.editarTpl(P);
       c.querySelector("#crDir").onclick = () => this.directorio(O, P);
@@ -7859,15 +7881,16 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
       repinta();
     },
     // correo de una persona, capturado desde su nombre en la lista (se guarda en el directorio y sirve para todos sus correos)
-    async capturarCorreo(clave, nom, repinta) {
-      const D = TJ.datos, ant = (D.correos || {})[clave] || "";
+    async capturarCorreo(nom, rpe, repinta) {
+      const ant = this.correoDe({ nom, rpe }), antX = this.extDe({ nom });
       const r = await B.ui.modal({ titulo: "Correo de " + esc(nom), icono: "usuarios",
-        html: `<div class="campo" style="margin:0"><label>Correo electrónico</label><input class="inp" id="cmC" value="${esc(ant)}" placeholder="nombre@cfe.mx" autocomplete="off"></div>
-          <p class="muted peque" style="margin:8px 0 0">Se guarda en <b>Correos electrónicos</b> y se usa en todos los correos donde aparezca. Vacío = quitarlo.</p>`,
-        alAbrir: v => { const i = v.querySelector("#cmC"); setTimeout(() => i.focus(), 50); i.onkeydown = e => { if (e.key === "Enter") { const b = [...v.querySelectorAll("button")].find(x => x.textContent.trim() === "Guardar"); if (b) b.click(); } }; },
-        botones: [{ t: "Cancelar", c: "sec", v: null }, { t: "Guardar", c: "verde", antes: v => { const x = v.querySelector("#cmC").value.trim(); if (x && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x)) { B.ui.toast("El correo no parece válido.", "error"); return false; } }, v: v => ({ c: v.querySelector("#cmC").value.trim() }) }] });
-      if (!r || r.c === ant) return;
-      try { await TJ.llamar("correosGuardar", { mapa: { [clave]: r.c } }); D.correos = D.correos || {}; if (r.c) D.correos[clave] = r.c; else delete D.correos[clave]; B.ui.toast(r.c ? "Correo guardado." : "Correo quitado.", "ok", 2500); repinta(); }
+        html: `<div class="campo"><label>Correo electrónico</label><input class="inp" id="cmC" value="${esc(ant)}" placeholder="nombre@cfe.mx" autocomplete="off"></div>
+          <div class="campo" style="margin:0"><label>Extensión (opcional)</label><input class="inp" id="cmX" value="${esc(antX)}" placeholder="Ej. 4512" maxlength="30" autocomplete="off"></div>
+          <p class="muted peque" style="margin:8px 0 0">Se guarda en <b>Correos electrónicos</b> y se usa en todos los correos y tarjetas donde aparezca esta persona (como originador o como jefe) y en el organigrama. Vacío = quitarlo.</p>`,
+        alAbrir: v => { const i = v.querySelector("#cmC"); setTimeout(() => i.focus(), 50); v.querySelectorAll("input").forEach(x => x.onkeydown = e => { if (e.key === "Enter") { const b = [...v.querySelectorAll("button")].find(y => y.textContent.trim() === "Guardar"); if (b) b.click(); } }); },
+        botones: [{ t: "Cancelar", c: "sec", v: null }, { t: "Guardar", c: "verde", antes: v => { const x = v.querySelector("#cmC").value.trim(); if (x && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x)) { B.ui.toast("El correo no parece válido.", "error"); return false; } }, v: v => ({ c: v.querySelector("#cmC").value.trim(), x: v.querySelector("#cmX").value.trim() }) }] });
+      if (!r || (r.c === ant && r.x === antX)) return;
+      try { await this.guardarPersona(nom, rpe, r.c, r.x); B.ui.toast(r.c ? "Correo guardado." : "Correo quitado.", "ok", 2500); repinta(); }
       catch (e) { B.ui.error(e); }
     },
     // descartar tarjetas: debilidades de alta energia que no requieren el correo ni la informacion de los anexos
@@ -7923,23 +7946,51 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
       if (tpl.cuerpo && !tpl.cuerpo.includes("{tabla}") && !(await B.ui.confirmar("El mensaje no tiene <b>{tabla}</b>: el correo saldrá sin la tabla de tarjetas. ¿Guardar así?", "Sin tabla", "Guardar"))) return;
       try { await TJ.llamar("tplGuardar", { tpl }); TJ.datos.correoTpl = tpl; B.ui.toast("Texto del correo guardado.", "ok"); P.pinta(); } catch (e) { B.ui.error(e); }
     },
-    // directorio: correos de los originadores (por RPE) y de jefes y listas (por nombre)
+    // directorio: una fila por persona (originador, jefe o los dos), con su correo y su extension
     async directorio(O, P) {
-      const Dr = this.dir(), filas = new Map();
-      for (const o of O) { filas.set("R:" + U.ini(o.rpe), { nom: o.nom, det: "Originador · " + (o.rpe || "") }); for (const p of o.D.cc) filas.set("N:" + U.norm(p.nom), { nom: p.nom, det: p.area || "" }); }
-      for (const n of (B.org.nodos || [])) if (n.j && !filas.has("N:" + U.norm(n.j))) filas.set("N:" + U.norm(n.j), { nom: n.j, det: n.n });
-      const L = [...filas.entries()].sort((a, b) => (!!Dr[a[0]] - !!Dr[b[0]]) || a[1].nom.localeCompare(b[1].nom));
+      const Dr = this.dir(), filas = new Map(), OG = B.org;
+      // originadores de todas las semanas cargadas: asi aparecen todos los que ya tienen correo guardado
+      const orig = new Map();
+      for (const s of Object.keys(TJ.datos.semanas || {})) { const cs = await TJ.semana(s).catch(() => []); this.aprenderAlias(cs); for (const x of cs) if (x.rpe && x.nom) orig.set(U.ini(x.rpe), x.nom); }
+      const pon = (nom, rpe, det) => {
+        const n = U.norm(nom); if (!n) return; rpe = U.ini(rpe || "") || this.alias.get(n) || "";
+        const f = filas.get(n) || filas.set(n, { nom, rpe: "", dets: [] }).get(n);
+        if (rpe && !f.rpe) f.rpe = rpe; if (det && !f.dets.includes(det)) f.dets.push(det);
+      };
+      for (const o of O) pon(o.nom, o.rpe, "Originador");
+      for (const o of O) for (const p of o.D.cc) pon(p.nom, "", p.area);
+      for (const n of (OG.nodos || [])) if (n.j) pon(n.j, "", n.n);
+      for (const k of Object.keys(Dr)) {
+        if (k.startsWith("R:")) { const r = k.slice(2); if (orig.has(r)) pon(orig.get(r), r, "Originador"); else if (![...filas.values()].some(f => f.rpe === r)) filas.set("R:" + r, { nom: "RPE " + r, rpe: r, dets: ["Originador (no está en las semanas cargadas)"], soloRpe: true }); }
+        else if ((k.startsWith("N:") || k.startsWith("X:")) && !filas.has(k.slice(2))) pon(k.slice(2), "", "");
+      }
+      const extOrg = n => { const x = (OG.nodos || []).find(y => y.j && U.norm(y.j) === U.norm(n)); return x ? String(x.x || "") : ""; };
+      const L = [...filas.values()].map(f => Object.assign(f, { correo: f.soloRpe ? (Dr["R:" + f.rpe] || "") : this.correoDe({ nom: f.nom, rpe: f.rpe }), ext: f.soloRpe ? "" : (this.extDe({ nom: f.nom }) || extOrg(f.nom)) }))
+        .sort((a, b) => (!!a.correo - !!b.correo) || a.nom.localeCompare(b.nom));
       const r = await B.ui.modal({ titulo: "Correos electrónicos", icono: "usuarios", ancho: true,
-        html: `<p class="muted peque" style="margin:0 0 8px">Se capturan una vez y se usan en todos los correos. Primero aparecen los que faltan. Para STAFF SEGURIDAD INDUSTRIAL escribe el correo de la lista de distribución.</p>
-          <input class="inp" id="dQ" placeholder="Buscar…" style="margin-bottom:8px"><div class="tabla-cont" style="max-height:52vh;overflow:auto"><table class="tabla"><thead><tr><th>Nombre</th><th>Área</th><th>Correo electrónico</th></tr></thead><tbody>
-          ${L.map(([k, f]) => `<tr data-n="${esc(U.norm(f.nom + " " + f.det))}"><td><b>${esc(f.nom)}</b></td><td class="peque muted">${esc(f.det)}</td><td><input class="inp" data-k="${esc(k)}" value="${esc(Dr[k] || "")}" placeholder="nombre@cfe.mx" style="min-width:220px;padding:6px 8px"></td></tr>`).join("")}</tbody></table></div>`,
+        html: `<p class="muted peque" style="margin:0 0 8px">Una fila por persona: si un jefe también es originador aparece una sola vez y su correo sirve para todo. Se capturan una vez y se usan en todos los correos, las tarjetas y el organigrama. Primero aparecen los que faltan. Para STAFF SEGURIDAD INDUSTRIAL escribe el correo de la lista de distribución.</p>
+          <input class="inp" id="dQ" placeholder="Buscar…" style="margin-bottom:8px"><div class="tabla-cont" style="max-height:52vh;overflow:auto"><table class="tabla"><thead><tr><th>Nombre</th><th>Área</th><th>Correo electrónico</th><th style="width:110px">Extensión <span class="muted peque">(opcional)</span></th></tr></thead><tbody>
+          ${L.map((f, i) => `<tr data-n="${esc(U.norm(f.nom + " " + f.rpe + " " + f.dets.join(" ")))}"><td><b>${esc(f.nom)}</b>${f.rpe && !f.soloRpe ? `<div class="peque muted">${esc(f.rpe)}</div>` : ""}</td><td class="peque muted">${esc(f.dets.join(" · "))}</td>
+            <td><input class="inp" data-fi="${i}" data-k="c" value="${esc(f.correo)}" placeholder="nombre@cfe.mx" style="min-width:220px;padding:6px 8px"></td>
+            <td>${f.soloRpe ? "" : `<input class="inp" data-fi="${i}" data-k="x" value="${esc(f.ext)}" maxlength="30" placeholder="—" style="width:100px;padding:6px 8px">`}</td></tr>`).join("")}</tbody></table></div>`,
         alAbrir: v => { const qq = v.querySelector("#dQ"); qq.oninput = () => { const t = U.norm(qq.value); v.querySelectorAll("tr[data-n]").forEach(tr => tr.style.display = !t || tr.dataset.n.includes(t) ? "" : "none"); }; },
-        botones: [{ t: "Cancelar", c: "sec", v: null }, { t: "Guardar", c: "verde", v: v => { const m = {}; v.querySelectorAll("[data-k]").forEach(i => { if ((i.value.trim()) !== (Dr[i.dataset.k] || "")) m[i.dataset.k] = i.value.trim(); }); return m; } }] });
+        botones: [{ t: "Cancelar", c: "sec", v: null }, { t: "Guardar", c: "verde", v: v => { const m = new Map(); v.querySelectorAll("[data-fi]").forEach(inp => { const f = L[+inp.dataset.fi], val = inp.value.trim(); if (val !== (inp.dataset.k === "c" ? f.correo : f.ext)) m.set(f, Object.assign(m.get(f) || {}, { [inp.dataset.k]: val })); }); return m; } }] });
       if (!r) return;
-      const malos = Object.values(r).filter(x => x && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x));
+      const malos = [...r.values()].map(x => x.c).filter(x => x && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x));
       if (malos.length) { B.ui.toast("Revisa estos correos: " + malos.map(esc).join(", "), "error", 8000); return; }
-      if (!Object.keys(r).length) { B.ui.toast("Sin cambios.", ""); return; }
-      try { await TJ.llamar("correosGuardar", { mapa: r }); TJ.datos.correos = Object.assign(TJ.datos.correos || {}, r); for (const [k, v] of Object.entries(r)) if (!v) delete TJ.datos.correos[k]; B.ui.toast(Object.keys(r).length + " correo(s) guardados.", "ok"); P.pinta(); } catch (e) { B.ui.error(e); }
+      if (!r.size) { B.ui.toast("Sin cambios.", ""); return; }
+      const mapa = {};
+      for (const [f, x] of r) {
+        const correo = "c" in x ? x.c : f.correo;
+        if (f.soloRpe) { mapa["R:" + f.rpe] = correo; continue; }
+        for (const k of this.claves(f.nom, f.rpe)) mapa[k] = correo;
+        if ("x" in x) mapa["X:" + U.norm(f.nom)] = x.x;
+      }
+      try {
+        await TJ.llamar("correosGuardar", { mapa });
+        const D = TJ.datos.correos = TJ.datos.correos || {}; for (const [k, v] of Object.entries(mapa)) { if (v) D[k] = v; else delete D[k]; }
+        B.ui.toast(r.size + " persona(s) actualizadas.", "ok"); P.pinta();
+      } catch (e) { B.ui.error(e); }
     }
   };
 })();
@@ -8578,7 +8629,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "4.9.1", servidorViejo: false,
+  info: {}, VERSION: "4.9.2", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -8765,7 +8816,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "procedimientos" ? '<span class="contador oculto" id="cntProc"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.9.1")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.9.2")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
