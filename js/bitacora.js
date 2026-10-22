@@ -803,7 +803,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.9.3", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.9.4", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -960,7 +960,7 @@ B.local = {
       case "grafGuardar": {
         soloEd();
         const gk = String(b.clave || "");
-        if (gk !== "cfg" && gk !== "diacfg" && !/^\d{4}-\d{2}$/.test(gk) && !/^dia:\d{4}-\d{2}-\d{2}:(AE|SI|AS)$/.test(gk)) throw new Error("Clave no válida.");
+        if (gk !== "cfg" && gk !== "diacfg" && !/^\d{4}-\d{2}$/.test(gk) && !/^dia:\d{4}-\d{2}-\d{2}(_\d{4}-\d{2}-\d{2})?:(AE|SI|AS)$/.test(gk) && !/^rango:\d{4}-\d{2}(-\d{2})?:\d{4}-\d{2}(-\d{2})?$/.test(gk)) throw new Error("Clave no válida.");
         T.graf[gk] = Object.assign({}, b.datos, { por: s.ini, fh: ahora() });
         return fin();
       }
@@ -6748,7 +6748,7 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
 
   const TD = B.tend = {
     F: null, G: {},
-    base() { return { desde: "", hasta: "", fu: "", subg: "", obsDepto: "", uni: "", turno: "", ae: false, dim: "std", max: 8, titulo: "", intro: "", lams: Object.fromEntries(LAMS.map(l => [l[0], true])) }; },
+    base() { return { modo: "sem", f1: "", f2: "", acum: false, desde: "", hasta: "", fu: "", subg: "", obsDepto: "", uni: "", turno: "", ae: false, dim: "std", max: 8, titulo: "", intro: "", lams: Object.fromEntries(LAMS.map(l => [l[0], true])) }; },
     esDeb: c => /^DEBIL/i.test(c.si || ""), esCum: c => /^CUMPLE/i.test(c.si || ""),
     pasa(c, F) {
       if (F.fu && !String(c.fu || "").split(",").includes(F.fu)) return false;
@@ -6764,10 +6764,36 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
     fila(c) { return { id: String(c.id), act: corto(frase(c.qp || c.doc), 120), riesgo: corto(frase(c.qpp), 90) }; },
     introDef() { return `A través de las observaciones de líderes en campo se han identificado desviaciones a los estándares de seguridad, los cuales debemos corregir para evitar eventos durante la ${B.t.periodo()}.`; },
 
+    // tarjetas del periodo, por semana. Por semanas: semanas de captura desde-hasta. Por fechas: fecha de observacion
+    // entre f1 y f2 (se buscan tambien en la semana de captura siguiente) agrupadas por la semana en que se observaron
+    async cubetas(F, crudas) {
+      const sems = Object.keys(TJ.datos.semanas).sort(), r = [];
+      if (F.modo === "fechas" && F.f1 && F.f2) {
+        const a = TJ.semDe(F.f1), b = TJ.semDe(F.f2), m = new Map();
+        for (const s of sems.filter(s => s >= TJ.semSig(a, -1) && s <= TJ.semSig(b, 1))) for (const c of await TJ.semana(s)) { const f = String(c.fobs || "").slice(0, 10); if (f >= F.f1 && f <= F.f2) m.set(String(c.id), c); }
+        if (crudas) return [...m.values()];
+        for (let w = a, g = 0; w <= b && g < 120; w = TJ.semSig(w, 1), g++) r.push({ k: w, L: [] });
+        for (const c of m.values()) { if (!this.pasa(c, F)) continue; const x = r.find(y => y.k === TJ.semDe(String(c.fobs).slice(0, 10))); if (x) x.L.push(c); }
+        return r;
+      }
+      const rango = sems.filter(s => s <= F.hasta && (!F.desde || s >= F.desde));
+      if (crudas) { const L = []; for (const s of rango) L.push(...await TJ.semana(s)); return L; }
+      for (const s of rango) r.push({ k: s, L: (await TJ.semana(s)).filter(c => this.pasa(c, F)) });
+      return r;
+    },
+    // nombre del periodo: "la semana 43" / "las semanas 40 a 43" / "el periodo del 05/10 al 18/10/2026"
+    periodo(F, rango) {
+      const s = k => +k.slice(5), fechas = F.modo === "fechas" && F.f1 && F.f2;
+      if (!F.acum) { const w = rango[rango.length - 1] || F.hasta; return { etq: "la semana " + s(w), corto: "Semana " + s(w) }; }
+      if (fechas) return F.f1 === F.f2 ? { etq: "el día " + U.corta(F.f1), corto: "Día " + U.corta(F.f1) } : { etq: "el periodo del " + U.cortaDM(F.f1) + " al " + U.corta(F.f2), corto: "Del " + U.cortaDM(F.f1) + " al " + U.cortaDM(F.f2) };
+      return rango.length > 1 ? { etq: "las semanas " + s(rango[0]) + " a " + s(rango[rango.length - 1]), corto: "Semanas " + s(rango[0]) + " a " + s(rango[rango.length - 1]) } : { etq: "la semana " + s(rango[0] || F.hasta), corto: "Semana " + s(rango[0] || F.hasta) };
+    },
+    // donde se guarda el TOP: la semana (como antes) o el periodo acumulado
+    claveG(F, W) { return F.modo === "fechas" && F.f1 && F.f2 ? (F.acum ? "rango:" + F.f1 + ":" + F.f2 : W) : F.acum && F.desde && F.desde !== F.hasta ? "rango:" + F.desde + ":" + F.hasta : W; },
+
     async modelo(F, G) {
-      const sems = Object.keys(TJ.datos.semanas).sort(), W = F.hasta, rango = sems.filter(s => s <= W && (!F.desde || s >= F.desde)), porSem = {};
-      for (const s of rango) porSem[s] = (await TJ.semana(s)).filter(c => this.pasa(c, F));
-      const L = porSem[W] || [], deb = L.filter(this.esDeb), cum = L.filter(this.esCum), nS = +W.slice(5), et = s => "SEM " + (+s.slice(5));
+      const cub = await this.cubetas(F), rango = cub.map(x => x.k), porSem = Object.fromEntries(cub.map(x => [x.k, x.L])), W = rango[rango.length - 1] || F.hasta;
+      const L = F.acum ? cub.flatMap(x => x.L) : (porSem[W] || []), deb = L.filter(this.esDeb), cum = L.filter(this.esCum), nS = +W.slice(5), et = s => "SEM " + (+s.slice(5)), PER = this.periodo(F, rango);
       let g = this.contar(deb, F.dim); const mx = Math.max(2, Math.min(12, +F.max || 8));
       if (g.length > mx) g = g.slice(0, mx - 1).concat([["Otros", g.slice(mx - 1).reduce((a, x) => a + x[1], 0)]]);
       const grupos = g.map(([n, v], i) => ({ n, v, p: pct(v, deb.length), col: PAL[i % PAL.length] }));
@@ -6777,17 +6803,17 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
         for (const [k] of this.contar(cumT, dim)) if (c.length < n && !c.includes(k)) c.push(k);
         return { cats: c, etq: true, series: [{ n: "DEBILIDADES", col: ROJO, v: c.map(k => de.get(k) || 0) }, { n: "CUMPLEN LA EXPECTATIVA", col: "9CCB5E", v: c.map(k => cu.get(k) || 0) }] }; };
       const dep = par("obsDepto", 12); dep.series[0].cols = dep.cats.map(k => U.norm(k).includes("SEGURIDAD INDUSTRIAL") ? "7A0019" : ROJO); dep.series[1].cols = dep.cats.map(k => U.norm(k).includes("SEGURIDAD INDUSTRIAL") ? "2E7D32" : "9CCB5E");
-      const ant = rango.length > 1 ? porSem[rango[rango.length - 2]] : null;
+      const ant = !F.acum && rango.length > 1 ? porSem[rango[rango.length - 2]] : null;
       return {
-        W, nS, rango, L, n: L.length, deb: deb.length, cum: cum.length, grupos, dim: F.dim, debs: deb,
+        W, nS, rango, L, etq: PER.etq, corto: PER.corto, n: L.length, deb: deb.length, cum: cum.length, grupos, dim: F.dim, debs: deb,
         titulo: F.titulo || "Estado actual", intro: F.intro || this.introDef(), top: (G.top || []).filter(x => x && x.id), lams: F.lams || {},
         evol: { titulo: "Observaciones de Líderes en Campo por semana", cats: rango.map(et), etq: true, series: [{ n: "OBSERVACIONES", col: VERDE, v: rango.map(s => porSem[s].length) }, { n: "CUMPLEN LA EXPECTATIVA", col: "9CCB5E", v: rango.map(s => porSem[s].filter(this.esCum).length) }, { n: "DEBILIDADES", col: ROJO, v: rango.map(s => porSem[s].filter(this.esDeb).length) }] },
-        txEvol: `En la **semana ${nS}** se registraron **${L.length} observaciones**: ${cum.length} cumplieron la expectativa (${pct(cum.length, L.length)}) y **${deb.length} fueron debilidades (${pct(deb.length, L.length)})**.` +
+        txEvol: `En **${PER.etq}** se registraron **${L.length} observaciones**: ${cum.length} cumplieron la expectativa (${pct(cum.length, L.length)}) y **${deb.length} fueron debilidades (${pct(deb.length, L.length)})**.` +
           (ant ? ` En la semana anterior las debilidades fueron ${ant.filter(this.esDeb).length} de ${ant.length} (${pct(ant.filter(this.esDeb).length, ant.length)}).` : ""),
         stdSem: { titulo: "Debilidades por " + DIMS[F.dim].toLowerCase() + " · últimas " + ult.length + " semanas", cats: catsStd, etq: true, bm: 96, series: ult.map((s, i) => ({ n: et(s), col: PAL[i % PAL.length], v: catsStd.map(k => porSem[s].filter(c => this.esDeb(c) && (String(c[F.dim] || "").trim() || "Sin dato") === k).length) })) },
         depto: Object.assign(dep, { titulo: "Observaciones por departamento observado · " + (rango.length > 1 ? "semanas " + (+rango[0].slice(5)) + " a " + nS : "semana " + nS), bm: 110 }),
         turno: Object.assign(par("turno", 4), { titulo: "Por turno", bm: 44 }), uni: Object.assign(par("uni", 4), { titulo: "Por unidad", bm: 44 }), edif: Object.assign(par("edif", 8), { titulo: "Por edificio", bm: 96 }),
-        rangoTxt: rango.length > 1 ? "Semanas " + (+rango[0].slice(5)) + " a " + nS : "Semana " + nS
+        rangoTxt: F.modo === "fechas" && F.f1 ? "Observadas del " + U.corta(F.f1) + " al " + U.corta(F.f2) : rango.length > 1 ? "Semanas " + (+rango[0].slice(5)) + " a " + nS : "Semana " + nS
       };
     },
 
@@ -6798,7 +6824,7 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
         ? [T(x, yy, w, h, [], { fill, bs, rad: 6 }), T(x, yy + 6, w, 50, [P("c", [R(num, NS, 40, { b: 1, col })])]), T(x + 4, yy + 56, w - 8, h - 58, lin.map(t => P("c", [R(t, NS, 12.5, { b: 1, col })]))) ]
         : [T(x, yy, w, h, [], { fill, bs, rad: 6 }), T(x + 6, yy, 96, h, [P("c", [R(num, NS, h > 70 ? 42 : 34, { b: 1, col })])], { anc: "m" }), T(x + 104, yy, w - 108, h, lin.map(t => P("l", [R(t, NS, 13, { b: 1, col })])), { anc: "m" })];
       const hs = vert ? [116, 110, 100] : [77, 60, 58], gap = vert ? 12 : 13;
-      return [].concat(c(y, hs[0], "4A8B2C", null, "FFFFFF", M.n, ["Observaciones", "registradas", "Semana " + M.nS]),
+      return [].concat(c(y, hs[0], "4A8B2C", null, "FFFFFF", M.n, ["Observaciones", "registradas", M.corto]),
         c(y + hs[0] + gap, hs[1], "EAF6EC", "8CCB9B", VERDE, M.cum, ["Cumplieron", "la expectativa", "(" + pct(M.cum, M.n) + ")"]),
         c(y + hs[0] + hs[1] + 2 * gap, hs[2], "FDECEC", "F2A9A9", ROJO, M.deb, ["Debilidades", "(" + pct(M.deb, M.n) + ")"]));
     },
@@ -6834,14 +6860,14 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
     /* ------------------------------------------------------------ laminas horizontales (960 x 540, fondo de la E+1) */
     laminas(M) {
       const L = [], on = k => M.lams[k] !== false, g = (o, x, y, w, h) => Object.assign({ k: "g", x, y, w, h }, o);
-      const encabezado = M.dim === "std" ? `Los comportamientos más peligrosos registrados en la semana ${M.nS} son:` : `Debilidades por ${DIMS[M.dim].toLowerCase()} en la semana ${M.nS}:`;
+      const encabezado = M.dim === "std" ? `Los comportamientos más peligrosos registrados en ${M.etq} son:` : `Debilidades por ${DIMS[M.dim].toLowerCase()} en ${M.etq}:`;
       if (on("estado")) {
         const a = E1.ajustar(M.intro, 640, 70, 17, 11);
         L.push({ fondo: "interior", els: [T(62, 18, 640, 54, [P("l", [R(M.titulo, NS, 40, { b: 1, col: VERDE })])]), T(64, 76, 640, 74, [P("l", [R(M.intro, NS, a.sz, { col: TXT })])])]
           .concat(this.cajas(M, 44, 180, 233), M.deb ? [this.pastel(M, 286, 162, 296)] : [T(286, 280, 296, 40, [P("c", [R("Sin debilidades registradas", NS, 14, { col: "595959" })])])],
             [T(592, 158, 340, 46, [P("l", [R(encabezado, NS, 16, { b: 1, col: VERDE })])])], this.lista(M, 592, 208, 340, 262, 13)) });
       }
-      if (on("top") && M.top.length) L.push({ fondo: "interior", els: this.titulo("Hallazgos de la semana " + M.nS, "Debilidades con mayor potencial de consecuencia").concat(this.tablaTop(M, 46, 96, 868, Math.min(62, (360 - 2 * M.top.length) / M.top.length), 13)) });
+      if (on("top") && M.top.length) L.push({ fondo: "interior", els: this.titulo("Hallazgos " + M.etq.replace(/^el /, "del ").replace(/^(la|las) /, "de $1 "), "Debilidades con mayor potencial de consecuencia").concat(this.tablaTop(M, 46, 96, 868, Math.min(62, (360 - 2 * M.top.length) / M.top.length), 13)) });
       if (on("evol")) L.push({ fondo: "interior", els: this.titulo("Tendencia semana a semana", M.rangoTxt).concat([g(M.evol, 45, 92, 870, 312), this.nota(M.txEvol, 414)]) });
       if (on("std") && M.stdSem.cats.length) L.push({ fondo: "interior", els: this.titulo(DIMS[M.dim] + " entre semanas", "Debilidades registradas en cada semana").concat([g(M.stdSem, 45, 92, 870, 390)]) });
       if (on("depto") && M.depto.cats.length) L.push({ fondo: "interior", els: this.titulo("Por departamento observado", M.rangoTxt + " · Seguridad Industrial en tono oscuro").concat([g(M.depto, 45, 92, 870, 390)]) });
@@ -6854,12 +6880,12 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
         { k: "im", src: B.imgUrl("ofIzq"), x: 356, y: 18, w: 168, h: 34 }, T(44, 72, 440, 86, [P("l", [R(M.intro, NS, a.sz, { col: TXT })])])]
         .concat(this.cajas(M, 16, 170, 138, true), M.deb ? [this.pastel(M, 160, 158, 366, true)] : []);
       if (M.top.length && M.lams.top !== false) els.push(...this.tablaTop(M, 12, 532, 516, Math.min(54, (290 - 2 * M.top.length) / M.top.length), 11));
-      else els.push(T(16, 536, 508, 30, [P("l", [R(`Debilidades de la semana ${M.nS} por ${DIMS[M.dim].toLowerCase()}:`, NS, 14, { b: 1, col: VERDE })])]), ...this.lista(M, 16, 570, 508, 300, 12.5));
+      else els.push(T(16, 536, 508, 30, [P("l", [R(`Debilidades ${M.etq.replace(/^el /, "del ").replace(/^(la|las) /, "de $1 ")} por ${DIMS[M.dim].toLowerCase()}:`, NS, 14, { b: 1, col: VERDE })])]), ...this.lista(M, 16, 570, 508, 300, 12.5));
       els.push({ k: "im", src: B.imgUrl("pie"), x: 16, y: 896, w: 508, h: 58 });
       return { fondo: "", w: 540, h: 960, els };
     },
     html(l, w, h) { return `<div class="s" style="width:${w || 960}pt;height:${h || 540}pt;${l.fondo ? `background-image:url('${E1.fondo(l.fondo)}')` : "background:#fff"}">${l.els.map(e => E1.elHtml(e)).join("")}</div>`; },
-    nombre(M) { return "LIDERES EN CAMPO SEMANA " + M.nS; },
+    nombre(M) { return ("LIDERES EN CAMPO " + U.norm(M.corto)).replace(/\//g, "."); },
     doc(M) {
       return { tipo: "e1", nombre: this.nombre(M), carpeta: "LIDERES EN CAMPO", horizontal: true,
         html: `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>${this.nombre(M)}</title><style>@page{size:960pt 540pt;margin:0}html,body{margin:0;padding:0}${E1.css("")} .s{page-break-after:always;break-after:page}.s:last-child{page-break-after:auto;break-after:auto}</style></head><body>${this.laminas(M).map(l => this.html(l)).join("")}</body></html>` };
@@ -6885,13 +6911,17 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
       const D = TJ.datos, sems = Object.keys(D.semanas).sort();
       if (!sems.length) { c.innerHTML = `<div class="tarjeta">${B.ui.vacio("Primero carga los Excel de la semana en la pestaña <b>Tarjetas y tendencias</b>.", "doc")}</div>`; return; }
       D.graf = D.graf || {};
-      if (!this.F) { this.F = Object.assign(this.base(), JSON.parse(JSON.stringify(D.graf.cfg || {}))); this.F.lams = Object.assign(this.base().lams, this.F.lams || {}); this.F.hasta = ""; }
+      if (!this.F) { this.F = Object.assign(this.base(), JSON.parse(JSON.stringify(D.graf.cfg || {}))); this.F.lams = Object.assign(this.base().lams, this.F.lams || {}); this.F.hasta = ""; this.F.desde = ""; this.F.f1 = ""; this.F.f2 = ""; }
       const F = this.F;
       if (!sems.includes(F.hasta)) F.hasta = sems.includes(Pv.sem) ? Pv.sem : sems[sems.length - 1];
-      if (!F.desde || !sems.includes(F.desde) || F.desde > F.hasta) F.desde = sems.filter(s => s <= F.hasta).slice(-6)[0];
-      const W = F.hasta, cruda = await TJ.semana(W);
-      if (!this.G[W]) this.G[W] = JSON.parse(JSON.stringify(D.graf[W] || {}));
-      const G = this.G[W]; let M = await this.modelo(F, G);
+      if (F.desde && sems.includes(F.desde) && F.desde > F.hasta) [F.desde, F.hasta] = [F.hasta, F.desde];
+      if (!F.desde || !sems.includes(F.desde)) F.desde = sems.filter(s => s <= F.hasta).slice(-6)[0];
+      // fechas por omision: del lunes de la primera semana al domingo de la ultima
+      if (!F.f1) F.f1 = TJ.lunes(F.desde); if (!F.f2) F.f2 = U.sumar(TJ.lunes(F.hasta), 6); if (F.f1 > F.f2) [F.f1, F.f2] = [F.f2, F.f1];
+      const cruda = await this.cubetas(F, true);
+      let M = await this.modelo(F, {}); const W = M.W, gk = this.claveG(F, W);
+      if (!this.G[gk]) this.G[gk] = JSON.parse(JSON.stringify(D.graf[gk] || {}));
+      const G = this.G[gk]; M = await this.modelo(F, G);
       if (!Array.isArray(G.top)) { G.top = this.sugerir(M.L); M = await this.modelo(F, G); }
       const ops = (k) => [...new Set(cruda.map(x => String(x[k] || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
       const sel = (k, t, lista, todos) => `<div class="campo" style="flex:1 1 170px"><label>${t}</label><select class="inp" data-f="${k}"><option value="">${todos}</option>${lista.map(o => `<option value="${esc(Array.isArray(o) ? o[0] : o)}" ${F[k] === (Array.isArray(o) ? o[0] : o) ? "selected" : ""}>${esc(Array.isArray(o) ? o[1] : o)}</option>`).join("")}</select></div>`;
@@ -6902,15 +6932,19 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
           <div class="campo" style="flex:1.4 1 200px;margin:0"><label>Riesgo potencial</label><input class="inp" data-tk="riesgo" value="${esc(r.riesgo)}" maxlength="120"></div>
           <div style="display:flex;gap:4px;margin-bottom:2px"><button class="btn fantasma btn-icono" data-ta="ver" title="Ver la tarjeta completa">${B.ico("ojo")}</button><button class="btn fantasma btn-icono" data-ta="sube" title="Subir prioridad" ${i ? "" : "disabled"}>▲</button><button class="btn fantasma btn-icono" data-ta="baja" title="Bajar prioridad" ${i < G.top.length - 1 ? "" : "disabled"}>▼</button><button class="btn fantasma btn-icono" data-ta="quita" title="Quitar">${B.ico("basura")}</button></div></div>`;
       c.innerHTML = `
-        <div class="tarjeta"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start"><div><h2 style="margin:0;font-size:17px">Gráficas y reportes de tendencias</h2><p class="muted peque" style="margin:4px 0 0">Elige la semana y los filtros; el reporte cuenta solo las tarjetas que pasan el filtro. Sale en PDF, PowerPoint editable o imagen.</p></div></div>
-          <div class="fila" style="margin-top:12px"><div class="campo" style="flex:1 1 230px"><label>Semana del reporte</label><select class="inp" data-f="hasta">${semOp(F.hasta)}</select></div>
-            <div class="campo" style="flex:1 1 230px"><label>Tendencias desde la semana</label><select class="inp" data-f="desde">${semOp(F.desde)}</select></div>
+        <div class="tarjeta"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start"><div><h2 style="margin:0;font-size:17px">Gráficas y reportes de tendencias</h2><p class="muted peque" style="margin:4px 0 0">Elige el periodo (por semanas o por fechas) y los filtros; el reporte cuenta solo las tarjetas que pasan el filtro. Sale en PDF, PowerPoint editable o imagen.</p></div></div>
+          <div class="fila" style="margin-top:12px"><div class="campo" style="flex:0 1 190px"><label>Periodo</label><select class="inp" data-f="modo"><option value="sem" ${F.modo !== "fechas" ? "selected" : ""}>Por semanas</option><option value="fechas" ${F.modo === "fechas" ? "selected" : ""}>Por fechas (observación)</option></select></div>
+            ${F.modo === "fechas"
+              ? `<div class="campo" style="flex:1 1 170px"><label>Desde el día</label><input class="inp" type="date" data-f="f1" value="${esc(F.f1)}"></div><div class="campo" style="flex:1 1 170px"><label>Hasta el día</label><input class="inp" type="date" data-f="f2" value="${esc(F.f2)}"></div>`
+              : `<div class="campo" style="flex:1 1 230px"><label>Desde la semana</label><select class="inp" data-f="desde">${semOp(F.desde)}</select></div><div class="campo" style="flex:1 1 230px"><label>Hasta la semana</label><select class="inp" data-f="hasta">${semOp(F.hasta)}</select></div>`}
+            <label class="chip-ali" style="margin:0 0 14px" title="Encendido: los totales, el pastel, la lista y el TOP suman todo el periodo. Apagado: solo la última semana (las tendencias siempre muestran todo el periodo)."><input type="checkbox" data-f="acum" ${F.acum ? "checked" : ""}><span>Acumulado de todo el periodo</span></label></div>
+          <div class="fila">
             ${sel("fu", "Archivo", [["SI", "Seguridad Industrial (SEGIND)"], ["AE", "Alta energía"]], "Ambos archivos")}
             <div class="campo" style="flex:1 1 200px"><label>Graficar las debilidades por</label><select class="inp" data-f="dim">${Object.entries(DIMS).map(([k, t]) => `<option value="${k}" ${F.dim === k ? "selected" : ""}>${t}</option>`).join("")}</select></div>
             <div class="campo" style="flex:0 0 130px"><label>Rebanadas (máx.)</label><input class="inp" type="number" min="3" max="12" data-f="max" value="${esc(F.max)}"></div></div>
           <div class="fila">${sel("subg", "Subgerencia observada", ops("subg"), "Todas")}${sel("obsDepto", "Departamento observado", ops("obsDepto"), "Todos")}${sel("uni", "Unidad", ops("uni"), "Todas")}${sel("turno", "Turno", ops("turno"), "Todos")}
             <label class="chip-ali" style="margin:0 0 14px"><input type="checkbox" data-f="ae" ${F.ae ? "checked" : ""}><span>Solo con peligros de alta energía</span></label></div>
-          <div class="tj-kpis" style="margin:2px 0 12px"><div><b>${M.n}</b><span>observaciones en la semana ${M.nS}${M.n !== cruda.length ? " (de " + cruda.length + " cargadas)" : ""}</span></div><div><b style="color:var(--verde,#1E6B4A)">${M.cum}</b><span>cumplieron la expectativa (${pct(M.cum, M.n)})</span></div><div><b style="color:var(--rojo)">${M.deb}</b><span>debilidades (${pct(M.deb, M.n)})</span></div><div><b>${M.rango.length}</b><span>semana(s) en las tendencias</span></div></div>
+          <div class="tj-kpis" style="margin:2px 0 12px"><div><b>${M.n}</b><span>observaciones en ${esc(M.etq)}${F.acum && M.n !== cruda.length ? " (de " + cruda.length + " del periodo)" : ""}</span></div><div><b style="color:var(--verde,#1E6B4A)">${M.cum}</b><span>cumplieron la expectativa (${pct(M.cum, M.n)})</span></div><div><b style="color:var(--rojo)">${M.deb}</b><span>debilidades (${pct(M.deb, M.n)})</span></div><div><b>${M.rango.length}</b><span>semana(s) en las tendencias${F.acum ? "" : " · totales y TOP de " + esc(M.etq)}</span></div></div>
           <div class="campo"><label>Láminas que se incluyen</label><div class="chips-ali">${LAMS.map(([k, t]) => `<label class="chip-ali"><input type="checkbox" data-lam="${k}" ${F.lams[k] !== false ? "checked" : ""}><span>${t}</span></label>`).join("")}</div></div>
           <div class="fila"><div class="campo" style="flex:0 0 240px"><label>Título</label><input class="inp" data-x="titulo" value="${esc(F.titulo)}" placeholder="Estado actual"></div>
             <div class="campo" style="flex:1"><label>Texto de introducción (vacío = el propuesto)</label><textarea class="inp" data-x="intro" rows="2" placeholder="${esc(this.introDef())}">${esc(F.intro)}</textarea></div></div></div>
@@ -6930,7 +6964,9 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
         const v = c.querySelector("#tdVert"); v.innerHTML = this.html(this.vertical(M), 540, 960); v.style.zoom = Math.min(0.62, (d.parentNode.clientWidth - 2) / 720);
       };
       const lento = U.debounce(prev, 500), repinta = () => Pv.pinta();
-      c.querySelectorAll("[data-f]").forEach(i => i.onchange = () => { const k = i.dataset.f; F[k] = i.type === "checkbox" ? i.checked : k === "max" ? Math.max(3, Math.min(12, +i.value || 8)) : i.value; if (k === "hasta") Pv.sem = F.hasta; repinta(); });
+      c.querySelectorAll("[data-f]").forEach(i => i.onchange = () => { const k = i.dataset.f; F[k] = i.type === "checkbox" ? i.checked : k === "max" ? Math.max(3, Math.min(12, +i.value || 8)) : i.value;
+        if (k === "hasta") Pv.sem = F.hasta; if (k === "desde" && F.desde > F.hasta) F.hasta = F.desde; if (k === "hasta" && F.desde > F.hasta) F.desde = F.hasta;
+        if (k === "f1" && F.f1 > F.f2) F.f2 = F.f1; if (k === "f2" && F.f1 > F.f2) F.f1 = F.f2; repinta(); });
       c.querySelectorAll("[data-lam]").forEach(i => i.onchange = () => { F.lams[i.dataset.lam] = i.checked; prev(); });
       c.querySelectorAll("[data-x]").forEach(i => i.oninput = () => { F[i.dataset.x] = i.value.trim(); lento(); });
       c.querySelectorAll("[data-top]").forEach(f => {
@@ -6947,10 +6983,10 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
       c.querySelector("#tdProp").onclick = async () => { if (!G.top.length || await B.ui.confirmar("Se reemplazará el TOP actual (y sus textos) por el propuesto.", "Proponer de nuevo", "Reemplazar")) { G.top = this.sugerir(M.L); repinta(); } };
       const guardar = async callado => {
         try {
-          const cfg = Object.assign({}, F); delete cfg.hasta; delete cfg.desde;
-          await TJ.llamar("grafGuardar", { clave: "cfg", datos: cfg }); await TJ.llamar("grafGuardar", { clave: W, datos: { top: G.top } });
-          D.graf.cfg = JSON.parse(JSON.stringify(cfg)); D.graf[W] = JSON.parse(JSON.stringify({ top: G.top }));
-          if (!callado) B.ui.toast("Configuración y TOP de la semana guardados.", "ok"); return true;
+          const cfg = Object.assign({}, F); delete cfg.hasta; delete cfg.desde; delete cfg.f1; delete cfg.f2;
+          await TJ.llamar("grafGuardar", { clave: "cfg", datos: cfg }); await TJ.llamar("grafGuardar", { clave: gk, datos: { top: G.top } });
+          D.graf.cfg = JSON.parse(JSON.stringify(cfg)); D.graf[gk] = JSON.parse(JSON.stringify({ top: G.top }));
+          if (!callado) B.ui.toast("Configuración y TOP de " + esc(M.etq) + " guardados.", "ok"); return true;
         } catch (e) { B.ui.error(e); return false; }
       };
       const listo = async () => { M = await this.modelo(F, G); if (!this.laminas(M).length) { B.ui.toast("Marca al menos una lámina.", "error"); return false; } return true; };
@@ -7057,7 +7093,7 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
     .ti-pot svg{flex:0 0 auto} .ti-pot b{color:#D7141E;font-weight:800}
     .ti-g{background:#FFF4E3;border:2px solid #F8D3A0;border-radius:10px;padding:10px 14px 12px;margin-top:8px}
     .ti-p{display:inline-block;background:#F28C1E;color:#fff;font-size:24px;font-weight:800;text-transform:uppercase;border-radius:6px;padding:4px 14px;margin:0 0 6px} .ti-p.ids{text-transform:none}
-    .ti-g ul{margin:4px 0 0;padding-left:24px} .ti-g li{font-size:20.5px;font-weight:500;line-height:1.22;margin-top:3px;color:#1F3B73}
+    .ti-g ul{margin:4px 0 0;padding-left:24px} .ti-g li.ti-mas{list-style:none;margin-left:-24px;font-weight:700;color:#B45309} .ti-g li{font-size:20.5px;font-weight:500;line-height:1.22;margin-top:3px;color:#1F3B73}
     .ti-nada{background:#E5F4EA;border:2px solid #9FD2AE;border-radius:10px;padding:18px;font-size:24px;font-weight:700;color:#1E7B3A;margin-top:8px}`;
 
   /* ------------------------------------------------------------ frases para la imagen (sin internet: reglas de como se
@@ -7181,7 +7217,10 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
   const TDIA = B.tdia = {
     F: null, G: {}, resumen, relato,
     fechaTxt(f) { const d = U.fecha(f); return d.getDate() + " " + MES[d.getMonth()]; },
-    clave(F) { return "dia:" + F.fecha + ":" + F.fu; },
+    hasta(F) { return F.hasta && F.hasta > F.fecha ? F.hasta : F.fecha; },
+    // "17 OCT" · varios dias: "13 AL 17 OCT" o "28 SEP AL 3 OCT"
+    periodoTxt(F) { const h = this.hasta(F); if (h === F.fecha) return this.fechaTxt(F.fecha); const a = U.fecha(F.fecha), b = U.fecha(h); return (a.getMonth() === b.getMonth() ? a.getDate() : this.fechaTxt(F.fecha)) + " AL " + this.fechaTxt(h); },
+    clave(F) { const h = this.hasta(F); return "dia:" + F.fecha + (h !== F.fecha ? "_" + h : "") + ":" + F.fu; },
     peso(c) {
       const t = U.norm(texto(c)), k = catDe(c); let p = k ? k.sev : 4;
       if (/DEBAJO DE|BAJO (LA |UNA )?CARGA/.test(t)) p += 3;     // en la linea de fuego
@@ -7226,19 +7265,22 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
       const e = k => ed ? ` contenteditable="true" spellcheck="true" data-e="${esc(k)}"` : "";
       const top = M.top.map((t, i) => `<div class="ti-top"><div class="ti-tt"><div class="ti-num">${i + 1}</div><div class="ti-id">ID ${esc(t.id)}</div><div class="ti-ttl"${e("top." + i + ".tit")}>${esc(t.tit)}</div></div>
           ${t.desc || ed ? `<p${e("top." + i + ".desc")}>${esc(t.desc)}</p>` : ""}${t.pot || ed ? `<div class="ti-pot">${TRI}<div><b>Potencial:</b> <span${e("top." + i + ".pot")}>${esc(t.pot)}</span></div></div>` : ""}</div>`).join("");
-      const gr = M.grupos.map(g => `<div class="ti-g"><div class="ti-p"${e("cat." + g.cat)}>${esc(g.cat)}</div><br><div class="ti-p ids">ID${g.cs.length > 1 ? "s" : ""} ${esc(g.cs.map(x => x.id).join(", "))}</div>
-          ${g.cs.some(x => x.bul) || ed ? `<ul>${g.cs.filter(x => x.bul || ed).map(x => `<li${e("bul." + x.id)}>${esc(x.bul)}</li>`).join("")}</ul>` : ""}</div>`).join("");
-      return `<div class="ti"><div class="ti-cab"><div class="ti-fecha">${esc(this.fechaTxt(F.fecha))}</div><div class="ti-sep"></div><div class="ti-tit"><span${e("t1")}>${esc(G.t1)}</span><br><span${e("t2")}>${esc(G.t2)}</span></div></div>
+      const largo = M.grupos.reduce((s, g) => s + g.cs.length, 0) > 14;
+      const unir = g => { const m = new Map(); for (const x of g.cs) { if (!x.bul && !ed) continue; const k = U.norm(x.bul) || "#" + x.id; if (!m.has(k)) m.set(k, { bul: x.bul, ids: [], n: 0 }); const f = m.get(k); f.ids.push(x.id); f.n++; } return [...m.values()].sort((a, b) => b.n - a.n); };
+      const frases = g => largo ? unir(g).slice(0, 4) : unir(g), mas = g => largo ? unir(g).slice(4).reduce((s, f) => s + f.n, 0) : 0;
+      const gr = M.grupos.map(g => `<div class="ti-g"><div class="ti-p"${e("cat." + g.cat)}>${esc(g.cat)}</div><br><div class="ti-p ids">ID${g.cs.length > 1 ? "s" : ""} ${esc(largo && g.cs.length > 10 ? g.cs.slice(0, 10).map(x => x.id).join(", ") + " y " + (g.cs.length - 10) + " más" : g.cs.map(x => x.id).join(", "))}</div>
+          ${g.cs.some(x => x.bul) || ed ? `<ul>${frases(g).map(f => `<li><span${e("bul." + f.ids.join(","))}>${esc(f.bul)}</span>${f.n > 1 ? ` <b>(×${f.n})</b>` : ""}</li>`).join("")}${mas(g) ? `<li class="ti-mas">y ${mas(g)} observación(es) más</li>` : ""}</ul>` : ""}</div>`).join("");
+      return `<div class="ti"><div class="ti-cab"><div class="ti-fecha"${this.hasta(F) !== F.fecha ? ' style="font-size:50px;letter-spacing:0"' : ""}>${esc(this.periodoTxt(F))}</div><div class="ti-sep"></div><div class="ti-tit"><span${e("t1")}>${esc(G.t1)}</span><br><span${e("t2")}>${esc(G.t2)}</span></div></div>
         <div class="ti-kpis"><div class="ti-k az"><b${e("kpi.n")}>${M.n}</b><span>Observaciones<br>realizadas</span></div><div class="ti-k ve"><b${e("kpi.cum")}>${M.cum}</b><span>Cumplieron<br>la expectativa</span></div>
           <div class="ti-k ro"><b${e("kpi.deb")}>${M.deb}</b><span${e("k3")}>${esc(G.k3).replace(/^(\S+\s+DE)\s+/i, "$1<br>")}</span></div></div>
         ${M.top.length || M.grupos.length ? `<div class="ti-cols">${M.top.length ? `<div class="ti-izq"><div class="ti-h ro"><b>TOP ${M.top.length}</b><i></i><span>Observaciones con mayor<br>potencial de consecuencia</span></div>${top}</div>` : ""}
           ${M.grupos.length ? `<div class="ti-der"><div class="ti-h na"><span>Otras observaciones<br>(acciones repetitivas)</span></div>${gr}</div>` : ""}</div>`
-        : `<div class="ti-nada">Todas las observaciones del día cumplieron la expectativa.</div>`}</div>`;
+        : `<div class="ti-nada">Todas las observaciones ${this.hasta(F) !== F.fecha ? "del periodo" : "del día"} cumplieron la expectativa.</div>`}</div>`;
     },
     // mensaje para WhatsApp (negritas con *asteriscos*)
     mensaje(M, G, F) {
       const AE = F.fu !== "SI", cats = [...new Set(M.grupos.map(g => porN(g.cat) || catDe(M.debs.find(c => String(c.id) === g.cs[0].id) || {})).filter(Boolean))].sort((a, b) => b.sev - a.sev), ks = cats.map(c => c.k);
-      const L = [`📋 *${G.t1} ${G.t2} · ${this.fechaTxt(F.fecha)}*`, "", `Se realizaron *${M.n} observaciones*:`, `✅ ${M.cum} cumplieron la expectativa (${pct(M.cum, M.n)}).`];
+      const L = [`📋 *${G.t1} ${G.t2} · ${this.periodoTxt(F)}*`, "", `Se realizaron *${M.n} observaciones*:`, `✅ ${M.cum} cumplieron la expectativa (${pct(M.cum, M.n)}).`];
       if (!M.deb) return L.concat(["", "¡Excelente! No se identificaron debilidades. Sigamos verificando los controles de seguridad antes y durante las actividades.", "", "✅ ¡La seguridad es responsabilidad de todos!"]).join("\n");
       L.push(`⚠️ ${M.deb} debilidades identificadas (${pct(M.deb, M.n)}).`, "");
       const temas = cats.slice(0, 2).map(c => c.tema);
@@ -7277,14 +7319,15 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
       D.graf = D.graf || {};
       const base = D.graf.diacfg || {}, F = this.F = this.F || { fu: ["AE", "SI", "AS"].includes(base.fu) ? base.fu : "AE", fecha: "" };
       // tarjetas de las ultimas semanas cargadas (una observacion puede capturarse en la semana siguiente)
-      const todas = new Map(); for (const s of sems.slice(-5)) for (const x of await TJ.semana(s)) todas.set(String(x.id), x);
+      const todas = new Map(); for (const s of sems.slice(-10)) for (const x of await TJ.semana(s)) todas.set(String(x.id), x);
       const pasa = x => F.fu === "AS" || String(x.fu || "").split(",").includes(F.fu), fo = x => String(x.fobs || "").slice(0, 10);
       const cuenta = new Map(); for (const x of todas.values()) if (pasa(x) && /^\d{4}-\d{2}-\d{2}$/.test(fo(x))) cuenta.set(fo(x), (cuenta.get(fo(x)) || 0) + 1);
       const fechas = [...cuenta.keys()].sort().reverse();
       const selArch = `<div class="campo" style="flex:1 1 200px"><label>Archivo</label><select class="inp" id="tdFu">${[["AE", "Alta energía"], ["SI", "Seguridad Industrial (SEGIND)"], ["AS", "Ambos archivos"]].map(([k, t]) => `<option value="${k}" ${F.fu === k ? "selected" : ""}>${t}</option>`).join("")}</select></div>`;
       if (!fechas.length) { c.innerHTML = `<div class="tarjeta"><div class="fila">${selArch}</div>${B.ui.vacio("No hay tarjetas de ese archivo en las semanas cargadas.", "doc")}</div>`; c.querySelector("#tdFu").onchange = e => { F.fu = e.target.value; Pv.pinta(); }; return; }
       if (!fechas.includes(F.fecha)) { const ayer = U.sumar(U.iso(new Date()), -1); F.fecha = fechas.find(f => f <= ayer) || fechas[0]; }
-      const L = [...todas.values()].filter(x => pasa(x) && fo(x) === F.fecha).sort((a, b) => (+a.id || 0) - (+b.id || 0));
+      if (F.hasta && (F.hasta <= F.fecha || !fechas.includes(F.hasta))) F.hasta = "";
+      const hasta = this.hasta(F), L = [...todas.values()].filter(x => pasa(x) && fo(x) >= F.fecha && fo(x) <= hasta).sort((a, b) => (+a.id || 0) - (+b.id || 0));
       const clave = this.clave(F);
       if (!this.G[clave]) this.G[clave] = D.graf[clave] ? JSON.parse(JSON.stringify(D.graf[clave])) : this.propuesta(L, base);
       const G = this.G[clave]; this.completar(G, L);
@@ -7303,7 +7346,8 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
       c.innerHTML = `
         <div class="tarjeta"><h2 style="margin:0;font-size:17px">Tendencia del día</h2>
           <p class="muted peque" style="margin:4px 0 0">Imagen con las observaciones de un día (por fecha de observación) y el mensaje para mandarla por WhatsApp. Todo se propone con las tarjetas; corrige lo que haga falta y <b>Guarda</b>.</p>
-          <div class="fila" style="margin-top:12px"><div class="campo" style="flex:1 1 230px"><label>Día observado</label><select class="inp" id="tdFe">${fechas.map(f => `<option value="${f}" ${f === F.fecha ? "selected" : ""}>${ftx(f)} · ${cuenta.get(f)} tarjeta(s)${D.graf[this.clave({ fecha: f, fu: F.fu })] ? " · guardada" : ""}</option>`).join("")}</select></div>${selArch}
+          <div class="fila" style="margin-top:12px"><div class="campo" style="flex:1 1 230px"><label>Día observado (desde)</label><select class="inp" id="tdFe">${fechas.map(f => `<option value="${f}" ${f === F.fecha ? "selected" : ""}>${ftx(f)} · ${cuenta.get(f)} tarjeta(s)${D.graf[this.clave({ fecha: f, fu: F.fu })] ? " · guardada" : ""}</option>`).join("")}</select></div>
+            <div class="campo" style="flex:1 1 200px"><label>Hasta el día</label><select class="inp" id="tdHa"><option value="">Solo ese día</option>${fechas.filter(f => f > F.fecha).slice().reverse().map(f => `<option value="${f}" ${f === F.hasta ? "selected" : ""}>${ftx(f)}</option>`).join("")}</select></div>${selArch}
             ${inp("t1", "Título, renglón 1", "OBSERVACIONES DE")}${inp("t2", "Título, renglón 2", "SEGURIDAD INDUSTRIAL")}</div>
           <div class="fila">${kp("n", "Observaciones realizadas", L.length)}${kp("cum", "Cumplieron la expectativa", L.filter(esCum).length)}${kp("deb", "Debilidades", debs.length)}${inp("k3", "Texto del recuadro de debilidades", "DEBILIDADES DE SEGURIDAD INDUSTRIAL", "flex:2 1 260px")}</div>
           <p class="muted peque" style="margin:0">Los números vacíos se cuentan de las tarjetas; escribe uno solo si necesitas corregirlo.</p></div>
@@ -7343,7 +7387,7 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
         if (a === "t1" || a === "t2" || a === "k3") { G[a] = v.toUpperCase(); const i = casilla(`[data-g="${a}"]`); if (i) i.value = G[a]; }
         else if (a === "kpi") { G.kpi[b] = v.replace(/\D/g, ""); const i = casilla(`[data-kpi="${b}"]`); if (i) i.value = G.kpi[b]; }
         else if (a === "top" && G.top[+b]) { G.top[+b][d] = d === "tit" ? v.toUpperCase() : v; const i = casilla(`[data-top="${b}"] [data-tk="${d}"]`); if (i) i.value = G.top[+b][d]; }
-        else if (a === "bul" && G.cards[b]) { G.cards[b].bul = v; const i = casilla(`tr[data-cid="${b}"] [data-c="bul"]`); if (i) i.value = v; }
+        else if (a === "bul") for (const id of b.split(",")) { if (!G.cards[id]) continue; G.cards[id].bul = v; const i = casilla(`tr[data-cid="${id}"] [data-c="bul"]`); if (i) i.value = v; }
         else if (a === "cat") { const viejo = k.slice(4), nuevo = v.toUpperCase() || "OTRAS"; for (const [id, g] of Object.entries(G.cards)) if (String(g.cat || "").toUpperCase() === viejo) { g.cat = nuevo; const i = casilla(`tr[data-cid="${id}"] [data-c="cat"]`); if (i) i.value = nuevo; } return "cat." + nuevo; }
         return k;
       };
@@ -7354,7 +7398,8 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
       // al salir del texto se vuelve a dibujar (mayusculas, renglones); si se paso a otro texto de la imagen, se espera
       pv.addEventListener("focusout", ev => { if (ev.relatedTarget && pv.contains(ev.relatedTarget)) return; setTimeout(() => { if (!pv.contains(document.activeElement)) prev(); }, 0); });
       c.querySelector("#tdFe").onchange = e => { F.fecha = e.target.value; repinta(); };
-      c.querySelector("#tdFu").onchange = e => { F.fu = e.target.value; F.fecha = ""; repinta(); };
+      c.querySelector("#tdHa").onchange = e => { F.hasta = e.target.value; repinta(); };
+      c.querySelector("#tdFu").onchange = e => { F.fu = e.target.value; F.fecha = ""; F.hasta = ""; repinta(); };
       c.querySelectorAll("[data-g]").forEach(i => i.oninput = () => { G[i.dataset.g] = i.value.trim().toUpperCase(); lento(); });
       c.querySelectorAll("[data-kpi]").forEach(i => i.oninput = () => { G.kpi[i.dataset.kpi] = i.value.trim(); lento(); });
       c.querySelectorAll("[data-top]").forEach(f => {
@@ -7386,7 +7431,7 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
           if (!callado) B.ui.toast("Tendencia del día guardada.", "ok"); return true;
         } catch (e) { if (!callado) B.ui.error(e); return false; }
       };
-      const nombre = () => "TENDENCIA " + F.fecha + (F.fu === "AE" ? " ALTA ENERGIA" : F.fu === "SI" ? " SEGIND" : "") + ".png";
+      const nombre = () => "TENDENCIA " + F.fecha + (this.hasta(F) !== F.fecha ? " AL " + this.hasta(F) : "") + (F.fu === "AE" ? " ALTA ENERGIA" : F.fu === "SI" ? " SEGIND" : "") + ".png";
       c.querySelector("#tdGuardar").onclick = () => guardar();
       c.querySelector("#tdPng").onclick = async () => { guardar(true); try { U.descargar(nombre(), await this.png(this.html(this.modelo(L, G), G, F)), "image/png"); B.ui.toast("Imagen descargada: búscala en <b>Descargas</b>.", "ok", 6000); } catch (e) { B.ui.error(e); } };
       c.querySelector("#tdCopImg").onclick = async () => {
@@ -8735,7 +8780,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "4.9.3", servidorViejo: false,
+  info: {}, VERSION: "4.9.4", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -8922,7 +8967,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "procedimientos" ? '<span class="contador oculto" id="cntProc"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.9.3")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.9.4")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
