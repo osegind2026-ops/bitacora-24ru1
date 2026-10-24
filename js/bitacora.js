@@ -803,7 +803,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.10.1", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.10.2", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -6441,7 +6441,7 @@ V.hoja = {
       return {
         fecha: g.fecha || U.sumar(TJ.lunes(W), 11), g1: g.g1 || ant.g1 || "2025-26", g2: g.g2 || ant.g2 || "2025-16",
         pag: Object.assign({ t: "", a: "", c: "", i: "", n: "", x: "" }, g.pag), tlc: Object.assign({ t: "", a: "", c: "", i: "", n: "", x: "" }, g.tlc), sac: Object.assign({ a: "", c: "", i: "", n: "", x: "" }, g.sac),
-        tx1: g.tx1 || "", tx2: g.tx2 || "", tx3: g.tx3 || "", hist: g.hist || undefined
+        tx1: g.tx1 || "", tx2: g.tx2 || "", tx3: g.tx3 || "", hist: g.hist || undefined, estBar: g.estBar || ant.estBar || "plana"
       };
     },
     // numeros de la tabla resumen: las tarjetas Lideres en Campo salen de lo cargado y lo marcado, salvo que se escriba otro valor
@@ -6488,8 +6488,8 @@ V.hoja = {
       return {
         W, sem: `${s}/${a}`, semN: +s, anio: a, fecha: this.fechaTxt(S.fecha), C,
         tx1: S.tx1 || prop.tx1, tx2: S.tx2 || prop.tx2, tx3: S.tx3 || prop.tx3,
-        g1: { titulo: "Actos y Condiciones Inseguras en la CNLV", cats: k1.map(et), etq: true, series: [{ n: "ACTOS INSEGUROS", col: AZUL, v: k1.map(k => h[k][0] || 0) }, { n: "TOTAL DE OBSERVACIONES", col: NARANJA, v: k1.map(k => h[k][1] || 0) }, { n: "CONDICIONES INSEGURAS", col: GRIS, v: k1.map(k => h[k][2] || 0) }] },
-        g2: { titulo: "ACCIDENTES INCAPACITANTES E INCIDENTES EN LA CNLV", cats: k2.map(et), etq: false, series: [{ n: "ACCIDENTES INCAPACITANTES", col: AZUL, v: k2.map(k => h[k][3] || 0) }, { n: "INCIDENTES", col: NARANJA, v: k2.map(k => h[k][4] || 0) }] }
+        g1: { titulo: "Actos y Condiciones Inseguras en la CNLV", est: S.estBar, cats: k1.map(et), etq: true, series: [{ n: "ACTOS INSEGUROS", col: AZUL, v: k1.map(k => h[k][0] || 0) }, { n: "TOTAL DE OBSERVACIONES", col: NARANJA, v: k1.map(k => h[k][1] || 0) }, { n: "CONDICIONES INSEGURAS", col: GRIS, v: k1.map(k => h[k][2] || 0) }] },
+        g2: { titulo: "ACCIDENTES INCAPACITANTES E INCIDENTES EN LA CNLV", est: S.estBar, cats: k2.map(et), etq: false, series: [{ n: "ACCIDENTES INCAPACITANTES", col: AZUL, v: k2.map(k => h[k][3] || 0) }, { n: "INCIDENTES", col: NARANJA, v: k2.map(k => h[k][4] || 0) }] }
       };
     },
 
@@ -6564,60 +6564,110 @@ V.hoja = {
       return `<span style="font-family:${this.FAM[r.f] || this.FAM.Arial};font-size:${r.sz}pt;${r.b ? "font-weight:700;" : ""}${r.i ? "font-style:italic;" : ""}${r.u ? "text-decoration:underline;" : ""}${r.col ? "color:#" + r.col + ";" : ""}">${esc(r.t)}</span>`;
     },
     // grafica de pastel (debilidades por estandar, etc.): rebanadas desde arriba en el sentido del reloj, con su porcentaje
+    // estilos de las graficas (los elige el usuario): barras plana/degradado/3d/cilindro; pastel plano/dona/3d/destacado
+    EST_BAR: [["plana", "Actual (barras planas)"], ["degradado", "Degradado con sombra"], ["3d", "3D"], ["cilindro", "Cilindros con brillo"]],
+    EST_PIE: [["plano", "Actual (pastel plano)"], ["dona", "Dona con total al centro"], ["3d", "Pastel 3D"], ["destacado", "Rebanada mayor destacada"]],
+    mezcla(hex, f) { const n = parseInt(hex || "888888", 16), c = [n >> 16, (n >> 8) & 255, n & 255].map(x => Math.round(f > 0 ? x + (255 - x) * f : x * (1 + f))); return "#" + c.map(x => x.toString(16).padStart(2, "0")).join(""); },
     svgPie(g) {
-      const W = g.w, H = g.h, cx = W / 2, cy = H / 2, r = Math.min(W, H) / 2 - 24, v = g.series[0].v, cols = g.series[0].cols || [], tot = v.reduce((a, b) => a + b, 0) || 1;
-      let s = `<svg style="left:${g.x}pt;top:${g.y}pt;width:${W}pt;height:${H}pt" viewBox="0 0 ${W} ${H}" font-family="'Noto Sans','Segoe UI',Arial,sans-serif">`, a0 = -Math.PI / 2;
-      const pt = (a, rr) => [(cx + rr * Math.cos(a)).toFixed(2), (cy + rr * Math.sin(a)).toFixed(2)], et = [];
+      const est = g.est || "plano", d3 = est === "3d", dona = est === "dona", dest = est === "destacado", id = "p" + (E1._gid = (E1._gid || 0) + 1);
+      const W = g.w, H = g.h, r = Math.min(W, H) / 2 - 24, ry = d3 ? r * 0.55 : r, dep = d3 ? r * 0.2 : 0, cx = W / 2, cy = H / 2 - dep / 2, v = g.series[0].v, cols = g.series[0].cols || [], tot = v.reduce((a, b) => a + b, 0) || 1;
+      const pt = (a, rr) => [(cx + rr * Math.cos(a)).toFixed(2), (cy + rr * (ry / r) * Math.sin(a)).toFixed(2)], et = [];
+      let defs = "", cuerpo = "", paredes = "", a0 = -Math.PI / 2;
+      const mayor = v.indexOf(Math.max(...v)), ri = r * 0.56;
+      if (est !== "plano") defs += `<filter id="${id}s" x="-30%" y="-30%" width="160%" height="160%"><feDropShadow dx="1.5" dy="3" stdDeviation="3" flood-color="#000" flood-opacity=".25"/></filter>`;
+      if (dona || dest) defs += `<radialGradient id="${id}h" cx=".42" cy=".35" r=".75"><stop offset="0" stop-color="#fff" stop-opacity=".35"/><stop offset=".6" stop-color="#fff" stop-opacity=".05"/><stop offset="1" stop-color="#000" stop-opacity=".12"/></radialGradient>`;
       v.forEach((n, i) => {
         if (!n) return;
-        const a1 = a0 + n / tot * Math.PI * 2, [x0, y0] = pt(a0, r), [x1, y1] = pt(a1, r), col = "#" + (cols[i] || "888888");
-        s += n === tot ? `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${col}"/>` : `<path d="M${cx},${cy} L${x0},${y0} A${r},${r} 0 ${a1 - a0 > Math.PI ? 1 : 0} 1 ${x1},${y1} Z" fill="${col}" stroke="#fff" stroke-width="1.2"/>`;
-        et.push({ i, n, m: (a0 + a1) / 2, p: n / tot * 100 }); a0 = a1;
+        const a1 = a0 + n / tot * Math.PI * 2, col = "#" + (cols[i] || "888888"), big = a1 - a0 > Math.PI ? 1 : 0;
+        const ex = dest && i === mayor ? r * 0.07 : 0, m = (a0 + a1) / 2, ox = (ex * Math.cos(m)).toFixed(2), oy = (ex * Math.sin(m)).toFixed(2);
+        const [x0, y0] = pt(a0, r), [x1, y1] = pt(a1, r);
+        if (d3) {
+          // pared de la rebanada en la parte de enfrente (de 0 a 180 grados)
+          for (const [p0, p1] of [[Math.max(a0, 0), Math.min(a1, Math.PI)], [Math.max(a0, 2 * Math.PI), Math.min(a1, 3 * Math.PI)]]) {
+            if (p1 <= p0) continue;
+            const [u0, w0] = pt(p0, r), [u1, w1] = pt(p1, r);
+            paredes += `<path d="M${u0},${w0} A${r},${ry} 0 0 1 ${u1},${w1} L${u1},${(+w1 + dep).toFixed(2)} A${r},${ry} 0 0 0 ${u0},${(+w0 + dep).toFixed(2)} Z" fill="${this.mezcla(cols[i], -.32)}"/>`;
+          }
+        }
+        if (n === tot) cuerpo += dona ? `<path d="M${cx - r},${cy} a${r},${r} 0 1 0 ${2 * r},0 a${r},${r} 0 1 0 ${-2 * r},0 M${cx - ri},${cy} a${ri},${ri} 0 1 1 ${2 * ri},0 a${ri},${ri} 0 1 1 ${-2 * ri},0" fill="${col}" fill-rule="evenodd"/>` : `<ellipse cx="${cx}" cy="${cy}" rx="${r}" ry="${ry}" fill="${col}"/>`;
+        else if (dona) { const [i0x, i0y] = pt(a0, ri), [i1x, i1y] = pt(a1, ri); cuerpo += `<path d="M${x0},${y0} A${r},${r} 0 ${big} 1 ${x1},${y1} L${i1x},${i1y} A${ri},${ri} 0 ${big} 0 ${i0x},${i0y} Z" fill="${col}" stroke="#fff" stroke-width="2"/>`; }
+        else cuerpo += `<path${ex ? ` transform="translate(${ox},${oy})"` : ""} d="M${cx},${cy} L${x0},${y0} A${r},${ry} 0 ${big} 1 ${x1},${y1} Z" fill="${col}" stroke="#fff" stroke-width="${est === "plano" ? 1.2 : 1.6}"/>`;
+        et.push({ i, n, m, p: n / tot * 100, ox: +ox, oy: +oy }); a0 = a1;
       });
+      let s = `<svg style="left:${g.x}pt;top:${g.y}pt;width:${W}pt;height:${H}pt" viewBox="0 0 ${W} ${H}" font-family="'Noto Sans','Segoe UI',Arial,sans-serif"><defs>${defs}</defs>`;
+      s += est === "plano" ? cuerpo : `<g filter="url(#${id}s)">${paredes}${cuerpo}</g>`;
+      if (dona || dest) s += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="url(#${id}h)"${dona ? ` mask="url(#${id}m)"` : ""}/>`;
+      if (dona) { s = s.replace("</defs>", `<mask id="${id}m"><circle cx="${cx}" cy="${cy}" r="${r}" fill="#fff"/><circle cx="${cx}" cy="${cy}" r="${ri}" fill="#000"/></mask></defs>`);
+        s += `<text x="${cx}" y="${cy + r * 0.04}" text-anchor="middle" font-size="${(r * 0.3).toFixed(1)}" font-weight="700" fill="#155B4E">${tot === 1 && !v.some(Boolean) ? 0 : v.reduce((a, b) => a + b, 0)}</text><text x="${cx}" y="${cy + r * 0.24}" text-anchor="middle" font-size="${(r * 0.1).toFixed(1)}" fill="#595959">${esc(g.centro || "total")}</text>`; }
       const claro = c => { const x = parseInt(c || "888888", 16); return ((x >> 16) * 299 + ((x >> 8) & 255) * 587 + (x & 255) * 114) / 1000 > 150; };
       let fuera = 0;      // las rebanadas chicas llevan su porcentaje por fuera, alternando la distancia para que no se encimen
       for (const e of et) {
-        const dentro = e.p >= (g.nombres ? 4 : 3.4), [x, y] = pt(e.m, dentro ? r * (e.p > 30 ? 0.55 : 0.68) : r + 8 + (fuera++ % 2) * 11), fz = g.nombres ? (e.p >= 9 ? 13 : 10.5) : (e.p >= 9 ? 11 : 9.5), fill = dentro ? (claro(cols[e.i]) ? "#1b1b1b" : "#fff") : "#1b1b1b";
-        const nom = g.nombres && dentro && e.p >= 8 ? String(g.cats[e.i] || "") : "", pal = nom.split(" "), lin = [];
+        const dentro = e.p >= (g.nombres ? 4 : 3.4), dist = dentro ? (dona ? (r + ri) / 2 : r * (e.p > 30 ? 0.55 : 0.68)) : r + 8 + (fuera++ % 2) * 11;
+        let [x, y] = pt(e.m, dist); x = (+x + e.ox).toFixed(2); y = (+y + e.oy + (!dentro && d3 && Math.sin(e.m) > 0 ? dep : 0)).toFixed(2);
+        const fz = g.nombres ? (e.p >= 9 ? 13 : 10.5) : (e.p >= 9 ? 11 : 9.5), fill = dentro ? (claro(cols[e.i]) ? "#1b1b1b" : "#fff") : "#1b1b1b";
+        const nom = g.nombres && dentro && !dona && e.p >= 8 ? String(g.cats[e.i] || "") : "", pal = nom.split(" "), lin = [];
         for (const p of pal) { if (lin.length && (lin[lin.length - 1] + " " + p).length <= (e.p >= 20 ? 14 : 11)) lin[lin.length - 1] += " " + p; else if (p) lin.push(p); }
         const alto = fz * 0.95, y0 = +y - (lin.length * alto) / 2 + (nom ? 0 : fz * 0.35);
-        s += `<text x="${x}" y="${nom ? y0.toFixed(2) : y0.toFixed(2)}" text-anchor="middle" font-size="${fz}" font-weight="700" fill="${fill}">${e.p.toFixed(1)}%</text>`;
+        s += `<text x="${x}" y="${y0.toFixed(2)}" text-anchor="middle" font-size="${fz}" font-weight="700" fill="${fill}">${e.p.toFixed(1)}%</text>`;
         lin.forEach((t, k) => { s += `<text x="${x}" y="${(y0 + (k + 1) * alto).toFixed(2)}" text-anchor="middle" font-size="${(fz * 0.72).toFixed(1)}" font-weight="600" fill="${fill}">${esc(t)}</text>`; });
       }
       return s + "</svg>";
     },
     pieXml(g) {
-      const n = g.cats.length, se = g.series[0], cols = se.cols || [];
+      const est = g.est || "plano", n = g.cats.length, se = g.series[0], cols = se.cols || [], mayor = se.v.indexOf(Math.max(...se.v));
+      const tag = est === "dona" ? "doughnutChart" : est === "3d" ? "pie3DChart" : "pieChart";
       return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><c:date1904 val="0"/><c:roundedCorners val="0"/>
-<c:chart><c:autoTitleDeleted val="1"/><c:plotArea><c:layout/><c:pieChart><c:varyColors val="1"/><c:ser><c:idx val="0"/><c:order val="0"/><c:tx><c:strRef><c:f>Hoja1!$B$1</c:f><c:strCache><c:ptCount val="1"/><c:pt idx="0"><c:v>${esc(se.n)}</c:v></c:pt></c:strCache></c:strRef></c:tx>
-${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><a:solidFill><a:srgbClr val="${cols[i] || "888888"}"/></a:solidFill><a:ln w="12700"><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill></a:ln></c:spPr></c:dPt>`).join("")}
+<c:chart><c:autoTitleDeleted val="1"/>${est === "3d" ? `<c:view3D><c:rotX val="30"/><c:rotY val="0"/><c:rAngAx val="0"/></c:view3D>` : ""}<c:plotArea><c:layout/><c:${tag}><c:varyColors val="1"/><c:ser><c:idx val="0"/><c:order val="0"/><c:tx><c:strRef><c:f>Hoja1!$B$1</c:f><c:strCache><c:ptCount val="1"/><c:pt idx="0"><c:v>${esc(se.n)}</c:v></c:pt></c:strCache></c:strRef></c:tx>
+${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est === "destacado" && i === mayor ? '<c:explosion val="10"/>' : ""}<c:spPr><a:solidFill><a:srgbClr val="${cols[i] || "888888"}"/></a:solidFill><a:ln w="${est === "plano" ? 12700 : 25400}"><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill></a:ln>${est === "plano" ? "" : `<a:effectLst><a:outerShdw blurRad="50800" dist="25400" dir="5400000" algn="t" rotWithShape="0"><a:prstClr val="black"><a:alpha val="25000"/></a:prstClr></a:outerShdw></a:effectLst>`}</c:spPr></c:dPt>`).join("")}
 <c:dLbls><c:numFmt formatCode="0.0%" sourceLinked="0"/><c:spPr><a:noFill/><a:ln><a:noFill/></a:ln></c:spPr><c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="1100" b="1"><a:solidFill><a:srgbClr val="1B1B1B"/></a:solidFill></a:defRPr></a:pPr><a:endParaRPr lang="es-MX"/></a:p></c:txPr><c:showLegendKey val="0"/><c:showVal val="0"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="1"/><c:showBubbleSize val="0"/><c:showLeaderLines val="1"/></c:dLbls>
 <c:cat><c:strRef><c:f>Hoja1!$A$2:$A$${n + 1}</c:f><c:strCache><c:ptCount val="${n}"/>${g.cats.map((c, i) => `<c:pt idx="${i}"><c:v>${esc(c)}</c:v></c:pt>`).join("")}</c:strCache></c:strRef></c:cat>
-<c:val><c:numRef><c:f>Hoja1!$B$2:$B$${n + 1}</c:f><c:numCache><c:formatCode>General</c:formatCode><c:ptCount val="${n}"/>${se.v.map((v, i) => `<c:pt idx="${i}"><c:v>${v || 0}</c:v></c:pt>`).join("")}</c:numCache></c:numRef></c:val></c:ser><c:firstSliceAng val="0"/></c:pieChart>
+<c:val><c:numRef><c:f>Hoja1!$B$2:$B$${n + 1}</c:f><c:numCache><c:formatCode>General</c:formatCode><c:ptCount val="${n}"/>${se.v.map((v, i) => `<c:pt idx="${i}"><c:v>${v || 0}</c:v></c:pt>`).join("")}</c:numCache></c:numRef></c:val></c:ser>${est === "3d" ? "" : `<c:firstSliceAng val="0"/>`}${est === "dona" ? `<c:holeSize val="55"/>` : ""}</c:${tag}>
 <c:spPr><a:noFill/></c:spPr></c:plotArea><c:plotVisOnly val="1"/><c:dispBlanksAs val="gap"/></c:chart>
 <c:spPr><a:noFill/><a:ln><a:noFill/></a:ln></c:spPr><c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr/></a:pPr><a:endParaRPr lang="es-MX"/></a:p></c:txPr><c:externalData r:id="rId1"><c:autoUpdate val="0"/></c:externalData></c:chartSpace>`;
     },
     svg(g) {
       if (g.tipo === "pie") return this.svgPie(g);
-      const W = g.w, H = g.h, L = 30, Rm = 8, T = 30, Bm = g.bm || 66, pw = W - L - Rm, ph = H - T - Bm, n = g.cats.length || 1, k = g.series.length;
+      const est = g.est || "plana", d3 = est === "3d", plana = est === "plana", id = "b" + (E1._gid = (E1._gid || 0) + 1);
+      const W = g.w, H = g.h, L = 30, Rm = 8 + (d3 ? 8 : 0), T = 30, Bm = g.bm || 66, pw = W - L - Rm, ph = H - T - Bm, n = g.cats.length || 1, k = g.series.length;
       const max = Math.max(1, ...g.series.flatMap(s => s.v)), paso = [0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500].find(p => max / p <= 7) || 1000, tope = Math.ceil(max / paso + 0.4) * paso;
-      const y = v => T + ph - v / tope * ph, gw = pw / n, bw = gw * 0.8 / k, fe = n > 60 ? 6.2 : 7.2;
-      let s = `<svg style="left:${g.x}pt;top:${g.y}pt;width:${W}pt;height:${H}pt" viewBox="0 0 ${W} ${H}" font-family="Calibri,Carlito,Arial,sans-serif"><text x="${W / 2}" y="17" text-anchor="middle" font-size="14" fill="#595959">${esc(g.titulo)}</text>`;
-      for (let v = 0; v <= tope + 1e-9; v += paso) s += `<line x1="${L}" x2="${W - Rm}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}" stroke="#D9D9D9" stroke-width=".75"/><text x="${L - 5}" y="${(y(v) + 2.6).toFixed(1)}" text-anchor="end" font-size="8" fill="#595959">${+v.toFixed(1)}</text>`;
+      const y = v => T + ph - v / tope * ph, gw = pw / n, bw = gw * (d3 ? 0.66 : 0.8) / k, fe = n > 60 ? 6.2 : 7.2, dx = d3 ? 8 : 0, dy = d3 ? 5.5 : 0;
+      let defs = "", s = "";
+      const hechos = new Set(), relleno = c => {
+        if (est !== "degradado" && est !== "cilindro") return "#" + c;
+        if (!hechos.has(c)) { hechos.add(c); defs += est === "degradado"
+          ? `<linearGradient id="${id}${c}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${this.mezcla(c, .35)}"/><stop offset="1" stop-color="${this.mezcla(c, -.15)}"/></linearGradient>`
+          : `<linearGradient id="${id}${c}" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="${this.mezcla(c, -.35)}"/><stop offset=".38" stop-color="${this.mezcla(c, .45)}"/><stop offset=".55" stop-color="${this.mezcla(c, .15)}"/><stop offset="1" stop-color="${this.mezcla(c, -.45)}"/></linearGradient>`; }
+        return `url(#${id}${c})`;
+      };
+      if (est === "degradado") defs += `<filter id="${id}s" x="-30%" y="-10%" width="160%" height="130%"><feDropShadow dx="1" dy="1.5" stdDeviation="1.2" flood-color="#000" flood-opacity=".28"/></filter>`;
+      if (d3) s += `<polygon points="${L},${T + ph} ${L + dx},${T + ph - dy} ${W - Rm + dx},${T + ph - dy} ${W - Rm},${T + ph}" fill="#E7E9EC"/><rect x="${L + dx}" y="${T - dy}" width="${pw}" height="${ph}" fill="#F6F7F9"/>`;
+      for (let v = 0; v <= tope + 1e-9; v += paso) s += `<line x1="${L + dx}" x2="${W - Rm + dx}" y1="${(y(v) - dy).toFixed(1)}" y2="${(y(v) - dy).toFixed(1)}" stroke="${plana ? "#D9D9D9" : "#E1E4E8"}" stroke-width=".75"${!plana && v ? ' stroke-dasharray="2.5 2.5"' : ""}/><text x="${L - 5}" y="${(y(v) + 2.6).toFixed(1)}" text-anchor="end" font-size="8" fill="#595959">${v}</text>`;
       g.cats.forEach((c, i) => {
-        const x0 = L + i * gw + gw * 0.1;
+        const x0 = L + i * gw + gw * (d3 ? 0.13 : 0.1);
         g.series.forEach((se, j) => {
-          const v = se.v[i] || 0, x = x0 + j * bw, yy = y(v);
-          if (v) s += `<rect x="${x.toFixed(2)}" y="${yy.toFixed(2)}" width="${Math.max(bw - 0.4, 0.8).toFixed(2)}" height="${(T + ph - yy).toFixed(2)}" fill="#${(se.cols && se.cols[i]) || se.col}"/>`;
-          if (g.etq) s += `<text x="${(x + bw / 2).toFixed(2)}" y="${(yy - 2).toFixed(2)}" text-anchor="middle" font-size="${fe}" fill="#404040">${v}</text>`;
+          const v = se.v[i] || 0, x = x0 + j * (bw + (d3 ? gw * 0.04 / k : 0)), yy = y(v), h = T + ph - yy, w = Math.max(bw - (plana ? 0.4 : 1.2), 0.8), cc = (se.cols && se.cols[i]) || se.col;
+          if (v) {
+            if (plana) s += `<rect x="${x.toFixed(2)}" y="${yy.toFixed(2)}" width="${w.toFixed(2)}" height="${h.toFixed(2)}" fill="#${cc}"/>`;
+            else if (est === "degradado") { const rr = Math.min(2.5, w / 3, h); s += `<path d="M${x.toFixed(2)},${(T + ph).toFixed(2)} V${(yy + rr).toFixed(2)} Q${x.toFixed(2)},${yy.toFixed(2)} ${(x + rr).toFixed(2)},${yy.toFixed(2)} H${(x + w - rr).toFixed(2)} Q${(x + w).toFixed(2)},${yy.toFixed(2)} ${(x + w).toFixed(2)},${(yy + rr).toFixed(2)} V${(T + ph).toFixed(2)} Z" fill="${relleno(cc)}" filter="url(#${id}s)"/>`; }
+            else if (d3) { const d = Math.min(dx, w * .55), e = d * .68;
+              s += `<polygon points="${(x + w).toFixed(2)},${yy.toFixed(2)} ${(x + w + d).toFixed(2)},${(yy - e).toFixed(2)} ${(x + w + d).toFixed(2)},${(T + ph - e).toFixed(2)} ${(x + w).toFixed(2)},${(T + ph).toFixed(2)}" fill="${this.mezcla(cc, -.35)}"/>`
+                + `<polygon points="${x.toFixed(2)},${yy.toFixed(2)} ${(x + d).toFixed(2)},${(yy - e).toFixed(2)} ${(x + w + d).toFixed(2)},${(yy - e).toFixed(2)} ${(x + w).toFixed(2)},${yy.toFixed(2)}" fill="${this.mezcla(cc, .35)}"/>`
+                + `<rect x="${x.toFixed(2)}" y="${yy.toFixed(2)}" width="${w.toFixed(2)}" height="${h.toFixed(2)}" fill="#${cc}"/>`; }
+            else { const ey = Math.min(w * .22, 4);
+              s += `<rect x="${x.toFixed(2)}" y="${yy.toFixed(2)}" width="${w.toFixed(2)}" height="${h.toFixed(2)}" fill="${relleno(cc)}"/><ellipse cx="${(x + w / 2).toFixed(2)}" cy="${(T + ph).toFixed(2)}" rx="${(w / 2).toFixed(2)}" ry="${ey.toFixed(2)}" fill="${this.mezcla(cc, -.4)}"/>`
+                + `<ellipse cx="${(x + w / 2).toFixed(2)}" cy="${yy.toFixed(2)}" rx="${(w / 2).toFixed(2)}" ry="${ey.toFixed(2)}" fill="${this.mezcla(cc, .5)}" stroke="${this.mezcla(cc, .2)}" stroke-width=".5"/>`; }
+          }
+          const sube = d3 ? dy + 2 : est === "cilindro" ? Math.min(w * .22, 4) + 2 : 2;
+          if (g.etq) s += `<text x="${(x + w / 2 + (d3 ? dx / 2 : 0)).toFixed(2)}" y="${(yy - sube).toFixed(2)}" text-anchor="middle" font-size="${fe}"${plana ? "" : ' font-weight="700"'} fill="${plana ? "#404040" : "#2A2A2A"}">${v}</text>`;
         });
         const cx = L + i * gw + gw / 2 + 2.4;
         s += `<text transform="translate(${cx.toFixed(2)},${T + ph + 5}) rotate(-90)" text-anchor="end" font-size="${n > 60 ? 7 : 8}" fill="#595959">${esc(String(c).length > (Bm - 10) / 4.1 ? String(c).slice(0, Math.floor((Bm - 10) / 4.1) - 1) + "…" : c)}</text>`;
       });
+      if (!plana) s += `<line x1="${L}" x2="${W - Rm}" y1="${T + ph}" y2="${T + ph}" stroke="#9AA0A6" stroke-width=".8"/>`;
       const anch = g.series.map(se => se.n.length * 4.7 + 22), tot = anch.reduce((a, b) => a + b, 0); let lx = (W - tot) / 2;
-      g.series.forEach((se, j) => { s += `<rect x="${lx}" y="${H - 12}" width="5" height="5" fill="#${se.col}"/><text x="${lx + 8}" y="${H - 7}" font-size="8.5" fill="#595959">${esc(se.n)}</text>`; lx += anch[j]; });
-      return s + "</svg>";
+      g.series.forEach((se, j) => { s += (plana ? `<rect x="${lx}" y="${H - 12}" width="5" height="5" fill="#${se.col}"/>` : `<circle cx="${lx + 2.5}" cy="${H - 9.5}" r="3" fill="#${se.col}"/>`) + `<text x="${lx + 8}" y="${H - 7}" font-size="8.5" fill="#595959">${esc(se.n)}</text>`; lx += anch[j]; });
+      return `<svg style="left:${g.x}pt;top:${g.y}pt;width:${W}pt;height:${H}pt" viewBox="0 0 ${W} ${H}" font-family="Calibri,Carlito,Arial,sans-serif"><defs>${defs}</defs><text x="${W / 2}" y="17" text-anchor="middle" font-size="14"${plana ? ' fill="#595959"' : ' font-weight="700" fill="#155B4E"'}>${esc(g.titulo)}</text>${s}</svg>`;
     },
     elHtml(e) {
       if (e.k === "g") return this.svg(e);
@@ -6671,18 +6721,26 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
         { n: "xl/worksheets/sheet1.xml", d: X + `<worksheet ${NS}><sheetData>${filas.map((f, r) => `<row r="${r + 1}">${f.map((v, i) => cs(r + 1, i, v)).join("")}</row>`).join("")}</sheetData></worksheet>` }
       ]).arrayBuffer());
     },
+    // relleno de PowerPoint para cada estilo de barra
+    rellenoXml(c, est) {
+      const sombra = `<a:effectLst><a:outerShdw blurRad="38100" dist="19050" dir="5400000" algn="t" rotWithShape="0"><a:prstClr val="black"><a:alpha val="30000"/></a:prstClr></a:outerShdw></a:effectLst>`;
+      const hx = (f) => this.mezcla(c, f).slice(1).toUpperCase();
+      if (est === "degradado") return `<c:spPr><a:gradFill rotWithShape="1"><a:gsLst><a:gs pos="0"><a:srgbClr val="${hx(.35)}"/></a:gs><a:gs pos="100000"><a:srgbClr val="${hx(-.15)}"/></a:gs></a:gsLst><a:lin ang="5400000" scaled="0"/></a:gradFill>${sombra}</c:spPr>`;
+      if (est === "cilindro") return `<c:spPr><a:gradFill rotWithShape="1"><a:gsLst><a:gs pos="0"><a:srgbClr val="${hx(-.35)}"/></a:gs><a:gs pos="38000"><a:srgbClr val="${hx(.45)}"/></a:gs><a:gs pos="55000"><a:srgbClr val="${hx(.15)}"/></a:gs><a:gs pos="100000"><a:srgbClr val="${hx(-.45)}"/></a:gs></a:gsLst><a:lin ang="0" scaled="0"/></a:gradFill></c:spPr>`;
+      return `<c:spPr><a:solidFill><a:srgbClr val="${c}"/></a:solidFill></c:spPr>`;
+    },
     chartXml(g) {
-      const n = g.cats.length, col = i => String.fromCharCode(66 + i), tx = (sz, c, rot) => `<c:txPr><a:bodyPr${rot ? ' rot="-5400000" vert="horz"' : ""}/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="${sz}" b="0"><a:solidFill><a:srgbClr val="${c}"/></a:solidFill></a:defRPr></a:pPr><a:endParaRPr lang="es-MX"/></a:p></c:txPr>`;
+      const est = g.est || "plana", tres = est === "3d" || est === "cilindro", n = g.cats.length, col = i => String.fromCharCode(66 + i), tx = (sz, c, rot) => `<c:txPr><a:bodyPr${rot ? ' rot="-5400000" vert="horz"' : ""}/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="${sz}" b="0"><a:solidFill><a:srgbClr val="${c}"/></a:solidFill></a:defRPr></a:pPr><a:endParaRPr lang="es-MX"/></a:p></c:txPr>`;
       const lin = `<c:spPr><a:ln w="9525"><a:solidFill><a:srgbClr val="D9D9D9"/></a:solidFill></a:ln></c:spPr>`;
       const cats = `<c:cat><c:strRef><c:f>Hoja1!$A$2:$A$${n + 1}</c:f><c:strCache><c:ptCount val="${n}"/>${g.cats.map((c, i) => `<c:pt idx="${i}"><c:v>${esc(c)}</c:v></c:pt>`).join("")}</c:strCache></c:strRef></c:cat>`;
       const ser = g.series.map((s, j) => `<c:ser><c:idx val="${j}"/><c:order val="${j}"/><c:tx><c:strRef><c:f>Hoja1!$${col(j)}$1</c:f><c:strCache><c:ptCount val="1"/><c:pt idx="0"><c:v>${esc(s.n)}</c:v></c:pt></c:strCache></c:strRef></c:tx>
-        <c:spPr><a:solidFill><a:srgbClr val="${s.col}"/></a:solidFill></c:spPr><c:invertIfNegative val="0"/>${s.cols ? s.cols.map((c, i) => c && c !== s.col ? `<c:dPt><c:idx val="${i}"/><c:invertIfNegative val="0"/><c:bubble3D val="0"/><c:spPr><a:solidFill><a:srgbClr val="${c}"/></a:solidFill></c:spPr></c:dPt>` : "").join("") : ""}
+        ${this.rellenoXml(s.col, est)}<c:invertIfNegative val="0"/>${s.cols ? s.cols.map((c, i) => c && c !== s.col ? `<c:dPt><c:idx val="${i}"/><c:invertIfNegative val="0"/><c:bubble3D val="0"/>${this.rellenoXml(c, est)}</c:dPt>` : "").join("") : ""}
         <c:dLbls>${g.etq ? `<c:spPr><a:noFill/><a:ln><a:noFill/></a:ln></c:spPr>${tx(n > 60 ? 700 : 800, "404040")}` : ""}<c:showLegendKey val="0"/><c:showVal val="${g.etq ? 1 : 0}"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="0"/><c:showBubbleSize val="0"/></c:dLbls>
         ${cats}<c:val><c:numRef><c:f>Hoja1!$${col(j)}$2:$${col(j)}$${n + 1}</c:f><c:numCache><c:formatCode>General</c:formatCode><c:ptCount val="${n}"/>${s.v.map((v, i) => `<c:pt idx="${i}"><c:v>${v || 0}</c:v></c:pt>`).join("")}</c:numCache></c:numRef></c:val></c:ser>`).join("");
       return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><c:date1904 val="0"/><c:roundedCorners val="0"/>
-<c:chart><c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="1400" b="0"><a:solidFill><a:srgbClr val="595959"/></a:solidFill></a:defRPr></a:pPr><a:r><a:rPr lang="es-MX" sz="1400" b="0"><a:solidFill><a:srgbClr val="595959"/></a:solidFill></a:rPr><a:t>${esc(g.titulo)}</a:t></a:r></a:p></c:rich></c:tx><c:overlay val="0"/></c:title><c:autoTitleDeleted val="0"/>
-<c:plotArea><c:layout/><c:barChart><c:barDir val="col"/><c:grouping val="clustered"/><c:varyColors val="0"/>${ser}<c:gapWidth val="30"/><c:axId val="50010001"/><c:axId val="50010002"/></c:barChart>
+<c:chart><c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="1400" b="0"><a:solidFill><a:srgbClr val="595959"/></a:solidFill></a:defRPr></a:pPr><a:r><a:rPr lang="es-MX" sz="1400" b="0"><a:solidFill><a:srgbClr val="595959"/></a:solidFill></a:rPr><a:t>${esc(g.titulo)}</a:t></a:r></a:p></c:rich></c:tx><c:overlay val="0"/></c:title><c:autoTitleDeleted val="0"/>${tres ? `<c:view3D><c:rotX val="12"/><c:rotY val="18"/><c:rAngAx val="1"/></c:view3D><c:floor><c:thickness val="0"/></c:floor><c:sideWall><c:thickness val="0"/><c:spPr><a:noFill/></c:spPr></c:sideWall><c:backWall><c:thickness val="0"/><c:spPr><a:solidFill><a:srgbClr val="F6F7F9"/></a:solidFill></c:spPr></c:backWall>` : ""}
+<c:plotArea><c:layout/>${tres ? `<c:bar3DChart><c:barDir val="col"/><c:grouping val="clustered"/><c:varyColors val="0"/>${ser}<c:gapWidth val="60"/><c:shape val="${est === "cilindro" ? "cylinder" : "box"}"/><c:axId val="50010001"/><c:axId val="50010002"/></c:bar3DChart>` : `<c:barChart><c:barDir val="col"/><c:grouping val="clustered"/><c:varyColors val="0"/>${ser}<c:gapWidth val="30"/><c:axId val="50010001"/><c:axId val="50010002"/></c:barChart>`}
 <c:catAx><c:axId val="50010001"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="b"/><c:numFmt formatCode="General" sourceLinked="0"/><c:majorTickMark val="none"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/>${lin}${tx(n > 60 ? 700 : 800, "595959", true)}<c:crossAx val="50010002"/><c:crosses val="autoZero"/><c:auto val="1"/><c:lblAlgn val="ctr"/><c:lblOffset val="100"/><c:tickLblSkip val="1"/><c:noMultiLvlLbl val="0"/></c:catAx>
 <c:valAx><c:axId val="50010002"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="l"/><c:majorGridlines>${lin}</c:majorGridlines><c:numFmt formatCode="General" sourceLinked="0"/><c:majorTickMark val="none"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/><c:spPr><a:ln><a:noFill/></a:ln></c:spPr>${tx(800, "595959")}<c:crossAx val="50010001"/><c:crosses val="autoZero"/><c:crossBetween val="between"/></c:valAx>
 <c:spPr><a:noFill/></c:spPr></c:plotArea><c:legend><c:legendPos val="b"/><c:overlay val="0"/>${tx(800, "595959")}</c:legend><c:plotVisOnly val="1"/><c:dispBlanksAs val="gap"/></c:chart>
@@ -6777,6 +6835,7 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
           <div class="fila"><div class="campo" style="flex:0 0 190px"><label>Fecha de la presentación</label><input class="inp" type="date" data-k="fecha" value="${esc(S.fecha)}"></div>
             <div class="campo" style="flex:0 0 190px"><label>Gráfica de actos: desde la semana</label><input class="inp" data-k="g1" value="${esc(S.g1)}" placeholder="2025-26"><span class="ayuda">Año-semana, p. ej. 2025-26</span></div>
             <div class="campo" style="flex:0 0 190px"><label>Gráfica de accidentes: desde</label><input class="inp" data-k="g2" value="${esc(S.g2)}" placeholder="2025-16"></div>
+            <div class="campo" style="flex:0 0 200px"><label>Estilo de las gráficas</label><select class="inp" data-k="estBar">${this.EST_BAR.map(([k, t]) => `<option value="${k}" ${S.estBar === k ? "selected" : ""}>${t}</option>`).join("")}</select></div>
             <div class="campo"><label>Tarjetas marcadas de la semana</label><div>${lista("Actos inseguros", C.actos, "rojo")}${lista("Condiciones inseguras", C.conds, "azul")}${C.actos.length + C.conds.length ? "" : `<span class="muted peque">Ninguna todavía. Márcalas en <a href="#" id="e1Ir">Tarjetas y tendencias</a>.</span>`}</div></div></div>
         </div>
         <div class="cuadricula">
@@ -6856,7 +6915,7 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
 
   const TD = B.tend = {
     F: null, G: {},
-    base() { return { modo: "sem", f1: "", f2: "", acum: false, desde: "", hasta: "", fu: "", subg: "", obsDepto: "", uni: "", turno: "", ae: false, dim: "std", max: 8, titulo: "", intro: "", lams: Object.fromEntries(LAMS.map(l => [l[0], true])) }; },
+    base() { return { estBar: "plana", estPie: "plano", modo: "sem", f1: "", f2: "", acum: false, desde: "", hasta: "", fu: "", subg: "", obsDepto: "", uni: "", turno: "", ae: false, dim: "std", max: 8, titulo: "", intro: "", lams: Object.fromEntries(LAMS.map(l => [l[0], true])) }; },
     esDeb: c => /^DEBIL/i.test(c.si || ""), esCum: c => /^CUMPLE/i.test(c.si || ""),
     pasa(c, F) {
       if (F.fu && !String(c.fu || "").split(",").includes(F.fu)) return false;
@@ -6913,7 +6972,7 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
       const dep = par("obsDepto", 12); dep.series[0].cols = dep.cats.map(k => U.norm(k).includes("SEGURIDAD INDUSTRIAL") ? "7A0019" : ROJO); dep.series[1].cols = dep.cats.map(k => U.norm(k).includes("SEGURIDAD INDUSTRIAL") ? "2E7D32" : "9CCB5E");
       const ant = !F.acum && rango.length > 1 ? porSem[rango[rango.length - 2]] : null;
       return {
-        W, nS, rango, L, etq: PER.etq, corto: PER.corto, n: L.length, deb: deb.length, cum: cum.length, grupos, dim: F.dim, debs: deb,
+        W, nS, rango, L, etq: PER.etq, corto: PER.corto, estBar: F.estBar || "plana", estPie: F.estPie || "plano", n: L.length, deb: deb.length, cum: cum.length, grupos, dim: F.dim, debs: deb,
         titulo: F.titulo || "Estado actual", intro: F.intro || this.introDef(), top: (G.top || []).filter(x => x && x.id), lams: F.lams || {}, encG: G.enc || "", txEvolG: G.txEvol || "",
         evol: { titulo: "Observaciones de Líderes en Campo por semana", cats: rango.map(et), etq: true, series: [{ n: "OBSERVACIONES", col: VERDE, v: rango.map(s => porSem[s].length) }, { n: "CUMPLEN LA EXPECTATIVA", col: "9CCB5E", v: rango.map(s => porSem[s].filter(this.esCum).length) }, { n: "DEBILIDADES", col: ROJO, v: rango.map(s => porSem[s].filter(this.esDeb).length) }] },
         txEvol: `En **${PER.etq}** se registraron **${L.length} observaciones**: ${cum.length} cumplieron la expectativa (${pct(cum.length, L.length)}) y **${deb.length} fueron debilidades (${pct(deb.length, L.length)})**.` +
@@ -6936,7 +6995,7 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
         c(y + hs[0] + gap, hs[1], "EAF6EC", "8CCB9B", VERDE, M.cum, ["Cumplieron", "la expectativa", "(" + pct(M.cum, M.n) + ")"]),
         c(y + hs[0] + hs[1] + 2 * gap, hs[2], "FDECEC", "F2A9A9", ROJO, M.deb, ["Debilidades", "(" + pct(M.deb, M.n) + ")"]));
     },
-    pastel(M, x, y, w, nombres) { return { k: "g", tipo: "pie", x, y, w, h: w, nombres, titulo: "", cats: M.grupos.map(g => g.n), series: [{ n: "Debilidades", v: M.grupos.map(g => g.v), cols: M.grupos.map(g => g.col) }] }; },
+    pastel(M, x, y, w, nombres) { return { k: "g", tipo: "pie", est: M.estPie, centro: "debilidades", x, y, w, h: w, nombres, titulo: "", cats: M.grupos.map(g => g.n), series: [{ n: "Debilidades", v: M.grupos.map(g => g.v), cols: M.grupos.map(g => g.col) }] }; },
     lista(M, x, y, w, alto, sz) {
       const n = M.grupos.length || 1, paso = Math.min(30, alto / n), els = [];
       M.grupos.forEach((g, i) => {
@@ -6967,7 +7026,7 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
 
     /* ------------------------------------------------------------ laminas horizontales (960 x 540, fondo de la E+1) */
     laminas(M) {
-      const L = [], on = k => M.lams[k] !== false, g = (o, x, y, w, h) => Object.assign({ k: "g", x, y, w, h }, o);
+      const L = [], on = k => M.lams[k] !== false, g = (o, x, y, w, h) => Object.assign({ k: "g", x, y, w, h, est: M.estBar }, o);
       const encabezado = M.encG || (M.dim === "std" ? `Los comportamientos más peligrosos registrados en ${M.etq} son:` : `Debilidades por ${DIMS[M.dim].toLowerCase()} en ${M.etq}:`);
       if (on("estado")) {
         const a = E1.ajustar(M.intro, 640, 70, 17, 11);
@@ -7049,7 +7108,9 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
           <div class="fila">
             ${sel("fu", "Archivo", [["SI", "Seguridad Industrial (SEGIND)"], ["AE", "Alta energía"]], "Ambos archivos")}
             <div class="campo" style="flex:1 1 200px"><label>Graficar las debilidades por</label><select class="inp" data-f="dim">${Object.entries(DIMS).map(([k, t]) => `<option value="${k}" ${F.dim === k ? "selected" : ""}>${t}</option>`).join("")}</select></div>
-            <div class="campo" style="flex:0 0 130px"><label>Rebanadas (máx.)</label><input class="inp" type="number" min="3" max="12" data-f="max" value="${esc(F.max)}"></div></div>
+            <div class="campo" style="flex:0 0 130px"><label>Rebanadas (máx.)</label><input class="inp" type="number" min="3" max="12" data-f="max" value="${esc(F.max)}"></div>
+            <div class="campo" style="flex:1 1 190px"><label>Estilo de las barras</label><select class="inp" data-f="estBar">${E1.EST_BAR.map(([k, t]) => `<option value="${k}" ${(F.estBar || "plana") === k ? "selected" : ""}>${t}</option>`).join("")}</select></div>
+            <div class="campo" style="flex:1 1 190px"><label>Estilo del pastel</label><select class="inp" data-f="estPie">${E1.EST_PIE.map(([k, t]) => `<option value="${k}" ${(F.estPie || "plano") === k ? "selected" : ""}>${t}</option>`).join("")}</select></div></div>
           <div class="fila">${sel("subg", "Subgerencia observada", ops("subg"), "Todas")}${sel("obsDepto", "Departamento observado", ops("obsDepto"), "Todos")}${sel("uni", "Unidad", ops("uni"), "Todas")}${sel("turno", "Turno", ops("turno"), "Todos")}
             <label class="chip-ali" style="margin:0 0 14px"><input type="checkbox" data-f="ae" ${F.ae ? "checked" : ""}><span>Solo con peligros de alta energía</span></label></div>
           <div class="tj-kpis" style="margin:2px 0 12px"><div><b>${M.n}</b><span>observaciones en ${esc(M.etq)}${F.acum && M.n !== cruda.length ? " (de " + cruda.length + " del periodo)" : ""}</span></div><div><b style="color:var(--verde,#1E6B4A)">${M.cum}</b><span>cumplieron la expectativa (${pct(M.cum, M.n)})</span></div><div><b style="color:var(--rojo)">${M.deb}</b><span>debilidades (${pct(M.deb, M.n)})</span></div><div><b>${M.rango.length}</b><span>semana(s) en las tendencias${F.acum ? "" : " · totales y TOP de " + esc(M.etq)}</span></div></div>
@@ -8904,7 +8965,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "4.10.1", servidorViejo: false,
+  info: {}, VERSION: "4.10.2", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -9091,7 +9152,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "procedimientos" ? '<span class="contador oculto" id="cntProc"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.10.1")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.10.2")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
