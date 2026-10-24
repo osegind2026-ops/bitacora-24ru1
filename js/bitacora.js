@@ -803,7 +803,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.10", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.10.1", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -966,6 +966,14 @@ B.local = {
         const gk = String(b.clave || ""), gkb = gk.replace(/:(RE|ON)$/, "");
         if (gk !== "cfg" && gk !== "diacfg" && !/^\d{4}-\d{2}$/.test(gkb) && !/^dia:\d{4}-\d{2}-\d{2}(_\d{4}-\d{2}-\d{2})?:(AE|SI|AS)$/.test(gkb) && !/^rango:\d{4}-\d{2}(-\d{2})?:\d{4}-\d{2}(-\d{2})?$/.test(gkb)) throw new Error("Clave no válida.");
         T.graf[gk] = Object.assign({}, b.datos, { por: s.ini, fh: ahora() });
+        return fin();
+      }
+      case "renombrar": {
+        soloEd(); semOk();
+        const mp = b.mapa || {}, L = await leerSem(sem);
+        for (const c of L) if (mp[c.id]) c.id = mp[c.id];
+        await this.escribir("tarjetas_" + sem, L);
+        for (const k of ["marcas", "envios", "noAplica", "fijas"]) for (const [a, n] of Object.entries(mp)) if (T[k] && a in T[k]) { T[k][n] = T[k][a]; delete T[k][a]; }
         return fin();
       }
       case "semGuardar": {
@@ -5814,6 +5822,22 @@ V.hoja = {
     },
     // huella de una tarjeta: RPE + fecha de observacion + inicio de "que paso" (para reconocerla entre archivos)
     llave(c) { return [U.ini(c.rpe), String(c.fobs || "").slice(0, 10), U.norm(c.qp || c.doc).replace(/[^A-Z0-9]/g, "").slice(0, 40)].join("|"); },
+    // ultimo consecutivo de las tarjetas de Operacion Normal sin Id de una semana ("2026-41-07" -> 7)
+    ultimoON(L, sem) { return L.reduce((m, c) => { const x = new RegExp("^" + sem + "-(\\d+)$").exec(String(c.id)); return x ? Math.max(m, +x[1]) : m; }, 0); },
+    // las que se cargaron con la clave anterior ("ON-14WELR8") pasan a su numero legible, con sus marcas y envios
+    async migrarON() {
+      if (this._migrado || !this.datos || !this.datos.editor || B.modoLocal) return; this._migrado = true;
+      for (const [sem, w] of Object.entries(this.datos.semanas || {})) {
+        if (!w.on) continue;
+        const L = await this.semana(sem, true), viejas = L.filter(c => /^ON-/.test(String(c.id))); if (!viejas.length) continue;
+        let n = this.ultimoON(L, sem); const mapa = {};
+        for (const c of viejas.sort((a, b) => String(a.fobs).localeCompare(String(b.fobs)))) mapa[c.id] = sem + "-" + pad(++n);
+        try {
+          await this.llamar("renombrar", { sem, mapa }); delete this.cartas[sem];
+          for (const k of ["marcas", "envios", "noAplica"]) { const d = this.datos[k] || {}; for (const [a, b] of Object.entries(mapa)) if (a in d) { d[b] = d[a]; delete d[a]; } }
+        } catch (e) { console.warn("No se pudieron renombrar las tarjetas de la semana " + sem, e); }
+      }
+    },
     huella(c) { let h = 0x811c9dc5; for (const ch of this.llave(c)) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619) >>> 0; } return h.toString(36).toUpperCase(); },
     // Operacion Normal: cada tarjeta va en la semana de su columna "Sem". Si ya estaba (vino en el Excel de Recarga) se usa su
     // Id y sus datos, y se quita de la semana donde estaba. Devuelve { sem: {tarjetas, quitar} } y cuantas ya estaban.
@@ -5822,15 +5846,17 @@ V.hoja = {
       for (const s of Object.keys(this.datos.semanas || {})) for (const c of await this.semana(s, true)) idx.set(this.llave(c), { c, s });
       const r = {}; let ya = 0;
       for (const [sem, L] of Object.entries(porSem)) {
-        const q = {}, out = [];
+        const q = {}, out = [], nuevas = [];
         for (const c of L) {
           const m = idx.get(this.llave(c));
-          if (!m) { out.push(c); continue; }
+          if (!m) { nuevas.push(c); continue; }
           ya++;
           const u = Object.assign({}, m.c); for (const k in c) if (k !== "id" && k !== "fcap" && c[k] != null && String(c[k]) !== "" && !(k in u && typeof c[k] === "object")) u[k] = c[k];
           u.fu = [...new Set(String(m.c.fu || "").split(",").concat(String(c.fu || "").split(",")).filter(Boolean))].join(",");
           out.push(u); if (m.s !== sem) (q[m.s] = q[m.s] || []).push(u.id);
         }
+        let n = this.ultimoON(await this.semana(sem, true), sem);
+        for (const c of nuevas) { c.id = sem + "-" + pad(++n); out.push(c); }
         r[sem] = { tarjetas: out, quitar: q };
       }
       return { r, ya };
@@ -6031,7 +6057,7 @@ V.hoja = {
       this.c = c;
       c.innerHTML = `<div class="vacio"><span class="giro" style="display:inline-block"></span></div>`;
       const n = ++this._n;
-      TJ.cargar().then(() => { if (n === this._n && B.app.ruta === "tarjetas") this.pinta(); })
+      TJ.cargar().then(() => TJ.migrarON()).then(() => { if (n === this._n && B.app.ruta === "tarjetas") this.pinta(); })
         .catch(e => { c.innerHTML = `<div class="aviso r">${B.ico("alerta")}<div>${esc(e.message)}</div></div>`; });
     },
     async recarga() { await TJ.cargar(); if (B.dom.esSup()) { try { await B.api.recargar(); B.app.contadores(); } catch (e) { } } return this.pinta(); },
@@ -6205,7 +6231,7 @@ V.hoja = {
                 delete TJ.cartas[sem]; for (const s2 of Object.keys(U2[sem].quitar)) delete TJ.cartas[s2]; this.sem = sem;
                 res.push(`<b>${esc(f.name)}</b> → <b>Operación Normal</b> (${arch}), semana ${+sem.split("-")[1]}: ${r.nuevas} nuevas, ${r.actualizadas} ya estaban`);
               }
-              if (ya) res.push(`${ya} de esas tarjetas ya venían en el Excel de Recarga (como Operación Normal): se reconocieron y no se duplicaron.`);
+              if (ya) res.push(`${ya} de esas tarjetas ya estaban cargadas (del Excel de Recarga, como Operación Normal, o de una carga anterior): se reconocieron y no se duplicaron.`);
             } else for (const sem of Object.keys(porSem).sort()) {
               const r = await TJ.llamar("importar", { sem, tarjetas: porSem[sem] });
               delete TJ.cartas[sem]; this.sem = sem;
@@ -6401,7 +6427,7 @@ V.hoja = {
   const AZUL = "4472C4", NARANJA = "ED7D31", GRIS = "A5A5A5";
 
   const E1 = B.e1 = {
-    S: null, W: null, histEd: null, tpSel: "",
+    S: null, W: null, histEd: null, tpSel: "", editable: false,
     /* Hay una E+1 de Recarga (24RU1) y otra de Operacion Normal: cada una con sus datos por semana, su historial y solo sus tarjetas.
        Las dos parten del mismo historial anterior a la recarga (B.E1_SEMILLA). */
     tp() { return this.tpSel || (TJ.periodo === "ON" ? "ON" : "RE"); },
@@ -6601,7 +6627,7 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
       }
       if (e.k === "im") return `<img class="e" src="${esc(e.src)}" alt="" style="left:${e.x}pt;top:${e.y}pt;width:${e.w}pt;height:${e.h}pt;object-fit:contain">`;
       const p = e.pad || [0, 0, 0, 0];
-      return `<div class="e" style="left:${e.x}pt;top:${e.y}pt;width:${e.w}pt;height:${e.h}pt;padding:${p[1]}pt ${p[2]}pt ${p[3]}pt ${p[0]}pt;${e.fill ? "background:#" + e.fill + ";" : ""}${e.borde ? "border:.75pt dashed #" + e.borde + ";" : ""}${e.bs ? "border:1pt solid #" + e.bs + ";" : ""}${e.rad === "o" ? "border-radius:50%;" : e.rad ? "border-radius:" + e.rad + "pt;" : ""}${e.anc === "m" ? "display:flex;flex-direction:column;justify-content:center;" : ""}">${e.pars.map(pa =>
+      return `<div class="e"${this.editable && e.ed ? ` contenteditable="true" spellcheck="true" data-e="${esc(e.ed)}"` : ""} style="left:${e.x}pt;top:${e.y}pt;width:${e.w}pt;height:${e.h}pt;padding:${p[1]}pt ${p[2]}pt ${p[3]}pt ${p[0]}pt;${e.fill ? "background:#" + e.fill + ";" : ""}${e.borde ? "border:.75pt dashed #" + e.borde + ";" : ""}${e.bs ? "border:1pt solid #" + e.bs + ";" : ""}${e.rad === "o" ? "border-radius:50%;" : e.rad ? "border-radius:" + e.rad + "pt;" : ""}${e.anc === "m" ? "display:flex;flex-direction:column;justify-content:center;" : ""}">${e.pars.map(pa =>
         `<p style="text-align:${{ l: "left", c: "center", j: "justify", r: "right" }[pa.al]}">${pa.runs.map(r => this.span(r)).join("")}</p>`).join("")}</div>`;
     },
     fondo(n) { return new URL("img/e1_" + n + ".jpg", location.href).href; },
@@ -6888,7 +6914,7 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
       const ant = !F.acum && rango.length > 1 ? porSem[rango[rango.length - 2]] : null;
       return {
         W, nS, rango, L, etq: PER.etq, corto: PER.corto, n: L.length, deb: deb.length, cum: cum.length, grupos, dim: F.dim, debs: deb,
-        titulo: F.titulo || "Estado actual", intro: F.intro || this.introDef(), top: (G.top || []).filter(x => x && x.id), lams: F.lams || {},
+        titulo: F.titulo || "Estado actual", intro: F.intro || this.introDef(), top: (G.top || []).filter(x => x && x.id), lams: F.lams || {}, encG: G.enc || "", txEvolG: G.txEvol || "",
         evol: { titulo: "Observaciones de Líderes en Campo por semana", cats: rango.map(et), etq: true, series: [{ n: "OBSERVACIONES", col: VERDE, v: rango.map(s => porSem[s].length) }, { n: "CUMPLEN LA EXPECTATIVA", col: "9CCB5E", v: rango.map(s => porSem[s].filter(this.esCum).length) }, { n: "DEBILIDADES", col: ROJO, v: rango.map(s => porSem[s].filter(this.esDeb).length) }] },
         txEvol: `En **${PER.etq}** se registraron **${L.length} observaciones**: ${cum.length} cumplieron la expectativa (${pct(cum.length, L.length)}) y **${deb.length} fueron debilidades (${pct(deb.length, L.length)})**.` +
           (ant ? ` En la semana anterior las debilidades fueron ${ant.filter(this.esDeb).length} de ${ant.length} (${pct(ant.filter(this.esDeb).length, ant.length)}).` : ""),
@@ -6932,25 +6958,25 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
         const a = E1.ajustar(r.act, cw[2] - 16, hFila - 6, sz, 8), b = E1.ajustar(r.riesgo, cw[3] - 16, hFila - 6, sz, 8);
         els.push(T(x, yy, w, hFila, [], { fill: i < 3 ? "FDECEC" : "FEF1DF" }), T(cx[0] + (cw[0] - d) / 2, yy + (hFila - d) / 2, d, d, [P("c", [R(i + 1, NS, d * 0.55, { b: 1, col: "FFFFFF" })])], { fill: col, rad: "o", anc: "m" }),
           T(cx[1], yy, cw[1], hFila, [P("c", [R(r.id, NS, sz + 4, { b: 1, col })])], { anc: "m" }),
-          T(cx[2] + 8, yy, cw[2] - 16, hFila, [P("l", [R(r.act, NS, a.sz, { col: TXT })])], { anc: "m" }), T(cx[3] + 8, yy, cw[3] - 16, hFila, [P("l", [R(r.riesgo, NS, b.sz, { b: 1, col })])], { anc: "m" }));
+          T(cx[2] + 8, yy, cw[2] - 16, hFila, [P("l", [R(r.act, NS, a.sz, { col: TXT })])], { anc: "m", ed: "top." + i + ".act" }), T(cx[3] + 8, yy, cw[3] - 16, hFila, [P("l", [R(r.riesgo, NS, b.sz, { b: 1, col })])], { ed: "top." + i + ".riesgo", anc: "m" }));
       });
       return els;
     },
     titulo(t, sub) { return [T(62, 20, 700, 50, [P("l", [R(t, NS, 34, { b: 1, col: VERDE })])])].concat(sub ? [T(64, 66, 700, 22, [P("l", [R(sub, NS, 14, { col: "595959" })])])] : []); },
-    nota(txt, y) { const a = E1.ajustar(txt, 826, 58, 14, 9); return T(60, y, 840, Math.min(66, a.h + 12), [P("j", E1.runs(txt, { f: "Arial", sz: a.sz }))], { fill: "EDEDED", rad: 4, pad: [8, 6, 8, 6] }); },
+    nota(txt, y) { const a = E1.ajustar(txt, 826, 58, 14, 9); return T(60, y, 840, Math.min(66, a.h + 12), [P("j", E1.runs(txt, { f: "Arial", sz: a.sz }))], { fill: "EDEDED", rad: 4, pad: [8, 6, 8, 6], ed: "txEvol" }); },
 
     /* ------------------------------------------------------------ laminas horizontales (960 x 540, fondo de la E+1) */
     laminas(M) {
       const L = [], on = k => M.lams[k] !== false, g = (o, x, y, w, h) => Object.assign({ k: "g", x, y, w, h }, o);
-      const encabezado = M.dim === "std" ? `Los comportamientos más peligrosos registrados en ${M.etq} son:` : `Debilidades por ${DIMS[M.dim].toLowerCase()} en ${M.etq}:`;
+      const encabezado = M.encG || (M.dim === "std" ? `Los comportamientos más peligrosos registrados en ${M.etq} son:` : `Debilidades por ${DIMS[M.dim].toLowerCase()} en ${M.etq}:`);
       if (on("estado")) {
         const a = E1.ajustar(M.intro, 640, 70, 17, 11);
-        L.push({ fondo: "interior", els: [T(62, 18, 640, 54, [P("l", [R(M.titulo, NS, 40, { b: 1, col: VERDE })])]), T(64, 76, 640, 74, [P("l", [R(M.intro, NS, a.sz, { col: TXT })])])]
+        L.push({ fondo: "interior", els: [T(62, 18, 640, 54, [P("l", [R(M.titulo, NS, 40, { b: 1, col: VERDE })])], { ed: "titulo" }), T(64, 76, 640, 74, [P("l", [R(M.intro, NS, a.sz, { col: TXT })])], { ed: "intro" })]
           .concat(this.cajas(M, 44, 180, 233), M.deb ? [this.pastel(M, 286, 162, 296)] : [T(286, 280, 296, 40, [P("c", [R("Sin debilidades registradas", NS, 14, { col: "595959" })])])],
-            [T(592, 158, 340, 46, [P("l", [R(encabezado, NS, 16, { b: 1, col: VERDE })])])], this.lista(M, 592, 208, 340, 262, 13)) });
+            [T(592, 158, 340, 46, [P("l", [R(encabezado, NS, 16, { b: 1, col: VERDE })])], { ed: "enc" })], this.lista(M, 592, 208, 340, 262, 13)) });
       }
       if (on("top") && M.top.length) L.push({ fondo: "interior", els: this.titulo("Hallazgos " + M.etq.replace(/^el /, "del ").replace(/^(la|las) /, "de $1 "), "Debilidades con mayor potencial de consecuencia").concat(this.tablaTop(M, 46, 96, 868, Math.min(62, (360 - 2 * M.top.length) / M.top.length), 13)) });
-      if (on("evol")) L.push({ fondo: "interior", els: this.titulo("Tendencia semana a semana", M.rangoTxt).concat([g(M.evol, 45, 92, 870, 312), this.nota(M.txEvol, 414)]) });
+      if (on("evol")) L.push({ fondo: "interior", els: this.titulo("Tendencia semana a semana", M.rangoTxt).concat([g(M.evol, 45, 92, 870, 312), this.nota(M.txEvolG || M.txEvol, 414)]) });
       if (on("std") && M.stdSem.cats.length) L.push({ fondo: "interior", els: this.titulo(DIMS[M.dim] + " entre semanas", "Debilidades registradas en cada semana").concat([g(M.stdSem, 45, 92, 870, 390)]) });
       if (on("depto") && M.depto.cats.length) L.push({ fondo: "interior", els: this.titulo("Por departamento observado", M.rangoTxt + " · Seguridad Industrial en tono oscuro").concat([g(M.depto, 45, 92, 870, 390)]) });
       if (on("lugar")) L.push({ fondo: "interior", els: this.titulo("Dónde y cuándo", M.rangoTxt + " · debilidades y observaciones que cumplen").concat([g(M.turno, 40, 100, 250, 370), g(M.uni, 300, 100, 250, 370), g(M.edif, 560, 100, 370, 370)]) });
@@ -6958,8 +6984,8 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
     },
     /* ------------------------------------------------------------ imagen vertical (540 x 960) para WhatsApp */
     vertical(M) {
-      const a = E1.ajustar(M.intro, 440, 84, 14.5, 10), els = [T(14, 14, 10, 116, [], { fill: VERDE }), T(42, 20, 300, 50, [P("l", [R(M.titulo, NS, 36, { b: 1, col: VERDE })])]),
-        { k: "im", src: B.imgUrl("ofIzq"), x: 356, y: 18, w: 168, h: 34 }, T(44, 72, 440, 86, [P("l", [R(M.intro, NS, a.sz, { col: TXT })])])]
+      const a = E1.ajustar(M.intro, 440, 84, 14.5, 10), els = [T(14, 14, 10, 116, [], { fill: VERDE }), T(42, 20, 300, 50, [P("l", [R(M.titulo, NS, 36, { b: 1, col: VERDE })])], { ed: "titulo" }),
+        { k: "im", src: B.imgUrl("ofIzq"), x: 356, y: 18, w: 168, h: 34 }, T(44, 72, 440, 86, [P("l", [R(M.intro, NS, a.sz, { col: TXT })])], { ed: "intro" })]
         .concat(this.cajas(M, 16, 170, 138, true), M.deb ? [this.pastel(M, 160, 158, 366, true)] : []);
       if (M.top.length && M.lams.top !== false) els.push(...this.tablaTop(M, 12, 532, 516, Math.min(54, (290 - 2 * M.top.length) / M.top.length), 11));
       else els.push(T(16, 536, 508, 30, [P("l", [R(`Debilidades ${M.etq.replace(/^el /, "del ").replace(/^(la|las) /, "de $1 ")} por ${DIMS[M.dim].toLowerCase()}:`, NS, 14, { b: 1, col: VERDE })])]), ...this.lista(M, 16, 570, 508, 300, 12.5));
@@ -7033,19 +7059,34 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
         <div class="tarjeta"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start"><div><h2 style="margin:0;font-size:17px">TOP ${G.top.length} · hallazgos con mayor potencial de consecuencia</h2><p class="muted peque" style="margin:4px 0 0">Se proponen las debilidades que marcaste como acto o condición insegura y las de alta energía. Cambia cuáles van, su orden y resume los textos.</p></div>
             <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn chico sec" id="tdMas" ${G.top.length >= 5 || !M.debs.length ? "disabled" : ""}>${B.ico("mas")} Agregar</button><button class="btn chico sec" id="tdProp">${B.ico("reutilizar")} Proponer de nuevo</button></div></div>
           <div style="margin-top:12px">${G.top.length ? G.top.map(filaTop).join("") : `<p class="muted" style="margin:0">Sin hallazgos en el TOP: la lámina no se incluye.${M.debs.length ? "" : " No hay debilidades con este filtro."}</p>`}</div></div>
-        <div class="tarjeta"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start"><div><h2 style="margin:0;font-size:17px">Vista previa</h2><p class="muted peque" style="margin:4px 0 0">En PowerPoint los textos y las gráficas se pueden editar (clic derecho en la gráfica → Modificar datos).</p></div>
+        <div class="tarjeta"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start"><div><h2 style="margin:0;font-size:17px">Vista previa</h2><p class="muted peque" style="margin:4px 0 0"><b>Toca cualquier título o texto de la vista previa para corregirlo ahí mismo</b>; se guarda con <b>Guardar</b>. En PowerPoint los textos y las gráficas también se pueden editar (clic derecho en la gráfica → Modificar datos).</p></div>
             <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn sec" id="tdGuardar">${B.ico("ok")} Guardar</button><button class="btn" id="tdPdf">${B.ico("pdf")} ${B.modoLocal ? "Guardar PDF" : "Generar PDF"}</button><button class="btn dorado" id="tdPptx">${B.ico("descargar")} PowerPoint (.pptx)</button>
               <button class="btn sec" id="tdPngH" title="La lámina «Estado actual» como imagen 16:9">${B.ico("descargar")} Imagen horizontal</button><button class="btn sec" id="tdPngV" title="Infografía vertical para WhatsApp">${B.ico("descargar")} Imagen vertical</button></div></div>
-          <style>${E1.css(".e1-doc")}</style><div class="e1-prev" style="margin-top:12px"><div class="e1-doc" id="tdDoc"></div></div>
+          <style>${E1.css(".e1-doc")} #tdDoc [data-e],#tdVert [data-e]{cursor:text;border-radius:3px} #tdDoc [data-e]:hover,#tdVert [data-e]:hover{outline:2px dashed rgba(100,116,139,.7);outline-offset:1px} #tdDoc [data-e]:focus,#tdVert [data-e]:focus{outline:3px solid #2563EB;outline-offset:1px;background-color:rgba(255,255,255,.55)}</style><div class="e1-prev" style="margin-top:12px"><div class="e1-doc" id="tdDoc"></div></div>
           <h3 style="font-size:13px;margin:16px 0 8px;color:var(--texto-2)">Imagen vertical (WhatsApp)</h3><div class="e1-doc" id="tdVert" style="width:auto"></div></div>`;
       const prev = async () => {
         const d = c.querySelector("#tdDoc"); if (!d) return;
         M = await this.modelo(F, G);
+        E1.editable = true;
         d.innerHTML = this.laminas(M).map(l => this.html(l)).join("") || `<p class="muted">No hay láminas marcadas.</p>`;
         d.style.zoom = Math.min(1, (d.parentNode.clientWidth - 2) / 1280);
         const v = c.querySelector("#tdVert"); v.innerHTML = this.html(this.vertical(M), 540, 960); v.style.zoom = Math.min(0.62, (d.parentNode.clientWidth - 2) / 720);
+        E1.editable = false;
       };
       const lento = U.debounce(prev, 500), repinta = () => Pv.pinta();
+      // correcciones escritas directo sobre la vista previa: se guardan en su dato (y en su casilla de arriba)
+      const poner = (k, v) => {
+        v = v.replace(/\s+/g, " ").trim(); const [a, i, f] = k.split(".");
+        if (a === "titulo" || a === "intro") { F[a] = v; const x = c.querySelector(`[data-x="${a}"]`); if (x) x.value = v; }
+        else if (a === "enc" || a === "txEvol") G[a] = v;
+        else if (a === "top" && G.top[+i]) { G.top[+i][f] = v; const x = c.querySelector(`[data-top="${i}"] [data-tk="${f}"]`); if (x) x.value = v; }
+      };
+      for (const caja of [c.querySelector("#tdDoc"), c.querySelector("#tdVert")]) {
+        caja.addEventListener("input", ev => { const el = ev.target.closest("[data-e]"); if (el) poner(el.dataset.e, el.innerText); });
+        caja.addEventListener("keydown", ev => { const el = ev.target.closest("[data-e]"); if (el && ev.key === "Enter") { ev.preventDefault(); el.blur(); } });
+        caja.addEventListener("paste", ev => { if (!ev.target.closest("[data-e]")) return; ev.preventDefault(); document.execCommand("insertText", false, (ev.clipboardData || window.clipboardData).getData("text/plain").replace(/\s+/g, " ")); });
+        caja.addEventListener("focusout", ev => { if (ev.relatedTarget && (c.querySelector("#tdDoc").contains(ev.relatedTarget) || c.querySelector("#tdVert").contains(ev.relatedTarget))) return; setTimeout(() => { const a = document.activeElement; if (!(a && a.closest && a.closest("#tdDoc,#tdVert"))) prev(); }, 0); });
+      }
       c.querySelectorAll("[data-f]").forEach(i => i.onchange = () => { const k = i.dataset.f; F[k] = i.type === "checkbox" ? i.checked : k === "max" ? Math.max(3, Math.min(12, +i.value || 8)) : i.value;
         if (k === "hasta") Pv.sem = F.hasta; if (k === "desde" && F.desde > F.hasta) F.hasta = F.desde; if (k === "hasta" && F.desde > F.hasta) F.desde = F.hasta;
         if (k === "f1" && F.f1 > F.f2) F.f2 = F.f1; if (k === "f2" && F.f1 > F.f2) F.f1 = F.f2; repinta(); });
@@ -7066,8 +7107,9 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
       const guardar = async callado => {
         try {
           const cfg = Object.assign({}, F); delete cfg.hasta; delete cfg.desde; delete cfg.f1; delete cfg.f2;
-          await TJ.llamar("grafGuardar", { clave: "cfg", datos: cfg }); await TJ.llamar("grafGuardar", { clave: gk, datos: { top: G.top } });
-          D.graf.cfg = JSON.parse(JSON.stringify(cfg)); D.graf[gk] = JSON.parse(JSON.stringify({ top: G.top }));
+          const dG = { top: G.top, enc: G.enc || "", txEvol: G.txEvol || "" };
+          await TJ.llamar("grafGuardar", { clave: "cfg", datos: cfg }); await TJ.llamar("grafGuardar", { clave: gk, datos: dG });
+          D.graf.cfg = JSON.parse(JSON.stringify(cfg)); D.graf[gk] = JSON.parse(JSON.stringify(dG));
           if (!callado) B.ui.toast("Configuración y TOP de " + esc(M.etq) + " guardados.", "ok"); return true;
         } catch (e) { B.ui.error(e); return false; }
       };
@@ -8862,7 +8904,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "4.10", servidorViejo: false,
+  info: {}, VERSION: "4.10.1", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -9049,7 +9091,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "procedimientos" ? '<span class="contador oculto" id="cntProc"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.10")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.10.1")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
