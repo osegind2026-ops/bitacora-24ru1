@@ -803,7 +803,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.9.4", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.10", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -827,7 +827,7 @@ B.local = {
      En el celular los datos llegan en el paquete de la PC; lo que se hace aqui se anota en pendientes y viaja a la PC. */
   async tarjLeer() {
     const T = (await this.leer("tarjetas")) || {};
-    for (const k of ["marcas", "sem", "hist", "cfg", "semanas", "graf", "correos", "envios", "ubic", "correoTpl", "noAplica"]) if (!T[k] || typeof T[k] !== "object") T[k] = {};
+    for (const k of ["marcas", "sem", "hist", "cfg", "semanas", "graf", "correos", "envios", "ubic", "correoTpl", "noAplica", "semON", "histON", "fijas"]) if (!T[k] || typeof T[k] !== "object") T[k] = {};
     T.decl = Array.isArray(T.decl) ? T.decl : [];
     for (const d of T.decl) if (!d.uid) d.uid = "d" + d.id;
     return T;
@@ -856,7 +856,7 @@ B.local = {
     switch (acc) {
       case "ver": {
         const r = { ok: true, editor: ed, esp: ed && !sup, editores: eds, cfg: T.cfg };
-        if (ed) Object.assign(r, { decl: T.decl, marcas: T.marcas, sem: T.sem, hist: T.hist, semanas: T.semanas, graf: T.graf, correos: T.correos, envios: T.envios, ubic: T.ubic, correoTpl: T.correoTpl, noAplica: T.noAplica });
+        if (ed) Object.assign(r, { decl: T.decl, marcas: T.marcas, sem: T.sem, hist: T.hist, semanas: T.semanas, graf: T.graf, correos: T.correos, envios: T.envios, ubic: T.ubic, correoTpl: T.correoTpl, noAplica: T.noAplica, semON: T.semON, histON: T.histON });
         else r.decl = T.decl.filter(x => U.ini(x.ini) === s.ini || x.est === "C").map(x => U.ini(x.ini) === s.ini ? x : { ini: x.ini, f: x.f, t: x.t, est: "C" });
         return r;
       }
@@ -868,9 +868,15 @@ B.local = {
       }
       case "importar": {
         soloEd(); semOk();
+        const plant = new Set((await this.leer("personal") || []).map(p => U.ini(p.rpe)));
+        const contar = (sm, LL) => { const rpes = {}; for (const c of LL) { const r1 = U.ini(c.rpe); if (plant.has(r1)) rpes[r1] = (rpes[r1] || 0) + 1; }
+          T.semanas[sm] = { n: LL.length, si: LL.filter(x => String(x.fu || "").includes("SI")).length, ae: LL.filter(x => String(x.fu || "").includes("AE")).length, on: LL.filter(x => U.norm(x.cond).includes("OPERACION NORMAL")).length, fh: ahora(), por: s.ini, rpes }; };
+        for (const [sq, ids] of Object.entries(b.quitar || {})) { if (!esSem(sq) || sq === sem) continue; const L2 = await leerSem(sq), n0 = L2.length, L3 = L2.filter(x => !(ids || []).map(String).includes(String(x.id))); if (L3.length !== n0) { await this.escribir("tarjetas_" + sq, L3); contar(sq, L3); } }
         const L = await leerSem(sem), idx = new Map(L.map(c => [String(c.id), c])); let nuevas = 0, act = 0;
         for (const c of b.tarjetas || []) {
           if (!c || !c.id) continue;
+          if (b.fijar) T.fijas[c.id] = sem;
+          else if (!idx.has(String(c.id)) && T.fijas[c.id] && T.fijas[c.id] !== sem) { act++; continue; }
           const e = idx.get(String(c.id));
           if (!e) { c.fu = c.fu || ""; L.push(c); idx.set(String(c.id), c); nuevas++; continue; }
           const fu = String(e.fu || "").split(",").filter(Boolean);
@@ -879,9 +885,7 @@ B.local = {
           e.fu = fu.join(","); act++;
         }
         await this.escribir("tarjetas_" + sem, L);
-        const plant = new Set((await this.leer("personal") || []).map(p => U.ini(p.rpe))), rpes = {};
-        for (const c of L) { const r1 = U.ini(c.rpe); if (plant.has(r1)) rpes[r1] = (rpes[r1] || 0) + 1; }
-        T.semanas[sem] = { n: L.length, si: L.filter(x => String(x.fu || "").includes("SI")).length, ae: L.filter(x => String(x.fu || "").includes("AE")).length, fh: ahora(), por: s.ini, rpes };
+        contar(sem, L);
         return fin({ nuevas, actualizadas: act, total: L.length });
       }
       case "rolEsp": {
@@ -959,15 +963,16 @@ B.local = {
       }
       case "grafGuardar": {
         soloEd();
-        const gk = String(b.clave || "");
-        if (gk !== "cfg" && gk !== "diacfg" && !/^\d{4}-\d{2}$/.test(gk) && !/^dia:\d{4}-\d{2}-\d{2}(_\d{4}-\d{2}-\d{2})?:(AE|SI|AS)$/.test(gk) && !/^rango:\d{4}-\d{2}(-\d{2})?:\d{4}-\d{2}(-\d{2})?$/.test(gk)) throw new Error("Clave no válida.");
+        const gk = String(b.clave || ""), gkb = gk.replace(/:(RE|ON)$/, "");
+        if (gk !== "cfg" && gk !== "diacfg" && !/^\d{4}-\d{2}$/.test(gkb) && !/^dia:\d{4}-\d{2}-\d{2}(_\d{4}-\d{2}-\d{2})?:(AE|SI|AS)$/.test(gkb) && !/^rango:\d{4}-\d{2}(-\d{2})?:\d{4}-\d{2}(-\d{2})?$/.test(gkb)) throw new Error("Clave no válida.");
         T.graf[gk] = Object.assign({}, b.datos, { por: s.ini, fh: ahora() });
         return fin();
       }
       case "semGuardar": {
         soloEd(); semOk();
-        T.sem[sem] = Object.assign({}, b.datos, { por: s.ini, fh: ahora() });
-        if (b.hist && typeof b.hist === "object") T.hist = b.hist;
+        const esON = b.tipo === "ON";
+        T[esON ? "semON" : "sem"][sem] = Object.assign({}, b.datos, { por: s.ini, fh: ahora() });
+        if (b.hist && typeof b.hist === "object") T[esON ? "histON" : "hist"] = b.hist;
         return fin();
       }
       case "cfgGuardar": {
@@ -5718,7 +5723,16 @@ V.hoja = {
     datos: null, cartas: {}, mias: null,
     llamar(accion, extra) { return B.api.llamar("tarjetas", Object.assign({ accion }, extra || {})); },
     async cargar() { this.datos = await this.llamar("ver"); return this.datos; },
-    async semana(sem) { if (!this.cartas[sem]) this.cartas[sem] = (await this.llamar("semana", { sem })).tarjetas; return this.cartas[sem]; },
+    /* Periodo que se ve en todo Lideres en Campo: "" = todas, "RE" = Recarga (24RU1), "ON" = Operacion Normal.
+       Cada tarjeta es de uno u otro por su Condicion Operativa ("Recarga/Paro" u "Operacion Normal"). */
+    periodo: (() => { try { const v = localStorage.getItem("b_tj_periodo"); return v === "RE" || v === "ON" ? v : ""; } catch (e) { return ""; } })(),
+    tipo(c) { return /OPERACION NORMAL/.test(U.norm(c && c.cond)) ? "ON" : "RE"; },
+    nomPeriodo(p) { return p === "ON" ? "Operación Normal" : p === "RE" ? "Recarga " + ((B.estado && B.estado.config && B.estado.config.proyecto) || "24RU1") : "Recarga y Operación Normal"; },
+    // tarjetas de una semana (del periodo elegido; todas = true trae las de los dos)
+    async semana(sem, todas) {
+      if (!this.cartas[sem]) this.cartas[sem] = (await this.llamar("semana", { sem })).tarjetas;
+      return todas || !this.periodo ? this.cartas[sem] : this.cartas[sem].filter(c => this.tipo(c) === this.periodo);
+    },
 
     /* ------------------------------------------------------------ semanas ISO (lunes a domingo) */
     semDe(fecha) {
@@ -5744,7 +5758,19 @@ V.hoja = {
         const i = enc.findIndex((h, j) => h && !usadas.has(j) && pref.some(p => h.startsWith(p)));
         if (i >= 0) { mapa[campo] = i; usadas.add(i); }
       }
-      if (mapa.id == null || mapa.autor == null || mapa.fcap == null) throw new Error("no tiene las columnas de las tarjetas Líderes en Campo (Id, Fecha de Captura, RPE y Nombre)");
+      // Operacion Normal: sin Id ni Fecha de Captura; trae "Sem" (semana del reporte) y los estandares sin el "T.4"
+      const on = mapa.id == null && enc.includes("SEM");
+      if (on) {
+        const libre = n => { const i = enc.findIndex((h, j) => !usadas.has(j) && h === n); if (i >= 0) usadas.add(i); return i >= 0 ? i : null; };
+        mapa.semC = libre("SEM");
+        if (mapa.std == null) { const i = enc.findIndex((h, j) => !usadas.has(j) && h.startsWith("ESTANDARES DE SEGURIDAD")); if (i >= 0) { mapa.std = i; usadas.add(i); } }
+        if (mapa.epp == null) { const i = libre("EPP"); if (i != null) mapa.epp = i; }
+        if (mapa.si == null) { const i = libre("SEGURIDAD INDUSTRIAL"); if (i != null) mapa.si = i; }
+      }
+      // si no se encontro la columna del resultado, la que solo dice "Debilidad" o "Cumple..."
+      if (mapa.si == null) { const i = enc.findIndex((h, j) => !usadas.has(j) && filas.slice(1, 60).some(f => /^DEBIL|^CUMPLE/i.test(String(f[j] || ""))) && filas.slice(1, 60).every(f => f[j] == null || /^(DEBIL|CUMPLE|N\/?A|$)/i.test(String(f[j]).trim()))); if (i >= 0) { mapa.si = i; usadas.add(i); } }
+      if (on ? (mapa.autor == null || mapa.fobs == null || mapa.semC == null) : (mapa.id == null || mapa.autor == null || mapa.fcap == null))
+        throw new Error("no tiene las columnas de las tarjetas Líderes en Campo (Id, Fecha de Captura, RPE y Nombre; o, de Operación Normal: Sem, Fecha de la Observación, RPE y Nombre)");
       // archivo de semanas anteriores sin la columna Edificio: los encabezados vienen recorridos un lugar
       const t2 = enc.findIndex((h, j) => h === "TURNO" && j !== mapa.turno);
       if (mapa.edif == null && t2 >= 0 && mapa.uni != null && mapa.niv != null) {
@@ -5757,13 +5783,26 @@ V.hoja = {
         const c = { fu }, x = {};
         for (const k in mapa) { const v = f[mapa[k]]; if (v != null && String(v).trim() !== "") c[k] = /^f(cap|obs)$/.test(k) ? fechaXls(v) : String(v).replace(/ /g, " ").trim(); }
         f.forEach((v, j) => { if (!usadas.has(j) && v != null && String(v).trim() !== "" && filas[0][j]) x[String(filas[0][j]).replace(/ /g, " ").trim()] = String(v).trim(); });
-        if (!c.id || !c.fcap) continue;
-        c.id = String(parseInt(c.id, 10) || c.id);
+        if (on) {
+          if (!c.fobs || !c.autor) continue;
+          c.fobs = String(c.fobs).slice(0, 10); if (!c.fcap) c.fcap = c.fobs;
+          if (!c.cond) c.cond = "Operación Normal";
+        }
+        if (!(on ? c.fobs : c.id && c.fcap)) continue;
+        if (!on) c.id = String(parseInt(c.id, 10) || c.id);
         const m = /^\s*([A-Za-z0-9]{4,6})\s+(.+)$/.exec(c.autor || "");
         c.rpe = m ? m[1].toUpperCase() : ""; c.nom = m ? m[2].trim() : (c.autor || "");
         delete c.autor; delete c.meaSi;
         if (c.fobs) c.fobs = c.fobs.slice(0, 10);
         if (Object.keys(x).length) c.x = x;
+        if (on) {
+          // sin Id: una clave propia con RPE, fecha y lo que paso (si ya esta en el Excel de Recarga se usa su Id al importar)
+          c.id = "ON-" + TJ.huella(c);
+          const sc = parseInt(c.semC, 10), [y, mo] = c.fobs.split("-").map(Number);
+          c.sem = (sc <= 2 && mo === 12 ? y + 1 : sc >= 52 && mo === 1 ? y - 1 : y) + "-" + pad(sc);
+          (porSem[c.sem] = porSem[c.sem] || []).push(c);
+          continue;
+        }
         // manda la "Semana de Captura" del archivo (una tarjeta del lunes temprano puede venir en la semana anterior)
         let sem = this.semDe(c.fcap);
         const sc = parseInt(c.semC, 10), si = +sem.slice(5);
@@ -5771,7 +5810,30 @@ V.hoja = {
         c.sem = sem;
         (porSem[sem] = porSem[sem] || []).push(c);
       }
-      return { fu, porSem };
+      return { fu, porSem, on };
+    },
+    // huella de una tarjeta: RPE + fecha de observacion + inicio de "que paso" (para reconocerla entre archivos)
+    llave(c) { return [U.ini(c.rpe), String(c.fobs || "").slice(0, 10), U.norm(c.qp || c.doc).replace(/[^A-Z0-9]/g, "").slice(0, 40)].join("|"); },
+    huella(c) { let h = 0x811c9dc5; for (const ch of this.llave(c)) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619) >>> 0; } return h.toString(36).toUpperCase(); },
+    // Operacion Normal: cada tarjeta va en la semana de su columna "Sem". Si ya estaba (vino en el Excel de Recarga) se usa su
+    // Id y sus datos, y se quita de la semana donde estaba. Devuelve { sem: {tarjetas, quitar} } y cuantas ya estaban.
+    async unirON(porSem) {
+      const idx = new Map();
+      for (const s of Object.keys(this.datos.semanas || {})) for (const c of await this.semana(s, true)) idx.set(this.llave(c), { c, s });
+      const r = {}; let ya = 0;
+      for (const [sem, L] of Object.entries(porSem)) {
+        const q = {}, out = [];
+        for (const c of L) {
+          const m = idx.get(this.llave(c));
+          if (!m) { out.push(c); continue; }
+          ya++;
+          const u = Object.assign({}, m.c); for (const k in c) if (k !== "id" && k !== "fcap" && c[k] != null && String(c[k]) !== "" && !(k in u && typeof c[k] === "object")) u[k] = c[k];
+          u.fu = [...new Set(String(m.c.fu || "").split(",").concat(String(c.fu || "").split(",")).filter(Boolean))].join(",");
+          out.push(u); if (m.s !== sem) (q[m.s] = q[m.s] || []).push(u.id);
+        }
+        r[sem] = { tarjetas: out, quitar: q };
+      }
+      return { r, ya };
     },
 
     /* ------------------------------------------------------------ personal y marcador */
@@ -5988,7 +6050,9 @@ V.hoja = {
       const tabs = [["marcador", "Marcador"], ["mias", "Mis tarjetas"]].concat(!D.editor ? [] : comp ? [["tend", "Tarjetas y tendencias"], ["tarj", "Tarjetas y correos"], ["graf", "Gráficas y reportes"], ["e1", "Presentación E+1"], ["org", "Organigrama"]] : [["res", "Resumen"], ["org", "Organigrama"]]).concat(sup ? [["ajustes", "Ajustes"]] : D.editor && comp ? [["ajustes", "Semanas cargadas"]] : []);
       if (!tabs.some(x => x[0] === this.tab)) this.tab = this.tab === "tend" || this.tab === "e1" || this.tab === "graf" || this.tab === "tarj" ? "res" : this.tab === "res" ? "tend" : "marcador";
       c.innerHTML = `${B.modoMovil && D.editor ? `<div class="tj-modo"><span>${comp ? "<b>Vista completa</b>: trabajo remoto con todas las funciones." : "<b>Vista resumida</b> para celular."}</span><a href="#" id="tjModo">${comp ? "Cambiar a la vista resumida" : "Usar la vista completa (trabajo remoto)"}</a></div>` : ""}
+        ${D.editor ? `<div class="chips-ali" style="margin:0 0 10px;align-items:center"><span class="peque muted" style="margin-right:2px">Tarjetas de:</span>${[["RE", TJ.nomPeriodo("RE")], ["ON", "Operación Normal"], ["", "Todas"]].map(([k, t]) => `<label class="chip-ali"><input type="radio" name="tjPer" value="${k}" ${TJ.periodo === k ? "checked" : ""}><span>${t}</span></label>`).join("")}</div>` : ""}
         <div class="pestanas">${tabs.map(([k, t]) => `<button data-t="${k}" class="${k === this.tab ? "on" : ""}">${t}</button>`).join("")}</div><div id="tjCuerpo"></div>`;
+      c.querySelectorAll("[name=tjPer]").forEach(i => i.onchange = () => { TJ.periodo = i.value; try { localStorage.setItem("b_tj_periodo", i.value); } catch (e) { } this.pinta(); });
       const mo = c.querySelector("#tjModo"); if (mo) mo.onclick = e => { e.preventDefault(); try { localStorage.setItem("b_tj_completa", comp ? "0" : "1"); } catch (x) { } this.pinta(); };
       c.querySelectorAll(".pestanas button").forEach(b => b.onclick = () => { this.tab = b.dataset.t; this.pinta(); });
       const cu = c.querySelector("#tjCuerpo");
@@ -6107,7 +6171,7 @@ V.hoja = {
       const marc = L.filter(x => M[x.id] && M[x.id].m !== "D"), porRev = L.filter(x => !M[x.id] && sug.get(x.id).nivel === 2);
       const top = (t, l) => l.length ? `<div class="tj-top"><h4>${t}</h4>${l.slice(0, 4).map(([k, n]) => `<div class="tj-b"><span class="tj-bn">${esc(k)}</span><b>${n}</b></div>`).join("")}</div>` : "";
       const item = x => { const m = M[x.id], s = sug.get(x.id); return `<div class="tj-item" data-id="${esc(x.id)}"><div><b>#${esc(x.id)}</b> ${m ? `<span class="badge ${MARCA[m.m][0]}">${MARCA[m.m][1]}</span>` : `<span class="tj-sug ${s.tipo}">¿${s.tipo === "A" ? "Acto" : "Condición"}?</span>`} <span class="badge n">${esc(x.std || "")}</span>${s.fecha && s.fecha.grave ? ` <span class="badge r">⚠ fecha</span>` : ""}<p>${esc((x.qp || x.doc || "").slice(0, 170))}</p></div>${B.ico("ojo")}</div>`; };
-      c.innerHTML = `<div class="tarjeta">${cab("grafica", "g", "Resumen de la semana", `${L.length} tarjetas · ${D.semanas[sem].si} de Seguridad Industrial · ${D.semanas[sem].ae} con alta energía`, this.selSemana(semanas))}
+      c.innerHTML = `<div class="tarjeta">${cab("grafica", "g", "Resumen de la semana", `${L.length} tarjetas · ${L.filter(x => String(x.fu || "").includes("SI")).length} de Seguridad Industrial · ${L.filter(x => String(x.fu || "").includes("AE")).length} con alta energía${TJ.periodo ? " · " + TJ.nomPeriodo(TJ.periodo) : ""}`, this.selSemana(semanas))}
           <div class="tj-kpis"><div><b>${nSI}</b><span>hechas por S.I.</span></div><div><b>${lugar >= 0 ? (lugar + 1) + ".º" : "—"}</b><span>lugar de ${porDep.length} deptos.</span></div><div><b>${deb.length}</b><span>con debilidad en S.I.</span></div>
             <div><b style="color:var(--rojo)">${marc.filter(x => M[x.id].m === "A").length}</b><span>actos marcados</span></div><div><b style="color:var(--azul)">${marc.filter(x => M[x.id].m === "C").length}</b><span>condiciones marcadas</span></div></div>
           <div class="tj-tops" style="margin-top:14px">${top("Estándar con debilidad", TJ.contar(deb, x => x.std))}${top("EPP con debilidad", TJ.contar(deb.filter(x => x.epp), x => x.epp))}${top("Alta energía", TJ.contar(L.filter(x => x.ae === "Si"), x => x.energia))}${top("Dónde", TJ.contar(deb, x => [x.edif, x.niv].filter(Boolean).join(" ")))}</div>
@@ -6122,7 +6186,7 @@ V.hoja = {
 
     /* ------------------------------------------------------------ TARJETAS Y TENDENCIAS (supervisores y quien elabora la E+1) */
     selSemana(semanas) {
-      return `<select class="inp" id="tjSem" style="width:auto;min-width:230px">${semanas.map(s => `<option value="${s}" ${s === this.sem ? "selected" : ""}>${TJ.semTxt(s)} (${TJ.datos.semanas[s].n})</option>`).join("")}</select>`;
+      return `<select class="inp" id="tjSem" style="width:auto;min-width:230px">${semanas.map(s => `<option value="${s}" ${s === this.sem ? "selected" : ""}>${TJ.semTxt(s)} (${(w => w.on == null || !TJ.periodo ? w.n : TJ.periodo === "ON" ? w.on : w.n - w.on)(TJ.datos.semanas[s])})</option>`).join("")}</select>`;
     },
     botonExcel() { return `<label class="btn" style="cursor:pointer">${B.ico("subir")} Cargar Excel…<input type="file" id="tjArch" accept=".xlsx" multiple hidden></label>`; },
     activarExcel(c) {
@@ -6131,11 +6195,22 @@ V.hoja = {
         const res = [], err = [];
         for (const f of inp.files) {
           try {
-            const { fu, porSem } = TJ.leerExcel(await f.arrayBuffer(), f.name);
-            for (const sem of Object.keys(porSem).sort()) {
+            const { fu, porSem, on } = TJ.leerExcel(await f.arrayBuffer(), f.name);
+            const arch = fu === "SI" ? "Seguridad Industrial" : "alta energía";
+            if (on) {
+              // Operacion Normal: semana de la columna "Sem"; reconoce las que ya venian en el Excel de Recarga
+              const { r: U2, ya } = await TJ.unirON(porSem);
+              for (const sem of Object.keys(U2).sort()) {
+                const r = await TJ.llamar("importar", { sem, tarjetas: U2[sem].tarjetas, fijar: true, quitar: U2[sem].quitar });
+                delete TJ.cartas[sem]; for (const s2 of Object.keys(U2[sem].quitar)) delete TJ.cartas[s2]; this.sem = sem;
+                res.push(`<b>${esc(f.name)}</b> → <b>Operación Normal</b> (${arch}), semana ${+sem.split("-")[1]}: ${r.nuevas} nuevas, ${r.actualizadas} ya estaban`);
+              }
+              if (ya) res.push(`${ya} de esas tarjetas ya venían en el Excel de Recarga (como Operación Normal): se reconocieron y no se duplicaron.`);
+            } else for (const sem of Object.keys(porSem).sort()) {
               const r = await TJ.llamar("importar", { sem, tarjetas: porSem[sem] });
               delete TJ.cartas[sem]; this.sem = sem;
-              res.push(`<b>${esc(f.name)}</b> (${fu === "SI" ? "Seguridad Industrial" : "alta energía"}) → semana ${+sem.split("-")[1]}: ${r.nuevas} nuevas, ${r.actualizadas} ya estaban`);
+              const nON = porSem[sem].filter(c => TJ.tipo(c) === "ON").length;
+              res.push(`<b>${esc(f.name)}</b> → <b>${nON === porSem[sem].length ? "Operación Normal" : TJ.nomPeriodo("RE")}</b> (${arch}), semana ${+sem.split("-")[1]}: ${r.nuevas} nuevas, ${r.actualizadas} ya estaban${nON && nON < porSem[sem].length ? ` · ${nON} son de Operación Normal (se separan solas)` : ""}`);
             }
           } catch (e) { err.push(`<b>${esc(f.name)}</b>: ${esc(e.message)}`); }
         }
@@ -6169,7 +6244,7 @@ V.hoja = {
         .sort((a, b) => (sug.get(b.id).nivel - sug.get(a.id).nivel) || (+a.id - +b.id));
       const nA = L.filter(x => M[x.id] && M[x.id].m === "A").length, nC = L.filter(x => M[x.id] && M[x.id].m === "C").length;
       c.innerHTML = `
-        <div class="tarjeta">${cab("grafica", "g", "Semana de captura", `${L.length} tarjetas distintas · ${D.semanas[sem].si} en el archivo de Seguridad Industrial · ${D.semanas[sem].ae} con peligros de alta energía`, this.selSemana(semanas) + this.botonExcel())}
+        <div class="tarjeta">${cab("grafica", "g", "Semana de captura", `${L.length} tarjetas distintas · ${L.filter(x => String(x.fu || "").includes("SI")).length} en el archivo de Seguridad Industrial · ${L.filter(x => String(x.fu || "").includes("AE")).length} con peligros de alta energía${TJ.periodo ? " · " + TJ.nomPeriodo(TJ.periodo) : ""}`, this.selSemana(semanas) + this.botonExcel())}
           <div class="tj-kpis"><div><b>${nSI}</b><span>hechas por Seguridad Industrial</span></div><div><b>${lugarSI >= 0 ? (lugarSI + 1) + ".º" : "—"}</b><span>lugar de ${porDep.length} departamentos</span></div>
             <div><b>${deb.length}</b><span>con debilidad en S.I.</span></div><div><b>${L.filter(x => x.ae === "Si").length}</b><span>con alta energía</span></div><div><b style="color:var(--rojo)">${nA}</b><span>actos marcados</span></div><div><b style="color:var(--azul)">${nC}</b><span>condiciones marcadas</span></div></div></div>
         <div class="cuadricula">
@@ -6326,12 +6401,17 @@ V.hoja = {
   const AZUL = "4472C4", NARANJA = "ED7D31", GRIS = "A5A5A5";
 
   const E1 = B.e1 = {
-    S: null, W: null, histEd: null,
+    S: null, W: null, histEd: null, tpSel: "",
+    /* Hay una E+1 de Recarga (24RU1) y otra de Operacion Normal: cada una con sus datos por semana, su historial y solo sus tarjetas.
+       Las dos parten del mismo historial anterior a la recarga (B.E1_SEMILLA). */
+    tp() { return this.tpSel || (TJ.periodo === "ON" ? "ON" : "RE"); },
+    semD() { const D = TJ.datos; return this.tp() === "ON" ? (D.semON = D.semON || {}) : D.sem; },
+    histD() { const D = TJ.datos; return (this.tp() === "ON" ? D.histON : D.hist) || {}; },
 
     fechaTxt(f) { const [y, m, d] = f.split("-"); return `${d} de ${MES[+m - 1]} de ${y}`; },
     // datos de la semana tal como se guardan (lo que no se ha capturado toma su valor por omision)
     base(W) {
-      const D = TJ.datos, g = D.sem[W] || {}, ant = Object.keys(D.sem).sort().reverse().map(k => D.sem[k]).find(x => x.g1) || {};
+      const SD = this.semD(), g = SD[W] || {}, ant = Object.keys(SD).sort().reverse().map(k => SD[k]).find(x => x.g1) || {};
       return {
         fecha: g.fecha || U.sumar(TJ.lunes(W), 11), g1: g.g1 || ant.g1 || "2025-26", g2: g.g2 || ant.g2 || "2025-16",
         pag: Object.assign({ t: "", a: "", c: "", i: "", n: "", x: "" }, g.pag), tlc: Object.assign({ t: "", a: "", c: "", i: "", n: "", x: "" }, g.tlc), sac: Object.assign({ a: "", c: "", i: "", n: "", x: "" }, g.sac),
@@ -6350,7 +6430,7 @@ V.hoja = {
       const tot = { t: pag.t + tlc.t, a: s("a"), c: s("c"), ev: s("i") + s("n") + s("x") };
       return { auto, tlc, pag, sac, tot, fila: [tot.a, tot.t, tot.c, s("x"), s("i")], actos: marc("A"), conds: marc("C") };
     },
-    hist(W, fila) { const h = Object.assign({}, B.E1_SEMILLA || {}, this.histEd || TJ.datos.hist || {}); if (W && fila) h[W] = fila; return h; },
+    hist(W, fila) { const h = Object.assign({}, B.E1_SEMILLA || {}, this.histEd || this.histD()); if (W && fila) h[W] = fila; return h; },
     serie(h, desde, W) { return Object.keys(h).filter(k => /^\d{4}-\d{2}$/.test(k) && k >= desde && k <= W).sort(); },
 
     /* ------------------------------------------------------------ textos propuestos (se pueden corregir). **negritas** */
@@ -6371,7 +6451,7 @@ V.hoja = {
       return {
         tx1: `El desempeño del personal relacionado a Seguridad Industrial para la **Semana ${sem},** se resume de la siguiente manera**:** Se documentaron ${C.tot.t} **observaciones (TLC y PÁG-28-5)**, de las cuales se reportan: ${desv}${detalle ? ":" + detalle : "."} ${marcadas.length <= 3 ? top + " " : ""}Para estas desviaciones fueron corregidos los comportamientos de manera oportuna e inmediata por la supervisión de primera línea.`.replace(/\s+/g, " "),
         tx2: `**Para la semana ${sem},** se resume de la siguiente manera**:** Se documentaron **${C.tot.t} observaciones**, se identificaron: ${pl(nA, "Acto Inseguro", "Actos Inseguros")}${nC ? " y " + pl(nC, "Condición Insegura", "Condiciones Inseguras") : ""} para los cuales fueron retroalimentados y corregidos los comportamientos de manera inmediata y oportuna.`,
-        tx3: `Durante la **Semana ${sem}, Se documentan ${nA}** __desviaciones__ por actos inseguros. ${top}${refMov} **Sin embargo se intensifican los recorridos dentro y fuera de los edificios de proceso, así como las campañas de difusión sobre la rueda de la energía y la línea de fuego, con el objetivo de fortalecer la percepción al riesgo y se refuerza la aplicación de la regla de los 2 minutos.**`.replace(/\s+/g, " ")
+        tx3: `Durante la **Semana ${sem}, Se documentan ${nA}** __desviaciones__ por actos inseguros. ${top}${refMov} **Sin embargo se intensifican los recorridos dentro y fuera de los edificios de proceso${this.tp() === "ON" ? " U-2 en operación" : ""}, así como las campañas de difusión sobre la rueda de la energía y la línea de fuego, con el objetivo de fortalecer la percepción al riesgo y se refuerza la aplicación de la regla de los 2 minutos.**`.replace(/\s+/g, " ")
       };
     },
 
@@ -6528,7 +6608,7 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
     slidesHtml(M) { return this.laminas(M).map(l => `<div class="s" style="background-image:url('${this.fondo(l.fondo)}')">${l.els.map(e => this.elHtml(e)).join("")}</div>`).join(""); },
     doc(M) {
       return {
-        tipo: "e1", nombre: `E+1 SEMANA ${M.semN}`, carpeta: "E+1", horizontal: true,
+        tipo: "e1", nombre: `E+1 SEMANA ${M.semN}${this.tp() === "ON" ? " OPERACION NORMAL" : ""}`, carpeta: "E+1", horizontal: true,
         html: `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>E+1 SEMANA ${M.semN}</title><style>@page{size:960pt 540pt;margin:0}html,body{margin:0;padding:0}${this.css("")} .s{page-break-after:always;break-after:page}.s:last-child{page-break-after:auto;break-after:auto}</style></head><body>${this.slidesHtml(M)}</body></html>`
       };
     },
@@ -6653,11 +6733,12 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
 
     /* ------------------------------------------------------------ pantalla (pestana "Presentacion E+1") */
     async vista(P, c) {
-      const D = TJ.datos, semanas = [...new Set(Object.keys(D.semanas).concat(Object.keys(D.sem)))].sort();
+      const D = TJ.datos, tp = this.tp(), SD = this.semD(), semanas = [...new Set(Object.keys(D.semanas).concat(Object.keys(SD)))].sort();
       if (!semanas.length) { c.innerHTML = `<div class="tarjeta">${B.ui.vacio("Primero carga los Excel de la semana en la pestaña <b>Tarjetas y tendencias</b>.", "doc")}</div>`; return; }
       if (!semanas.includes(P.sem)) P.sem = semanas[semanas.length - 1];
-      const W = P.sem, L = D.semanas[W] ? await TJ.semana(W) : [];
-      if (this.W !== W || !this.S) { this.W = W; this.S = this.base(W); this.histEd = Object.assign({}, D.hist || {}); }
+      // solo las tarjetas del periodo de esta E+1 (aunque arriba se vean todas)
+      const W = P.sem, L = D.semanas[W] ? (await TJ.semana(W, true)).filter(c => TJ.tipo(c) === tp) : [];
+      if (this.W !== W || this.Wtp !== tp || !this.S) { this.W = W; this.Wtp = tp; this.S = this.base(W); this.histEd = Object.assign({}, this.histD()); }
       const S = this.S, C = this.calc(W, S, L), prop = this.textos(W, C, L), h = this.hist(W, C.fila);
       const ent = (k, ph, w) => `<input class="inp e1-n" data-k="${k}" value="${esc(k.split(".").reduce((o, p) => o[p], S))}" placeholder="${ph}" inputmode="numeric" style="width:${w || 52}px">`;
       const fila = (t, o, auto) => `<tr><td><b>${t}</b></td>${["t", "a", "c", "i", "n", "x"].map(k => `<td>${o === "sac" && k === "t" ? "N/A" : ent(o + "." + k, auto && auto[k] != null ? auto[k] : "0")}</td>`).join("")}</tr>`;
@@ -6665,8 +6746,8 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
       const lista = (t, l, col) => l.length ? `<div class="e1-marc"><b style="color:var(--${col})">${t} (${l.length})</b>${l.map(x => `<a href="#" data-ver="${esc(x.id)}">#${esc(x.id)} · ${esc((x.qp || x.doc || "").slice(0, 150))}${(x.qp || "").length > 150 ? "…" : ""}${D.marcas[x.id].nota ? ` <i>(${esc(D.marcas[x.id].nota)})</i>` : ""}${(TJ.fechaMal(x) || {}).grave ? ` <b style="color:var(--rojo)">⚠ fecha dudosa</b>` : ""}</a>`).join("")}</div>` : "";
       c.innerHTML = `
         <div class="tarjeta">${cab("pdf", "g", "Presentación E+1", "Se arma con las tarjetas que marcaste como acto o condición insegura. Todo se puede corregir antes de generarla.",
-          `<select class="inp" id="e1Sem" style="width:auto;min-width:220px">${semanas.map(s => `<option value="${s}" ${s === W ? "selected" : ""}>${TJ.semTxt(s)}</option>`).join("")}</select>`)}
-          ${(D.sem[W] || {}).hist ? `<div class="aviso a">${B.ico("historial")}<div><b>Presentación ya entregada</b> (historial de consulta). Aquí están sus números y textos tal como se presentaron${!B.modoMovil && (B.E1_ORIGINALES || {})[W] ? `; también puedes abrir el <a href="${esc(B.E1_ORIGINALES[W])}" target="_blank"><b>PDF original</b></a>` : ""}. Si la modificas y guardas, se conserva tu versión.</div></div>` : ""}
+          `<select class="inp" id="e1Tp" style="width:auto" title="Cada periodo tiene su propia E+1: sus tarjetas, sus números y su historial"><option value="RE" ${tp === "RE" ? "selected" : ""}>E+1 de ${esc(TJ.nomPeriodo("RE"))}</option><option value="ON" ${tp === "ON" ? "selected" : ""}>E+1 de Operación Normal</option></select><select class="inp" id="e1Sem" style="width:auto;min-width:220px">${semanas.map(s => `<option value="${s}" ${s === W ? "selected" : ""}>${TJ.semTxt(s)}</option>`).join("")}</select>`)}
+          ${(SD[W] || {}).hist ? `<div class="aviso a">${B.ico("historial")}<div><b>Presentación ya entregada</b> (historial de consulta). Aquí están sus números y textos tal como se presentaron${!B.modoMovil && tp === "RE" && (B.E1_ORIGINALES || {})[W] ? `; también puedes abrir el <a href="${esc(B.E1_ORIGINALES[W])}" target="_blank"><b>PDF original</b></a>` : ""}. Si la modificas y guardas, se conserva tu versión.</div></div>` : ""}
           <div class="fila"><div class="campo" style="flex:0 0 190px"><label>Fecha de la presentación</label><input class="inp" type="date" data-k="fecha" value="${esc(S.fecha)}"></div>
             <div class="campo" style="flex:0 0 190px"><label>Gráfica de actos: desde la semana</label><input class="inp" data-k="g1" value="${esc(S.g1)}" placeholder="2025-26"><span class="ayuda">Año-semana, p. ej. 2025-26</span></div>
             <div class="campo" style="flex:0 0 190px"><label>Gráfica de accidentes: desde</label><input class="inp" data-k="g2" value="${esc(S.g2)}" placeholder="2025-16"></div>
@@ -6696,6 +6777,7 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
       c.querySelectorAll("[data-k]").forEach(i => i.oninput = () => { const p = i.dataset.k.split("."); if (p.length === 2) S[p[0]][p[1]] = i.value.trim(); else S[p[0]] = i.type === "textarea" ? i.value : i.value.trim(); tot(); prevLento(); });
       c.querySelectorAll("[data-h]").forEach(i => i.oninput = () => { const k = i.dataset.h, f = (this.histEd[k] || h[k]).slice(); f[+i.dataset.i] = num(i.value); this.histEd[k] = f; prevLento(); });
       c.querySelector("#e1Sem").onchange = e => { P.sem = e.target.value; this.S = null; P.pinta(); };
+      c.querySelector("#e1Tp").onchange = e => { this.tpSel = e.target.value; this.S = null; P.pinta(); };
       const ir = c.querySelector("#e1Ir"); if (ir) ir.onclick = e => { e.preventDefault(); P.tab = "tend"; P.fil.ver = "sug"; P.pinta().then(() => { const l = document.getElementById("tjLista"); if (l) l.scrollIntoView({ behavior: "smooth" }); }); };
       c.querySelectorAll("[data-ver]").forEach(a => a.onclick = e => { e.preventDefault(); P.detalle(L.find(x => x.id === a.dataset.ver), null, () => P.pinta()); });
       c.querySelector("#e1Prop").onclick = () => { for (const k of ["tx1", "tx2", "tx3"]) if (!S[k]) { S[k] = prop[k]; c.querySelector(`[data-k="${k}"]`).value = prop[k]; } prev(); };
@@ -6707,14 +6789,14 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
       const guardar = async callado => {
         if (!valida()) return false;
         const k = this.calc(W, S, L), hh = Object.assign({}, this.histEd); hh[W] = k.fila;
-        try { await TJ.llamar("semGuardar", { sem: W, datos: S, hist: hh }); D.sem[W] = JSON.parse(JSON.stringify(S)); D.hist = hh; this.histEd = Object.assign({}, hh); if (!callado) B.ui.toast("Datos de la E+1 guardados.", "ok"); return true; }
+        try { await TJ.llamar("semGuardar", { sem: W, datos: S, hist: hh, tipo: tp }); SD[W] = JSON.parse(JSON.stringify(S)); if (tp === "ON") D.histON = hh; else D.hist = hh; this.histEd = Object.assign({}, hh); if (!callado) B.ui.toast("Datos de la E+1 guardados.", "ok"); return true; }
         catch (e) { B.ui.error(e); return false; }
       };
       c.querySelector("#e1Guardar").onclick = () => guardar();
       c.querySelector("#e1Pdf").onclick = async e => { const b = e.currentTarget; if (await guardar(true)) B.rep.pdf(this.doc(this.modelo(W, S, L)), b); };
       c.querySelector("#e1Pptx").onclick = async () => {
         if (!(await guardar(true))) return;
-        try { const M = this.modelo(W, S, L); U.descargar(`E+1 SEMANA ${M.semN}.pptx`, await this.pptx(M), "application/vnd.openxmlformats-officedocument.presentationml.presentation"); B.ui.toast("Presentación descargada: búscala en <b>Descargas</b>.", "ok", 6000); }
+        try { const M = this.modelo(W, S, L); U.descargar(`E+1 SEMANA ${M.semN}${tp === "ON" ? " OPERACION NORMAL" : ""}.pptx`, await this.pptx(M), "application/vnd.openxmlformats-officedocument.presentationml.presentation"); B.ui.toast("Presentación descargada: búscala en <b>Descargas</b>.", "ok", 6000); }
         catch (err) { B.ui.error(err); }
       };
       prev();
@@ -6789,7 +6871,7 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
       return rango.length > 1 ? { etq: "las semanas " + s(rango[0]) + " a " + s(rango[rango.length - 1]), corto: "Semanas " + s(rango[0]) + " a " + s(rango[rango.length - 1]) } : { etq: "la semana " + s(rango[0] || F.hasta), corto: "Semana " + s(rango[0] || F.hasta) };
     },
     // donde se guarda el TOP: la semana (como antes) o el periodo acumulado
-    claveG(F, W) { return F.modo === "fechas" && F.f1 && F.f2 ? (F.acum ? "rango:" + F.f1 + ":" + F.f2 : W) : F.acum && F.desde && F.desde !== F.hasta ? "rango:" + F.desde + ":" + F.hasta : W; },
+    claveG(F, W) { return (F.modo === "fechas" && F.f1 && F.f2 ? (F.acum ? "rango:" + F.f1 + ":" + F.f2 : W) : F.acum && F.desde && F.desde !== F.hasta ? "rango:" + F.desde + ":" + F.hasta : W) + (TJ.periodo === "ON" ? ":ON" : ""); },    // Operacion Normal guarda su propio TOP
 
     async modelo(F, G) {
       const cub = await this.cubetas(F), rango = cub.map(x => x.k), porSem = Object.fromEntries(cub.map(x => [x.k, x.L])), W = rango[rango.length - 1] || F.hasta;
@@ -7220,7 +7302,7 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><
     hasta(F) { return F.hasta && F.hasta > F.fecha ? F.hasta : F.fecha; },
     // "17 OCT" · varios dias: "13 AL 17 OCT" o "28 SEP AL 3 OCT"
     periodoTxt(F) { const h = this.hasta(F); if (h === F.fecha) return this.fechaTxt(F.fecha); const a = U.fecha(F.fecha), b = U.fecha(h); return (a.getMonth() === b.getMonth() ? a.getDate() : this.fechaTxt(F.fecha)) + " AL " + this.fechaTxt(h); },
-    clave(F) { const h = this.hasta(F); return "dia:" + F.fecha + (h !== F.fecha ? "_" + h : "") + ":" + F.fu; },
+    clave(F) { const h = this.hasta(F); return "dia:" + F.fecha + (h !== F.fecha ? "_" + h : "") + ":" + F.fu + (TJ.periodo === "ON" ? ":ON" : ""); },
     peso(c) {
       const t = U.norm(texto(c)), k = catDe(c); let p = k ? k.sev : 4;
       if (/DEBAJO DE|BAJO (LA |UNA )?CARGA/.test(t)) p += 3;     // en la linea de fuego
@@ -8780,7 +8862,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "4.9.4", servidorViejo: false,
+  info: {}, VERSION: "4.10", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -8967,7 +9049,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "procedimientos" ? '<span class="contador oculto" id="cntProc"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.9.4")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.10")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
