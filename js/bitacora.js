@@ -28,7 +28,7 @@ const pad = n => String(n).padStart(2, "0");
 B.u = {
   esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); },
   br(s) { return B.u.esc(s).replace(/\n/g, "<br>"); },
-  norm(s) { return String(s ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase().replace(/\s+/g, " ").trim(); },
+  norm(s) { return String(s ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/\s+/g, " ").trim(); },
   iso(d) { return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); },
   isoFH(d) { return B.u.iso(d) + "T" + pad(d.getHours()) + ":" + pad(d.getMinutes()); },
   fecha(s) { const [y, m, d] = String(s).slice(0, 10).split("-").map(Number); return new Date(y, m - 1, d); },
@@ -52,7 +52,7 @@ B.u = {
   },
   csv(nombre, encabezados, filas) {
     const q = v => { const s = String(v ?? ""); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
-    const txt = "﻿" + [encabezados, ...filas].map(r => r.map(q).join(",")).join("\r\n");
+    const txt = "ï»¿" + [encabezados, ...filas].map(r => r.map(q).join(",")).join("\r\n");
     B.u.descargar(nombre + ".csv", txt, "text/csv;charset=utf-8");
   },
   // Hora en formato de 24 horas: acepta "7", "730", "0730", "19:30", "7.30"... y devuelve "HH:MM" (null si no es valida)
@@ -519,7 +519,13 @@ B.dom = {
     return m[2].trim() ? m[1] + ": " + m[2].trim() : "";
   },
   // actividades que el supervisor dejo sin responsable ("por asignar")
-  porAsignar() { return B.estado.actividades.filter(a => !a.ini && (a.est === "Pendiente" || a.est === "En proceso")).sort((a, b) => a.id - b.id); },
+  // actividades que el supervisor dejo sin responsable ("por asignar"), incluyendo las recurrentes activas
+  porAsignar() {
+    return B.estado.actividades.filter(a => {
+      if (a.recurrente && !a.recuFin) return true;           // recurrente activa: siempre en "por asignar"
+      return !a.ini && (a.est === "Pendiente" || a.est === "En proceso");
+    }).sort((a, b) => a.id - b.id);
+  },
 
   /* Asistencia de un turno (persona -> origen, horas extra, referencia) */
   asistenciaTurno(f, t) {
@@ -803,7 +809,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.10.2", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.10.4", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -856,7 +862,7 @@ B.local = {
     switch (acc) {
       case "ver": {
         const r = { ok: true, editor: ed, esp: ed && !sup, editores: eds, cfg: T.cfg };
-        if (ed) Object.assign(r, { decl: T.decl, marcas: T.marcas, sem: T.sem, hist: T.hist, semanas: T.semanas, graf: T.graf, correos: T.correos, envios: T.envios, ubic: T.ubic, correoTpl: T.correoTpl, noAplica: T.noAplica, semON: T.semON, histON: T.histON });
+        if (ed) Object.assign(r, { decl: T.decl, marcas: T.marcas, sem: T.sem, hist: T.hist, semanas: T.semanas, graf: T.graf, correos: T.correos, envios: T.envios, ubic: T.ubic, correoTpl: T.correoTpl, noAplica: T.noAplica, semON: T.semON, histON: T.histON, fijas: T.fijas });
         else r.decl = T.decl.filter(x => U.ini(x.ini) === s.ini || x.est === "C").map(x => U.ini(x.ini) === s.ini ? x : { ini: x.ini, f: x.f, t: x.t, est: "C" });
         return r;
       }
@@ -1227,12 +1233,18 @@ B.local = {
         const k = U.norm(txt), creadas = [], omitidas = [];
         if (d.libre === true) {
           if (L.some(x => !x.ini && U.norm(x.txt) === k && x.est === "Pendiente")) throw new Error("Esa actividad ya está en la lista de actividades por asignar.");
-          const n = { id: sig(L, "id"), fecha: d.fecha, turno: d.turno, ini: "", nombre: "", txt, est: "Pendiente", estOrig: "Pendiente", seg: "", fCierre: "", tCierre: "", cerro: "", reg: ahora(), capturo: s.ini, asig: s.ini, grupo, uni, ...(d.rep === true ? { rep: true } : {}) };
+          const n = { id: sig(L, "id"), fecha: d.fecha, turno: d.turno, ini: "", nombre: "", txt, est: "Pendiente", estOrig: "Pendiente", seg: "", fCierre: "", tCierre: "", cerro: "", reg: ahora(), capturo: s.ini, asig: s.ini, grupo, uni, ...(d.rep === true ? { rep: true } : {}), ...(d.recurrente === true ? { recurrente: true } : {}) };
           L.push(n); await this.escribir("actividades", L);
           return { ok: true, creadas, omitidas, libre: n.id };
         }
         let libre = +d.id > 0 ? L.find(x => +x.id === +d.id && !x.ini) : null;
-        if (libre) { if (!libre.grupo) libre.grupo = grupo; grupo = libre.grupo; if (!uni) uni = libre.uni || ""; }
+        if (libre && libre.recurrente && !libre.recuFin) {
+          // Actividad recurrente activa: se preserva como plantilla permanente en por asignar
+          if (!libre.grupo) libre.grupo = grupo;
+          grupo = libre.grupo;
+          if (!uni) uni = libre.uni || "";
+          libre = null;
+        } else if (libre) { if (!libre.grupo) libre.grupo = grupo; grupo = libre.grupo; if (!uni) uni = libre.uni || ""; }
         else {
           const ya = L.find(x => x.fecha === d.fecha && x.turno === d.turno && x.ini && U.norm(x.txt) === k && x.est !== "Concluida");
           if (ya) { if (!ya.grupo) ya.grupo = grupo; grupo = ya.grupo; est = ya.est; txt = ya.txt; if (!uni) uni = ya.uni || ""; }
@@ -1256,8 +1268,34 @@ B.local = {
         const ini = sup && d.ini ? U.ini(d.ini) : s.ini, p = (await this.leer("personal") || []).find(x => U.ini(x.ini) === ini);
         if (!p) throw new Error("Iniciales no encontradas en el personal.");
         if (d.hecha === true && (!d.fecha || !["T1", "T2"].includes(d.turno))) throw new Error("Fecha o turno no válidos.");
-        Object.assign(a, { ini, nombre: p.nombre, tomo: s.ini, mod: ahora() });
+        if (a.recurrente && !a.recuFin) {
+          // Es recurrente activa: se preserva la plantilla en por asignar y se crea una actividad para quien la toma
+          const n = {
+            id: sig(L, "id"), fecha: d.fecha || a.fecha, turno: d.turno || a.turno,
+            ini, nombre: p.nombre, txt: a.txt, est: d.hecha === true ? "Realizada" : "Pendiente",
+            estOrig: d.hecha === true ? "Realizada" : "Pendiente", seg: "", fCierre: "", tCierre: "",
+            cerro: "", reg: ahora(), capturo: s.ini, tomo: s.ini, asig: a.asig || s.ini,
+            grupo: a.grupo || String(Date.now()), uni: a.uni || ""
+          };
+          L.push(n);
+        } else {
+          Object.assign(a, { ini, nombre: p.nombre, tomo: s.ini, mod: ahora() });
+        }
         if (d.hecha === true) Object.assign(a, { fecha: d.fecha, turno: d.turno, est: "Realizada", estOrig: "Realizada" });
+        await this.escribir("actividades", L); return { ok: true };
+      }
+      case "actividades.recurrente": {
+        soloSup();
+        const L = await this.leer("actividades") || [], a = L.find(x => +x.id === +d.id);
+        if (!a) throw new Error("Actividad no encontrada.");
+        const activo = d.activo === true;
+        if (activo) {
+          a.recurrente = true;
+          delete a.recuFin;
+        } else {
+          a.recuFin = ahora();
+        }
+        a.mod = ahora() + " " + s.ini;
         await this.escribir("actividades", L); return { ok: true };
       }
       case "actividades.unidad": {
@@ -2607,7 +2645,7 @@ V.actividades = {
     c.onkeydown = e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") { e.preventDefault(); guardar(); } };
   },
   /* Supervisor: registrar una actividad y asignarla a una o varias personas disponibles en el turno */
-  asSel: new Set(), asExtra: [], asTxt: "", asEst: "Realizada", asClave: "", asLibre: 0, asUni: "", asRep: false,
+  asSel: new Set(), asExtra: [], asTxt: "", asEst: "Realizada", asClave: "", asLibre: 0, asUni: "", asRep: false, asRecu: false,
   asignar(c, f, t) {
     const D = B.dom, clave = f + t;
     if (this.asClave !== clave) { this.asClave = clave; this.asSel = new Set(); this.asExtra = []; }
@@ -2631,11 +2669,20 @@ V.actividades = {
           : `<span class="muted peque">Nadie asignado a este turno. Agrega personas con el buscador.</span>`}</div></div>
       <div class="fila he-fila">
         <div class="campo" style="min-width:260px;max-width:380px;margin-bottom:0"><label>Agregar a otra persona (de otro turno)</label><input class="inp" id="asOtro" placeholder="Busca por iniciales o apellido…"></div>
-        <label class="chip-ali" id="asRepL" style="margin:0 0 2px auto"><input type="checkbox" id="asRep" ${this.asRep ? "checked" : ""}><span>Si queda sin asignar: mostrarla en el reporte como PENDIENTE</span></label>
+        <div style="display:flex;flex-direction:column;gap:3px;margin:0 0 2px auto">
+          <label class="chip-ali" id="asRepL" style="margin:0"><input type="checkbox" id="asRep" ${this.asRep ? "checked" : ""}><span>Si queda sin asignar: mostrarla en el reporte como PENDIENTE</span></label>
+          <label class="chip-ali" id="asRecuL" style="margin:0"><input type="checkbox" id="asRecu" ${this.asRecu ? "checked" : ""}><span>Actividad <b>recurrente</b> (aparece en cada turno en la hoja y por asignar)</span></label>
+        </div>
         <button class="btn verde" id="asGuardar">${B.ico("ok")} <span id="asN">Asignar</span></button></div>
-      ${libres.length ? `<h3 style="font-size:13px;margin:18px 0 8px;color:var(--texto-2)">Por asignar (${libres.length}) · sin responsable todavía</h3><div class="lista" data-tour="act-porasignar">${libres.map(a => `<div class="item" style="flex-wrap:wrap;${a.id === this.asLibre ? "background:var(--dorado-claro);" : ""}">
-          <span class="badge d">POR ASIGNAR</span><div class="cuerpo" style="min-width:240px"><div class="tit">${U.esc(a.txt)}</div>${a.com ? `<div class="meta" style="color:var(--texto)">↳ ${U.esc(a.com)}</div>` : ""}<div class="meta"><span>para ${B.t.corto(a.fecha, a.turno)}</span><span>registró ${U.esc(a.asig || a.capturo || "")}</span><span>ID ${a.id}</span><span>${a.rep ? "sale en el reporte como pendiente" : "no sale en el reporte"}</span></div></div>
-          <div style="display:flex;gap:6px"><button class="btn chico sec" data-edlibre="${a.id}">${B.ico("editar")} Editar / nota</button><button class="btn chico" data-aslibre="${a.id}">Asignar…</button><button class="btn chico fantasma btn-icono" data-quitar="${a.id}" title="Eliminar">${B.ico("basura")}</button></div></div>`).join("")}</div>` : ""}
+      ${libres.length ? `<h3 style="font-size:13px;margin:18px 0 8px;color:var(--texto-2)">Por asignar (${libres.length}) · sin responsable todavía</h3><div class="lista" data-tour="act-porasignar">${libres.map(a => {
+          const esRecu = !!(a.recurrente && !a.recuFin);
+          return `<div class="item" style="flex-wrap:wrap;${a.id === this.asLibre ? "background:var(--dorado-claro);" : ""}">
+            <span class="badge ${esRecu ? "a" : "d"}" style="${esRecu ? "background:#0984e3;color:#fff" : ""}">${esRecu ? "RECURRENTE" : "POR ASIGNAR"}</span><div class="cuerpo" style="min-width:240px"><div class="tit">${U.esc(a.txt)}</div>${a.com ? `<div class="meta" style="color:var(--texto)">↳ ${U.esc(a.com)}</div>` : ""}<div class="meta"><span>${esRecu ? "recurrente en cada turno" : "para " + B.t.corto(a.fecha, a.turno)}</span><span>registró ${U.esc(a.asig || a.capturo || "")}</span><span>ID ${a.id}</span><span>${a.rep ? "sale en el reporte como pendiente" : "no sale en el reporte"}</span></div></div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn chico sec" data-edlibre="${a.id}">${B.ico("editar")} Editar / nota</button><button class="btn chico" data-aslibre="${a.id}">Asignar…</button>
+              ${esRecu ? `<button class="btn chico fantasma" data-togglerecu="${a.id}" data-activo="0" title="Desactivar recurrencia (dejará de aparecer en futuros turnos)">${B.ico("pausa")} Desactivar</button>`
+                       : `<button class="btn chico fantasma" data-togglerecu="${a.id}" data-activo="1" title="Hacer recurrente para que aparezca en todos los turnos">${B.ico("reutilizar")} Hacer recurrente</button>`}
+              <button class="btn chico fantasma btn-icono" data-quitar="${a.id}" title="Eliminar">${B.ico("basura")}</button></div></div>`;
+        }).join("")}</div>` : ""}
       ${grupos.size ? `<h3 style="font-size:13px;margin:18px 0 8px;color:var(--texto-2)">Asignadas en este turno</h3><div class="lista">${[...grupos.values()].map(g => `<div class="item" style="flex-wrap:wrap"><div class="cuerpo" style="min-width:260px">
           <div class="tit">${U.esc(g.txt)}</div><div class="meta"><span>asignó ${U.esc(g.por)}</span><span>${g.items.length} persona(s)</span></div>
           <div class="chips-ali" style="margin-top:6px;min-height:0">${g.items.map(a => `<span class="chip-per">${U.esc(a.ini)} ${ui.estatusBadge(a.est)}<button title="Quitar a ${U.esc(a.ini)}" data-quitar="${a.id}">×</button></span>`).join("")}</div></div>
@@ -2647,11 +2694,23 @@ V.actividades = {
     const ta = c.querySelector("#asTxt"), ajustar = () => { ta.style.height = "auto"; ta.style.height = Math.max(38, ta.scrollHeight) + "px"; };
     const contar = () => { const n = c.querySelectorAll("[data-as]:checked").length; c.querySelector("#asN").textContent = n ? `Asignar a ${n} persona${n === 1 ? "" : "s"}` : (this.asLibre ? "Asignar" : "Guardar sin asignar"); };
     c.querySelector("#asRep").onchange = e => { this.asRep = e.target.checked; };
+    const chRecu = c.querySelector("#asRecu");
+    if (chRecu) chRecu.onchange = e => { this.asRecu = e.target.checked; };
+    c.querySelectorAll("[data-togglerecu]").forEach(b => b.onclick = async () => {
+      const id = +b.dataset.togglerecu, activo = b.dataset.activo === "1";
+      const a = B.estado.actividades.find(x => x.id === id); if (!a) return;
+      if (activo) {
+        await ejecutar(() => B.api.op("actividades", "recurrente", { id, activo: true }), "Actividad marcada como recurrente: seguirá apareciendo en la hoja y por asignar.");
+      } else {
+        if (!(await ui.confirmar(`¿Desactivar la recurrencia de esta actividad?<br><span class="muted">${U.esc(a.txt)}</span><br><br>Dejará de aparecer en la hoja de asignación y en actividades por asignar de los siguientes turnos.`, "Desactivar recurrente", "Desactivar", true))) return;
+        await ejecutar(() => B.api.op("actividades", "recurrente", { id, activo: false }), "Recurrencia desactivada.");
+      }
+    });
     c.querySelectorAll("[data-edlibre]").forEach(b => b.onclick = () => this.editarLibre(+b.dataset.edlibre));
-    const bc = c.querySelector("#asCancelar"); if (bc) bc.onclick = e => { e.preventDefault(); this.asLibre = 0; this.asTxt = ""; this.asignar(c, f, t); };
+    const bc = c.querySelector("#asCancelar"); if (bc) bc.onclick = e => { e.preventDefault(); this.asLibre = 0; this.asTxt = ""; this.asRecu = false; this.asignar(c, f, t); };
     c.querySelectorAll("[data-aslibre]").forEach(b => b.onclick = () => {
       const a = libres.find(x => x.id === +b.dataset.aslibre); if (!a) return;
-      this.asLibre = a.id; this.asTxt = a.txt; this.asEst = "Realizada"; this.asUni = a.uni || ""; this.asignar(c, f, t);
+      this.asLibre = a.id; this.asTxt = a.txt; this.asEst = "Realizada"; this.asUni = a.uni || ""; this.asRecu = !!(a.recurrente && !a.recuFin); this.asignar(c, f, t);
       c.scrollIntoView({ behavior: "smooth", block: "start" });
     });
     ta.oninput = () => { this.asTxt = ta.value; ajustar(); }; setTimeout(ajustar, 0);
@@ -2673,15 +2732,15 @@ V.actividades = {
       const b = c.querySelector("#asGuardar"); b.disabled = true;
       if (!inis.length) {       // sin responsable todavia
         try {
-          await B.api.op("actividades", "asignar", { fecha: f, turno: t, txt, est: "Pendiente", inis: [], libre: true, uni: this.asUni, rep: this.asRep });
-          const enRep = this.asRep; this.asTxt = ""; await B.app.refrescar();
-          ui.toast("Actividad guardada <b>por asignar</b>: aparece en la hoja de asignación hasta que alguien la tome o la asignes." + (enRep ? " También sale en el reporte del turno como pendiente." : " No sale en el reporte del turno (puedes cambiarlo con Editar)."), "ok", 7000);
+          await B.api.op("actividades", "asignar", { fecha: f, turno: t, txt, est: "Pendiente", inis: [], libre: true, uni: this.asUni, rep: this.asRep, recurrente: this.asRecu });
+          const enRep = this.asRep, esRecu = this.asRecu; this.asTxt = ""; this.asRecu = false; await B.app.refrescar();
+          ui.toast("Actividad guardada <b>" + (esRecu ? "recurrente por asignar" : "por asignar") + "</b>: " + (esRecu ? "aparecerá en la hoja de asignación y en actividades por asignar en cada turno hasta que un supervisor la desactive." : "aparece en la hoja de asignación hasta que alguien la tome o la asignes.") + (enRep ? " También sale en el reporte del turno como pendiente." : " No sale en el reporte del turno (puedes cambiarlo con Editar)."), "ok", 8000);
         } catch (e) { ui.error(e); b.disabled = false; }
         return;
       }
       try {
-        const r = await B.api.op("actividades", "asignar", { fecha: f, turno: t, txt, est: this.asEst, inis, id: this.asLibre || 0, uni: this.asUni });
-        this.asTxt = ""; this.asSel = new Set(); this.asLibre = 0;
+        const r = await B.api.op("actividades", "asignar", { fecha: f, turno: t, txt, est: this.asEst, inis, id: this.asLibre || 0, uni: this.asUni, recurrente: this.asRecu });
+        this.asTxt = ""; this.asSel = new Set(); this.asLibre = 0; this.asRecu = false;
         await B.app.refrescar();
         ui.toast(`Actividad asignada a ${r.creadas.length} persona(s)${r.creadas.length ? ": " + r.creadas.join(", ") : ""}.` + (r.omitidas.length ? `<br>Sin duplicar (ya la tenían): <b>${r.omitidas.join(", ")}</b>` : ""), r.creadas.length ? "ok" : "aviso", 7000);
       } catch (e) { ui.error(e); b.disabled = false; }
@@ -2722,20 +2781,26 @@ V.actividades = {
   /* Supervisor: editar una actividad POR ASIGNAR (texto, nota, unidad y si sale en el reporte del turno como pendiente) */
   async editarLibre(id) {
     const a = B.estado.actividades.find(x => x.id === id && !x.ini); if (!a) return;
+    const esRecu = !!(a.recurrente && !a.recuFin);
     const r = await ui.modal({ titulo: "Actividad por asignar · ID " + a.id, icono: "editar", ancho: true,
       html: `<div class="campo"><label>Actividad</label><textarea class="inp" id="elTxt" rows="3">${U.esc(a.txt)}</textarea></div>
         <div class="campo"><label>Comentario o nota (opcional)</label><input class="inp" id="elCom" value="${U.esc(a.com || "")}" placeholder="Sale junto a la actividad en la hoja de asignación y en el reporte"></div>
         <div class="campo"><label>Unidad (hoja de asignación)</label>${ui.seg("elUni", ["General", "Unidad 1", "Unidad 2"], { "": "General", U1: "Unidad 1", U2: "Unidad 2" }[a.uni || ""])}</div>
-        <label class="chip-ali" style="margin:0"><input type="checkbox" id="elRep" ${a.rep ? "checked" : ""}><span>Mostrar en el <b>reporte del turno</b> como actividad PENDIENTE</span></label>
-        <p class="muted peque" style="margin:8px 0 0">En la hoja de asignación siempre aparece mientras no se asigne. En el reporte del turno solo si marcas la casilla.</p>`,
+        <div style="display:flex;flex-direction:column;gap:5px;margin:8px 0">
+          <label class="chip-ali" style="margin:0"><input type="checkbox" id="elRep" ${a.rep ? "checked" : ""}><span>Mostrar en el <b>reporte del turno</b> como actividad PENDIENTE</span></label>
+          <label class="chip-ali" style="margin:0"><input type="checkbox" id="elRecu" ${esRecu ? "checked" : ""}><span>Actividad <b>recurrente</b> (aparece en cada turno en la hoja y por asignar hasta desactivarla)</span></label>
+        </div>
+        <p class="muted peque" style="margin:8px 0 0">En la hoja de asignación y por asignar siempre aparece mientras esté activa. En el reporte del turno solo si marcas la casilla de reporte.</p>`,
       alAbrir: v => ui.activarSeg(v),
       botones: [{ t: "Cancelar", c: "sec", v: null }, { t: "Guardar", c: "verde", v: v => ({ txt: v.querySelector("#elTxt").value.trim(), com: v.querySelector("#elCom").value.trim(), rep: v.querySelector("#elRep").checked,
+        recurrente: v.querySelector("#elRecu").checked,
         uni: { General: "", "Unidad 1": "U1", "Unidad 2": "U2" }[ui.segValor(v.querySelector('[data-seg="elUni"]'))] }) }] });
     if (!r) return;
     if (!r.txt) { ui.toast("La actividad no puede quedar vacía.", "error"); return; }
     await ejecutar(async () => {
       await B.api.op("actividades", "estatus", { id: a.id, est: "Pendiente", txt: r.txt, uni: r.uni, rep: r.rep });
       if (r.com !== (a.com || "")) await B.api.op("actividades", "comentario", { id: a.id, tipo: "com", texto: r.com });
+      if (r.recurrente !== esRecu) await B.api.op("actividades", "recurrente", { id: a.id, activo: r.recurrente });
     }, "Actividad actualizada.");
   },
   /* Comentarios de una actividad: cada quien edita o elimina los suyos; el supervisor, los de cualquiera */
@@ -4264,22 +4329,31 @@ V.registros = {
 B.editarActividad = async function (id) {
       const a = B.estado.actividades.find(x => x.id === id); if (!a) return;
       const T0 = B.app.trabajo, ops = a.ini ? ["Realizada", "En proceso", "Pendiente", "Concluida"] : [...new Set(["Pendiente", a.est])];      // sin asignar: conserva su estatus o vuelve a pendiente
+      const esRecu = !!(a.recurrente && !a.recuFin);
       const r = await ui.modal({
         titulo: "Editar actividad · ID " + a.id, icono: "editar", ancho: true,
         html: `<p class="muted peque" style="margin:0 0 10px">${a.ini ? "<b>" + U.esc(a.ini) + "</b> " + U.esc(B.dom.nombre(a.ini)) : "Por asignar"} · ${B.t.corto(a.fecha, a.turno)}</p>
           <div class="campo"><label>Actividad</label><textarea class="inp" id="eaTxt" rows="3">${U.esc(a.txt)}</textarea></div>
           <div class="campo"><label>Estatus</label>${ui.seg("eaEst", ops, a.est, "estatus")}</div>
           <div class="campo"><label>Unidad (hoja de asignación)</label>${ui.seg("eaUni", ["General", "Unidad 1", "Unidad 2"], { "": "General", U1: "Unidad 1", U2: "Unidad 2" }[a.uni || ""])}</div>
+          <label class="chip-ali" style="margin:8px 0 0"><input type="checkbox" id="eaRecu" ${esRecu ? "checked" : ""}><span>Actividad <b>recurrente</b> (aparece en la hoja de asignación y por asignar en cada turno hasta desactivarla)</span></label>
           ${a.grupo && B.estado.actividades.filter(x => x.grupo === a.grupo).length > 1 ? `<p class="muted peque" style="margin:0 0 8px">Actividad compartida con <b>${U.esc(B.estado.actividades.filter(x => x.grupo === a.grupo).map(x => x.ini).join("/"))}</b>: el cambio vale para todos.</p>` : ""}
-          <p class="muted peque" style="margin:0"><b>Realizada</b>: sale solo en el reporte de su turno. <b>En proceso / Pendiente</b>: se repite en cada reporte hasta concluirla.
+          <p class="muted peque" style="margin:8px 0 0"><b>Realizada</b>: sale solo en el reporte de su turno. <b>En proceso / Pendiente</b>: se repite en cada reporte hasta concluirla.
           <b>Concluida</b>: se cierra en el turno de trabajo seleccionado (${B.t.corto(T0.f, T0.t)}).</p>`,
         alAbrir: v => ui.activarSeg(v),
-        botones: [{ t: "Cancelar", c: "sec", v: null }, { t: "Guardar", c: "verde", v: v => ({ txt: v.querySelector("#eaTxt").value.trim(), est: ui.segValor(v.querySelector('[data-seg="eaEst"]')), uni: { General: "", "Unidad 1": "U1", "Unidad 2": "U2" }[ui.segValor(v.querySelector('[data-seg="eaUni"]'))] }) }]
+        botones: [{ t: "Cancelar", c: "sec", v: null }, { t: "Guardar", c: "verde", v: v => ({ txt: v.querySelector("#eaTxt").value.trim(), est: ui.segValor(v.querySelector('[data-seg="eaEst"]')), uni: { General: "", "Unidad 1": "U1", "Unidad 2": "U2" }[ui.segValor(v.querySelector('[data-seg="eaUni"]'))], recurrente: v.querySelector("#eaRecu").checked }) }]
       });
       if (!r) return;
       if (!r.txt) { ui.toast("La actividad no puede quedar vacía.", "error"); return; }
-      if (r.txt === a.txt && r.est === a.est && r.uni === (a.uni || "")) { ui.toast("Sin cambios.", ""); return; }
-      await ejecutar(() => B.api.op("actividades", "estatus", { id: a.id, est: r.est, txt: r.txt, uni: r.uni, fecha: T0.f, turno: T0.t }), "Actividad actualizada.");
+      if (r.txt === a.txt && r.est === a.est && r.uni === (a.uni || "") && r.recurrente === esRecu) { ui.toast("Sin cambios.", ""); return; }
+      await ejecutar(async () => {
+        if (r.txt !== a.txt || r.est !== a.est || r.uni !== (a.uni || "")) {
+          await B.api.op("actividades", "estatus", { id: a.id, est: r.est, txt: r.txt, uni: r.uni, fecha: T0.f, turno: T0.t });
+        }
+        if (r.recurrente !== esRecu) {
+          await B.api.op("actividades", "recurrente", { id: a.id, activo: r.recurrente });
+        }
+      }, "Actividad actualizada.");
 };
 ;
 /* ---- horasextra.js ---- */
@@ -4821,9 +4895,17 @@ B.hoja = {
   },
   // fecha que se imprime: el turno nocturno (T1) inicia la tarde del dia anterior a su fecha de reporte
   fechaHoja(f, t) { return t === "T1" ? U.sumar(f, -1) : f; },
-  inis(f, t, cats) {
-    const D = B.dom, set = new Set([...D.personalDelTurno(f, t), ...D.presentes(f, t).keys()]);
-    return D.ordenados([...set]).filter(i => { const p = D.persona(i); return p && cats.includes(D.catOrden(p.cat)); }).join(" / ");
+  presentesInis(f, t) {
+    const D = B.dom, pres = D.presentes(f, t);
+    return [...pres.keys()];
+  },
+  inis(f, t, cats, forzarRol = false) {
+    const D = B.dom, pres = this.presentesInis(f, t);
+    // Prioridad: colocar las iniciales del personal marcado presente en el turno.
+    // Si aún nadie está marcado presente y no se forzó el rol, se propone el rol de turno como punto de partida.
+    // "Segun el rol" (forzarRol): el personal programado en el rol MAS todos los marcados presentes (aunque sean de otro turno)
+    const lista = forzarRol ? [...new Set([...D.personalDelTurno(f, t), ...pres])] : pres.length ? pres : D.personalDelTurno(f, t);
+    return D.ordenados(lista).filter(i => { const p = D.persona(i); return p && cats.includes(D.catOrden(p.cat)); }).join(" / ");
   },
   nueva(f, t) {
     const td = B.dom.turnoDatos(f, t) || {}, u = (etq) => ({ etq, dias: "", modo: "", pot: "", x1: "", x2: "", x3: "", y2: "", y3: "" });
@@ -4833,23 +4915,29 @@ B.hoja = {
       u1: u("Días de Recarga"), u2: { ...u("Días continuos en línea"), x1: "H2: ", x2: "IQ: ", x3: "TV: " },
       petar: [1, 2, 3, 4].map(() => ({ t: "PETAR ", l1: "", l2: "Dosis del día: ", l3: "Dosis de ayer: ", z: "" })),
       agenda: ["19:00 hrs Reunión Inicio de Turno (CECOR Sala 1)", "20:00 hrs Reunión de ALINEAMIENTO OPERATIVO", "20:10 hrs Reunión con personal técnico SGIND Y PCI", "05:30 hrs Reunión Cierre de Turno (CECOR Sala 1)"],
-      sup: U.ini(td.elab || B.usuario.ini), vac: "", sitio: this.inis(f, t, [1, 2, 5]), incap: "N/A", comis: "N/A", espec: this.inis(f, t, [3]), sinmov: "N/A",
+      sup: U.ini(td.elab || td.rev || B.usuario.ini), vac: "", sitio: this.inis(f, t, [1, 2, 5]), incap: "N/A", comis: "N/A", espec: this.inis(f, t, [3]), sinmov: "N/A", persAuto: true,
       extraU1: [], extraU2: [], inop1: [], inop2: []
     };
   },
   // hoja del turno: la guardada, o una nueva arrastrando los datos de la hoja anterior (los contadores de dias avanzan)
   base(f, t) {
-    const g = this.de(f, t); if (g) return JSON.parse(JSON.stringify({ ...this.nueva(f, t), ...g }));
+    // hoja guardada: si se guardo antes de esta version (sin persAuto) se respeta tal cual su personal
+    const g = this.de(f, t); if (g) return JSON.parse(JSON.stringify({ ...this.nueva(f, t), ...g, persAuto: g.persAuto === true }));
     const n = this.nueva(f, t), a = this.anterior(f, t);
     if (!a) return n;
     const h = JSON.parse(JSON.stringify({ ...n, ...a }));
     delete h.mod; delete h.fecha; delete h.turno;
     h.fechaHoja = n.fechaHoja;
-    // juntas y personal: son recurrentes por turno, asi que se toman de la ultima hoja del MISMO turno (T1 de T1, T2 de T2)
+    // juntas y notas extra: se toman de la ultima hoja del MISMO turno (T1 de T1, T2 de T2)
     const m = this.anterior(f, t, true);
-    // las NOTAS EXTRA tambien son de cada turno: persisten de dia a dia (o de noche a noche) hasta que se borran a mano, sin mezclarse con las del otro turno
-    const REC = ["agenda", "sup", "vac", "sitio", "incap", "comis", "espec", "sinmov", "extraU1", "extraU2"];
+    // Las NOTAS EXTRA, agenda y ausencias persisten de dia a dia hasta que se borren a mano
+    const REC = ["agenda", "vac", "incap", "comis", "sinmov", "extraU1", "extraU2"];
     for (const k of REC) h[k] = JSON.parse(JSON.stringify(m && m[k] != null && String(m[k]) !== "" ? m[k] : n[k]));
+    // El personal en sitio y especializado se coloca de acuerdo a los presentes de ESTE turno (n.sitio / n.espec)
+    h.sitio = n.sitio;
+    h.espec = n.espec;
+    h.persAuto = true;
+    h.sup = n.sup;
     h._mismo = m ? B.t.corto(m.fecha, m.turno) : "";
     const dias = U.dia(n.fechaHoja) - U.dia(a.fechaHoja || this.fechaHoja(a.fecha, a.turno));
     const mas = v => (String(v).trim() !== "" && /^\d+$/.test(String(v).trim()) && dias > 0) ? String(+v + dias) : v;
@@ -4858,22 +4946,42 @@ B.hoja = {
     h._arrastrada = B.t.corto(a.fecha, a.turno);
     return h;
   },
-  // Actividades para la hoja: pendientes / en proceso (tambien de turnos anteriores), las del turno y las por asignar; sin duplicar
+  // Actividades para la hoja: pendientes / en proceso (tambien de turnos anteriores), las del turno, las por asignar y las recurrentes activas; sin duplicar
   actividades(f, t) {
     const K = B.t.clave(f, t), m = new Map(), def = (B.estado.config.hojaUniDef === "U2") ? "U2" : "U1";
     for (const a of B.dom.todas().sort((x, y) => x.id - y.id)) {
       const ck = B.t.clave(a.fecha, a.turno), zk = a.fCierre ? B.t.clave(a.fCierre, a.tCierre) : 0;
+      const esRecuActiva = !!(a.recurrente && !a.recuFin);
       // solo lo que falta por hacer: pendiente, en proceso o por asignar (lo ya realizado no va en la hoja)
-      const abierta = ck <= K && (a.est === "Pendiente" || a.est === "En proceso" || (a.est === "Concluida" && zk > K));
+      // O si es recurrente activa: SIEMPRE se incluye en la hoja hasta que se desactive por un supervisor
+      const abierta = esRecuActiva || (ck <= K && (a.est === "Pendiente" || a.est === "En proceso" || (a.est === "Concluida" && zk > K)));
       if (!abierta) continue;
       const k = U.norm(a.txt);
-      if (!m.has(k)) m.set(k, { id: a.id, txt: a.txt, inis: [], est: !a.ini ? "Por asignar" : (a.est === "Concluida" ? (a.estOrig || "Pendiente") : a.est), uni: a.uni || "", ck, com: "", libre: !a.ini });
+      if (!m.has(k)) {
+        m.set(k, {
+          id: a.id,
+          txt: a.txt,
+          inis: [],
+          est: !a.ini ? "Por asignar" : (a.est === "Concluida" ? (a.estOrig || "Pendiente") : a.est),
+          uni: a.uni || "",
+          ck,
+          com: "",
+          libre: !a.ini,
+          recurrente: esRecuActiva
+        });
+      }
       const g = m.get(k), i = U.ini(a.ini);
-      if (i && !g.inis.includes(i)) g.inis.push(i);
+      if (i && !g.inis.includes(i)) {
+        if (ck === K || a.est === "Pendiente" || a.est === "En proceso") {
+          g.inis.push(i);
+          if (a.est && a.est !== "Pendiente") g.est = a.est;
+        }
+      }
       if (a.uni && !g.uni) g.uni = a.uni;
       if (a.com && !g.com) g.com = a.com;
+      if (esRecuActiva) g.recurrente = true;
     }
-    return [...m.values()].map(g => ({ ...g, inis: B.dom.ordenados(g.inis).join("/"), col: g.uni || def, desde: g.ck < K }));
+    return [...m.values()].map(g => ({ ...g, inis: B.dom.ordenados(g.inis).join("/"), col: g.uni || def, desde: g.ck < K && !g.recurrente }));
   },
 
   documento(h, f, t) {
@@ -4888,7 +4996,7 @@ B.hoja = {
       "Supervisor: " + (h.sup || ""), "Personal de vacaciones/ permiso: " + (h.vac || ""), "Personal laborando en sitio: <b>" + e(h.sitio || "") + "</b>",
       "Personal incapacitado: " + (h.incap || ""), "Personal comisionado: " + e(h.comis || "") + "<br>Personal especializado: <b>" + e(h.espec || "") + "</b>", "Personal sin movimiento: " + (h.sinmov || "")];
     const fila = x => /<b>|<br>/.test(x) ? x : e(x);
-    const act = a => `<div class="act">${e(a.txt)}${a.inis ? ` <b>(${e(a.inis)})</b>` : a.est === "Por asignar" ? " <b>(por asignar)</b>" : ""}${a.desde && a.est !== "Por asignar" ? ` <span class="gr">· ${e(a.est.toLowerCase())}</span>` : ""}${a.com ? `<div class="gr">↳ ${e(a.com)}</div>` : ""}</div>`;
+    const act = a => `<div class="act">${e(a.txt)}${a.inis ? ` <b>(${e(a.inis)})</b>` : a.est === "Por asignar" ? ` <b>(${a.recurrente ? "recurrente / por asignar" : "por asignar"})</b>` : ""}${a.desde && a.est !== "Por asignar" ? ` <span class="gr">· ${e(a.est.toLowerCase())}</span>` : ""}${a.com ? `<div class="gr">↳ ${e(a.com)}</div>` : ""}</div>`;
     const col = (u, extra) => acts.filter(a => a.col === u).map(act).join("") + (extra || []).filter(x => String(x).trim()).map(x => `<div class="act">${e(x)}</div>`).join("") || `<div class="act">&nbsp;</div>`;
     const inop = (titulo, l) => { const r = [...(l || []).filter(x => x.c || x.i || x.v)]; while (r.length < 4) r.push({});
       return `<table class="in inop"><tr><th colspan="3" class="sec">${titulo}</th></tr><tr><th style="width:56%">COMPONENTE</th><th>INICIO</th><th>VENCE</th></tr>
@@ -4971,6 +5079,8 @@ V.hoja = {
     const { f, t } = T(), H = B.hoja, k = f + t, guardada = H.de(f, t);
     if (!this.borr[k]) this.borr[k] = H.base(f, t);
     const h = this.borr[k], e = U.esc, acts = H.actividades(f, t);
+    // mientras no se corrijan a mano, las iniciales siguen a los presentes del turno (aunque se marquen despues de abrir la hoja)
+    if (h.persAuto) { h.sitio = H.inis(f, t, [1, 2, 5]); h.espec = H.inis(f, t, [3]); }
     const inp = (ruta, et, o = {}) => `<div class="campo" style="${o.st || ""}"><label>${et}</label><input class="inp ${o.cl || ""}" data-h="${ruta}" type="${o.tipo || "text"}" value="${e(ruta.split(".").reduce((x, p) => (x == null ? "" : x[p]), h) ?? "")}" placeholder="${e(o.ph || "")}"></div>`;
     const area = (ruta, et) => `<div class="campo"><label>${et}</label><textarea class="inp" rows="2" data-h="${ruta}">${e(h[ruta] || "")}</textarea></div>`;
     const unidad = (u, n) => `<div class="hoja-sec">Unidad ${n}</div><div class="grid4">${inp(u + ".etq", "Etiqueta de días")}${inp(u + ".dias", "Días (avanza solo)")}${inp(u + ".modo", "Modo de operación COA")}${inp(u + ".pot", "Potencia eléctrica", { ph: "100% 762 MWe" })}
@@ -4992,14 +5102,18 @@ V.hoja = {
         <div class="grid4">${(h.petar || []).map((p, i) => `<div>${inp("petar." + i + ".t", "PETAR " + (i + 1), { ph: "PETAR 26-1R1014 (mR)" })}${inp("petar." + i + ".l1", "Acumulado", { ph: "0 de 14 sem" })}${inp("petar." + i + ".l2", "Dosis del día")}${inp("petar." + i + ".l3", "Dosis de ayer")}${inp("petar." + i + ".z", "Zona", { ph: "RX, TB Y RW (24RU1)" })}</div>`).join("")}</div>
       </div>
       <div class="cuadricula">
-        <div class="tarjeta c6">${cab("calendario", "a", "Reuniones y recurso", "Columna «Actividades pendientes de atender y recurso». Las juntas y el personal se conservan de la última hoja de este mismo turno; corrige solo lo que cambie.", `<button class="btn chico sec" id="hjPers" title="Vuelve a proponer supervisor, personal en sitio y especializado con el rol del turno">${B.ico("reutilizar")} Personal según el rol</button>`)}
+        <div class="tarjeta c6">${cab("calendario", "a", "Reuniones y recurso", "Columna «Actividades pendientes de atender y recurso». Las iniciales del personal se colocan según los marcados presentes en el turno; puedes modificarlas o corregirlas a mano directamente en los campos.",
+          `<div style="display:flex;gap:6px;flex-wrap:wrap">
+            <button class="btn chico verde" id="hjPres" title="Colocar las iniciales del personal marcado presente en este turno">${B.ico("usuarios")} Traer presentes del turno</button>
+            <button class="btn chico sec" id="hjPers" title="Proponer con todo el personal programado en el rol más los marcados presentes (aunque sean de otro turno)">${B.ico("reutilizar")} Según el rol</button>
+          </div>`)}
           <div class="hoja-sec" style="margin-top:0">Reuniones / pendientes de atender</div>${lista("agenda", "19:00 hrs Reunión…")}
           <div class="hoja-sec">Recurso</div>
-          <div class="grid2">${inp("sup", "Supervisor")}${inp("vac", "Vacaciones / permiso")}</div>${inp("sitio", "Personal laborando en sitio")}
-          <div class="grid2">${inp("espec", "Personal especializado")}${inp("incap", "Personal incapacitado")}${inp("comis", "Personal comisionado")}${inp("sinmov", "Personal sin movimiento")}</div>
+          <div class="grid2">${inp("sup", "Supervisor")}${inp("vac", "Vacaciones / permiso")}</div>${inp("sitio", "Personal laborando en sitio", { ph: "Iniciales separadas por / (ej. KMH / JRS)" })}
+          <div class="grid2">${inp("espec", "Personal especializado", { ph: "Iniciales separadas por /" })}${inp("incap", "Personal incapacitado")}${inp("comis", "Personal comisionado")}${inp("sinmov", "Personal sin movimiento")}</div>
         </div>
-        <div class="tarjeta c6" data-tour="hoja-acts">${cab("lista", "g", "Actividades (" + acts.length + ")", "Salen solas de la bitácora: solo las pendientes, en proceso y por asignar (las ya realizadas no aparecen). Elige la unidad de cada una; las por asignar se pueden editar con el lápiz.", `<a class="btn chico sec" href="#/actividades">Asignar…</a>`)}
-          <div class="hoja-lista">${acts.length ? acts.map(a => `<div class="hoja-act"><div class="t"><b>${e(a.inis || "POR ASIGNAR")}</b> · ${e(a.txt)} <span class="muted peque">${e(a.est)}${a.desde ? " · de turnos anteriores" : ""}</span>${a.com ? `<div class="muted peque">↳ ${e(a.com)}</div>` : ""}</div>
+        <div class="tarjeta c6" data-tour="hoja-acts">${cab("lista", "g", "Actividades (" + acts.length + ")", "Salen solas de la bitácora: solo las pendientes, en proceso, por asignar y recurrentes activas. Elige la unidad de cada una; las por asignar se pueden editar con el lápiz.", `<a class="btn chico sec" href="#/actividades">Asignar…</a>`)}
+          <div class="hoja-lista">${acts.length ? acts.map(a => `<div class="hoja-act"><div class="t"><b>${e(a.inis || (a.recurrente ? "RECURRENTE / POR ASIGNAR" : "POR ASIGNAR"))}</b> · ${e(a.txt)}${a.recurrente ? ` <span class="badge a peque" style="padding:1px 5px;font-size:10px">Recurrente</span>` : ""} <span class="muted peque">${e(a.est)}${a.desde ? " · de turnos anteriores" : ""}</span>${a.com ? `<div class="muted peque">↳ ${e(a.com)}</div>` : ""}</div>
             ${a.libre ? `<button class="btn fantasma btn-icono" data-edlibre="${a.id}" title="Editar el texto o agregar una nota">${B.ico("editar")}</button>` : ""}${ui.seg("u" + a.id, ["U1", "U2"], a.col)}</div>`).join("") : ui.vacio("Sin actividades pendientes, en proceso ni por asignar.", "lista")}</div>
           <p class="muted peque" style="margin:10px 0 0">Las <b>notas extra</b> son de este turno (${t === "T1" ? "noche" : "día"}): se conservan en las siguientes hojas del mismo turno hasta que las quites, y no afectan a las del otro turno.</p>
           <div class="hoja-sec">Notas extra en Unidad 1</div>${lista("extraU1", "Texto libre para la columna de Unidad 1")}
@@ -5023,7 +5137,7 @@ V.hoja = {
     const cambio = U.debounce(pintar, 350);
     // volver a dibujar SIN que la pagina salte al inicio (al agregar o quitar renglones)
     const rer = foco => { const y = window.scrollY; B.app.render(); window.scrollTo(0, y); if (foco) { const l = document.querySelectorAll(`[data-h^="${foco}."]`), i = l[l.length - 1]; if (i) i.focus({ preventScroll: true }); } };
-    c.querySelectorAll("[data-h]").forEach(i => i.addEventListener("input", () => { poner(i.dataset.h, i.value); cambio(); }));
+    c.querySelectorAll("[data-h]").forEach(i => i.addEventListener("input", () => { poner(i.dataset.h, i.value); if (i.dataset.h === "sitio" || i.dataset.h === "espec") h.persAuto = false; cambio(); }));
     c.querySelectorAll("[data-add]").forEach(b => b.onclick = () => { (h[b.dataset.add] = h[b.dataset.add] || []).push(b.dataset.obj ? { c: "", i: "", v: "" } : ""); rer(b.dataset.add); });
     c.querySelectorAll("[data-del]").forEach(b => b.onclick = () => { const [r, i] = b.dataset.del.split("."); h[r].splice(+i, 1); rer(); });
     ui.activarSeg(c, async (s, v) => {
@@ -5040,7 +5154,31 @@ V.hoja = {
     };
     const limpia = () => { const x = JSON.parse(JSON.stringify(h)); delete x._arrastrada; delete x._mismo; return x; };
     c.querySelectorAll("[data-edlibre]").forEach(b => b.onclick = () => V.actividades.editarLibre(+b.dataset.edlibre));
-    const bPers = c.querySelector("#hjPers"); if (bPers) bPers.onclick = () => { const n = H.nueva(f, t); h.sitio = n.sitio; h.espec = n.espec; h.sup = n.sup; rer(); };
+    const bPres = c.querySelector("#hjPres");
+    if (bPres) bPres.onclick = () => {
+      const pres = H.presentesInis(f, t);
+      h.sitio = H.inis(f, t, [1, 2, 5]);
+      h.espec = H.inis(f, t, [3]);
+      h.persAuto = true;
+      const td = B.dom.turnoDatos(f, t) || {};
+      h.sup = U.ini(td.elab || td.rev || B.usuario.ini);
+      rer();
+      if (pres.length) {
+        ui.toast(`Iniciales actualizadas con ${pres.length} persona(s) presente(s) en el turno. Puedes corregirlas a mano si lo requieres.`, "ok");
+      } else {
+        ui.toast("Aún no hay personal marcado presente en este turno. Se colocó el rol programado; márcalos presentes en Datos del turno o corrígelas a mano.", "aviso", 6000);
+      }
+    };
+    const bPers = c.querySelector("#hjPers");
+    if (bPers) bPers.onclick = () => {
+      h.sitio = H.inis(f, t, [1, 2, 5], true);
+      h.espec = H.inis(f, t, [3], true);
+      h.persAuto = false;
+      const td = B.dom.turnoDatos(f, t) || {};
+      h.sup = U.ini(td.elab || td.rev || B.usuario.ini);
+      rer();
+      ui.toast("Iniciales propuestas con el rol de turno más todos los marcados presentes.", "aviso");
+    };
     c.querySelector("#hjGuardar").onclick = async () => {
       const r = await ejecutar(() => B.api.op("hojas", "guardar", { fecha: f, turno: t, hoja: limpia() }), "Hoja de asignación guardada.");
       if (r) delete this.borr[k];
@@ -5811,14 +5949,24 @@ V.hoja = {
           (porSem[c.sem] = porSem[c.sem] || []).push(c);
           continue;
         }
-        // manda la "Semana de Captura" del archivo (una tarjeta del lunes temprano puede venir en la semana anterior)
+        // fecha de captura danada: en algunos archivos vienen cruzadas "Sem de Captura" (trae la fecha, p. ej. 46318) y
+        // "Fecha de Captura" (trae la semana 43, que Excel muestra como 12/02/1900). Se recupera la fecha y se ignora esa semana.
+        if (!/^20\d\d-\d\d-\d\d/.test(c.fcap)) {
+          const crudo = mapa.semC != null ? f[mapa.semC] : null, n = typeof crudo === "number" ? crudo : parseFloat(crudo);
+          c.fcap = n > 30000 && n < 80000 ? fechaXls(n) : c.fobs ? c.fobs + "T00:00" : c.fcap;
+          c.semC = ""; c.fcapArreglada = 1;
+        }
+        // manda la "Semana de Captura" del archivo (una tarjeta del lunes temprano puede venir en la semana anterior),
+        // solo si es una semana cercana a la de su fecha de captura (si trae otra cosa, se usa la de la fecha)
         let sem = this.semDe(c.fcap);
-        const sc = parseInt(c.semC, 10), si = +sem.slice(5);
-        if (sc >= 1 && sc <= 53 && sc !== si) sem = (+sem.slice(0, 4) + (sc - si > 26 ? -1 : si - sc > 26 ? 1 : 0)) + "-" + pad(sc);
+        const sc = parseInt(c.semC, 10), si = +sem.slice(5), dif = Math.abs(sc - si);
+        if (sc >= 1 && sc <= 53 && sc !== si && (dif <= 1 || dif >= 51)) sem = (+sem.slice(0, 4) + (sc - si > 26 ? -1 : si - sc > 26 ? 1 : 0)) + "-" + pad(sc);
         c.sem = sem;
         (porSem[sem] = porSem[sem] || []).push(c);
       }
-      return { fu, porSem, on };
+      const todas = Object.values(porSem).flat(), oficial = on || (todas.length > 0 && todas.every(c => this.tipo(c) === "ON"));
+      if (oficial) for (const c of todas) c.oficialON = 1;      // es el listado de la E+1 de Operacion Normal
+      return { fu, porSem, on, oficial };
     },
     // huella de una tarjeta: RPE + fecha de observacion + inicio de "que paso" (para reconocerla entre archivos)
     llave(c) { return [U.ini(c.rpe), String(c.fobs || "").slice(0, 10), U.norm(c.qp || c.doc).replace(/[^A-Z0-9]/g, "").slice(0, 40)].join("|"); },
@@ -6441,13 +6589,27 @@ V.hoja = {
       return {
         fecha: g.fecha || U.sumar(TJ.lunes(W), 11), g1: g.g1 || ant.g1 || "2025-26", g2: g.g2 || ant.g2 || "2025-16",
         pag: Object.assign({ t: "", a: "", c: "", i: "", n: "", x: "" }, g.pag), tlc: Object.assign({ t: "", a: "", c: "", i: "", n: "", x: "" }, g.tlc), sac: Object.assign({ a: "", c: "", i: "", n: "", x: "" }, g.sac),
-        tx1: g.tx1 || "", tx2: g.tx2 || "", tx3: g.tx3 || "", hist: g.hist || undefined, estBar: g.estBar || ant.estBar || "plana"
+        tx1: g.tx1 || "", tx2: g.tx2 || "", tx3: g.tx3 || "", hist: g.hist || undefined, estBar: g.estBar || ant.estBar || "plana",
+        ver: Object.assign({ fu: "SI", oficial: true }, g.ver), excl: (g.excl || []).map(String), incl: (g.incl || []).map(String)
       };
     },
+    // la tarjeta viene en el listado oficial de la E+1 de Operacion Normal (archivo con solo Operacion Normal)
+    oficial(c) { return !!(c.oficialON || ((TJ.datos.fijas || {})[c.id])); },
+    // por que una tarjeta NO se cuenta ("" = si se cuenta). Por omision: las del archivo SEGIND; en Operacion Normal, si la
+    // semana tiene listado oficial, solo las de ese listado. Siempre manda lo que se marque a mano (incluir / excluir).
+    porQueNo(c, S, hayOf) {
+      const v = S.ver || {}, id = String(c.id);
+      if ((S.excl || []).includes(id)) return "Quitada a mano";
+      if ((S.incl || []).includes(id)) return "";
+      if (v.fu && !String(c.fu || "").split(",").includes(v.fu)) return v.fu === "SI" ? "No viene en el archivo SEGIND (solo en Alta energía)" : "No viene en el archivo de Alta energía";
+      if (this.tp() === "ON" && hayOf && v.oficial !== false && !this.oficial(c)) return "No está en el listado oficial de la E+1 de Operación Normal";
+      return "";
+    },
+    contadas(S, L) { const hayOf = L.some(c => this.oficial(c)); return L.filter(c => !this.porQueNo(c, S, hayOf)); },
     // numeros de la tabla resumen: las tarjetas Lideres en Campo salen de lo cargado y lo marcado, salvo que se escriba otro valor
     calc(W, S, L) {
       const M = TJ.datos.marcas, marc = t => L.filter(c => M[c.id] && M[c.id].m === t);
-      const auto = { t: L.filter(c => (c.fu || "").includes("SI")).length, a: marc("A").length, c: marc("C").length };
+      const auto = { t: this.contadas(S, L).length, a: marc("A").length, c: marc("C").length };
       const v = (o, k) => num(o[k]) || 0;
       const tlc = { t: num(S.tlc.t) ?? auto.t, a: num(S.tlc.a) ?? auto.a, c: num(S.tlc.c) ?? auto.c, i: v(S.tlc, "i"), n: v(S.tlc, "n"), x: v(S.tlc, "x") };
       const pag = { t: v(S.pag, "t"), a: v(S.pag, "a"), c: v(S.pag, "c"), i: v(S.pag, "i"), n: v(S.pag, "n"), x: v(S.pag, "x") };
@@ -6847,6 +7009,7 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
             <div class="tabla-cont" style="max-height:268px;overflow:auto"><table class="tabla e1-tabla"><thead><tr><th>Sem.</th><th>Actos</th><th>Observ.</th><th>Cond.</th><th>Acc. incap.</th><th>Incid.</th></tr></thead><tbody id="e1Hist">
               ${ult.reverse().map(k => `<tr><td><b>${k.slice(5)}</b>/${k.slice(2, 4)}</td>${[0, 1, 2, 3, 4].map(i => `<td><input class="inp e1-n" data-h="${k}" data-i="${i}" value="${h[k][i] ?? ""}" inputmode="numeric" style="width:46px"></td>`).join("")}</tr>`).join("")}</tbody></table></div></div>
         </div>
+        <div class="tarjeta" id="e1Ver"></div>
         <div class="tarjeta">${cab("editar", "v", "Textos de las láminas", "Vacío = se usa el texto propuesto (en gris). Entre **dobles asteriscos** va en negritas.", `<button class="btn chico sec" id="e1Prop">${B.ico("reutilizar")} Usar los propuestos para editarlos</button>`)}
           ${[["tx1", "Lámina 3 · bajo la tabla resumen"], ["tx2", "Lámina 4 · bajo la gráfica de actos y condiciones"], ["tx3", "Lámina 5 · bajo la gráfica de accidentes e incidentes"]].map(([k, t]) => `<div class="campo"><label>${t}</label><textarea class="inp" data-k="${k}" placeholder="${esc(prop[k])}" style="min-height:84px">${esc(S[k])}</textarea></div>`).join("")}</div>
         <div class="tarjeta">${cab("ojo", "g", "Vista previa", "Así quedará. En PowerPoint la tabla, los textos y las gráficas se pueden editar (clic derecho en la gráfica → Modificar datos).",
@@ -6859,6 +7022,40 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
       };
       const tot = () => { const k = this.calc(W, S, L); [["e1Tt", k.tot.t], ["e1Ta", k.tot.a], ["e1Tc", k.tot.c], ["e1Te", k.tot.ev]].forEach(([id, v]) => { const el = c.querySelector("#" + id); if (el) el.textContent = v; }); };
       const prevLento = U.debounce(prev, 500);
+      // ---- verificacion: que tarjetas se cuentan en "Tarjetas Lideres en Campo" y por que una no
+      const fV = this.fV = this.fV || { q: "", ver: "todas" };
+      const pintaVer = () => {
+        const caja = c.querySelector("#e1Ver"), hayOf = L.some(x => this.oficial(x)), v = S.ver, por = new Map(L.map(x => [String(x.id), this.porQueNo(x, S, hayOf)]));
+        const cuenta = L.filter(x => !por.get(String(x.id))).length, nSI = L.filter(x => String(x.fu || "").includes("SI")).length, nAE = L.filter(x => String(x.fu || "").split(",").includes("AE") && !String(x.fu || "").includes("SI")).length, nOf = L.filter(x => this.oficial(x)).length;
+        const q = U.norm(fV.q), filas = L.filter(x => (fV.ver === "todas" || (fV.ver === "si" ? !por.get(String(x.id)) : !!por.get(String(x.id)))) && (!q || U.norm([x.id, x.rpe, x.nom, x.std, x.qp].join(" ")).includes(q)))
+          .sort((a, b) => !!por.get(String(a.id)) - !!por.get(String(b.id)) || String(a.fobs).localeCompare(String(b.fobs)));
+        caja.innerHTML = `${cab("buscar", "a", "Verificación de las tarjetas que se cuentan", `Todas las tarjetas de ${esc(TJ.nomPeriodo(tp))} de la semana. Se cuentan <b>${cuenta}</b> en «Tarjetas Líderes en Campo». Marca o desmarca <b>Contar</b> para corregir una por una.`)}
+          <div class="tj-kpis" style="margin:4px 0 10px"><div><b>${L.length}</b><span>tarjetas de ${esc(TJ.nomPeriodo(tp))} en la semana</span></div><div><b>${nSI}</b><span>en el archivo SEGIND</span></div><div><b>${nAE}</b><span>solo en Alta energía</span></div>${tp === "ON" ? `<div><b>${nOf}</b><span>en el listado oficial E+1</span></div>` : ""}<div><b style="color:var(--verde,#1E6B4A)">${cuenta}</b><span>se cuentan</span></div></div>
+          <div class="fila" style="align-items:flex-end"><div class="campo" style="flex:1 1 220px"><label>Contar las tarjetas del archivo</label><select class="inp" id="e1VFu"><option value="SI" ${v.fu === "SI" ? "selected" : ""}>SEGIND (como siempre)</option><option value="AE" ${v.fu === "AE" ? "selected" : ""}>Alta energía</option><option value="" ${!v.fu ? "selected" : ""}>Los dos archivos</option></select></div>
+            ${tp === "ON" ? `<label class="chip-ali" style="margin:0 0 14px" title="Si la semana tiene listado oficial (el Excel de la E+1 de Operación Normal), solo se cuentan las de ese listado"><input type="checkbox" id="e1VOf" ${v.oficial !== false ? "checked" : ""} ${hayOf ? "" : "disabled"}><span>Solo las del listado oficial${hayOf ? " (" + nOf + ")" : " (no se ha cargado)"}</span></label>` : ""}
+            <div class="campo" style="flex:0 1 190px"><label>Ver</label><select class="inp" id="e1VVer"><option value="todas" ${fV.ver === "todas" ? "selected" : ""}>Todas</option><option value="si" ${fV.ver === "si" ? "selected" : ""}>Las que se cuentan</option><option value="no" ${fV.ver === "no" ? "selected" : ""}>Las que NO se cuentan</option></select></div>
+            <div class="campo" style="flex:1 1 200px"><label>Buscar</label><input class="inp" id="e1VQ" value="${esc(fV.q)}" placeholder="ID, nombre, RPE o texto…"></div>
+            ${(S.excl.length || S.incl.length) ? `<button class="btn chico fantasma" id="e1VLimpia" style="margin-bottom:14px">Quitar los cambios a mano (${S.excl.length + S.incl.length})</button>` : ""}</div>
+          <div class="tabla-cont" style="max-height:420px;overflow:auto"><table class="tabla"><thead><tr><th class="c">Contar</th><th>ID</th><th>Obs.</th><th>Captura</th><th>Originador</th><th>Estándar</th><th>Resultado</th><th>Archivo</th>${tp === "ON" ? "<th>Listado oficial</th>" : ""}<th>Por qué no se cuenta</th></tr></thead><tbody>
+            ${filas.map(x => { const r = por.get(String(x.id)), fu = String(x.fu || "").split(","); return `<tr style="${r ? "opacity:.62" : ""}"><td class="c"><input type="checkbox" data-cnt="${esc(x.id)}" ${r ? "" : "checked"} style="width:17px;height:17px"></td><td><a href="#" data-verc="${esc(x.id)}"><b>${esc(x.id)}</b></a></td>
+              <td class="tnum">${esc(U.corta(x.fobs))}</td><td class="tnum">${esc(U.corta(String(x.fcap || "").slice(0, 10)))}${x.fcapArreglada ? ' <span class="badge d" title="La fecha de captura venía dañada en el Excel; se recuperó">corregida</span>' : ""}</td><td>${esc(x.nom || "")}<div class="peque muted">${esc(x.rpe || "")}</div></td><td class="peque">${esc(x.std || "")}</td>
+              <td>${/^DEBIL/i.test(x.si || "") ? '<span class="badge r">Debilidad</span>' : '<span class="badge v">Cumple</span>'}</td><td>${fu.includes("SI") ? '<span class="badge v">SEGIND</span> ' : ""}${fu.includes("AE") ? '<span class="badge r">AE</span>' : ""}</td>
+              ${tp === "ON" ? `<td class="c">${this.oficial(x) ? "✓" : ""}</td>` : ""}<td class="peque" style="color:#b45309">${esc(r || "")}</td></tr>`; }).join("") || `<tr><td colspan="10" class="muted">Sin tarjetas con ese filtro.</td></tr>`}</tbody></table></div>`;
+        const re = () => { pintaVer(); tot(); prevLento(); const ti = c.querySelector('[data-k="tlc.t"]'); if (ti) ti.placeholder = this.calc(W, S, L).auto.t; };
+        caja.querySelector("#e1VFu").onchange = e => { S.ver.fu = e.target.value; re(); };
+        const of = caja.querySelector("#e1VOf"); if (of) of.onchange = e => { S.ver.oficial = e.target.checked; re(); };
+        caja.querySelector("#e1VVer").onchange = e => { fV.ver = e.target.value; pintaVer(); };
+        const qi = caja.querySelector("#e1VQ"); qi.onchange = () => { fV.q = qi.value.trim(); pintaVer(); };
+        const lp = caja.querySelector("#e1VLimpia"); if (lp) lp.onclick = () => { S.excl = []; S.incl = []; re(); };
+        caja.querySelectorAll("[data-cnt]").forEach(ch => ch.onchange = () => {
+          const id = ch.dataset.cnt; S.excl = S.excl.filter(x => x !== id); S.incl = S.incl.filter(x => x !== id);
+          const sinMano = this.porQueNo(L.find(x => String(x.id) === id), Object.assign({}, S, { excl: [], incl: [] }), hayOf);
+          if (ch.checked && sinMano) S.incl.push(id); if (!ch.checked && !sinMano) S.excl.push(id);
+          re();
+        });
+        caja.querySelectorAll("[data-verc]").forEach(a => a.onclick = e => { e.preventDefault(); P.detalle(L.find(x => String(x.id) === a.dataset.verc), null, () => { }); });
+      };
+      pintaVer();
       c.querySelectorAll("[data-k]").forEach(i => i.oninput = () => { const p = i.dataset.k.split("."); if (p.length === 2) S[p[0]][p[1]] = i.value.trim(); else S[p[0]] = i.type === "textarea" ? i.value : i.value.trim(); tot(); prevLento(); });
       c.querySelectorAll("[data-h]").forEach(i => i.oninput = () => { const k = i.dataset.h, f = (this.histEd[k] || h[k]).slice(); f[+i.dataset.i] = num(i.value); this.histEd[k] = f; prevLento(); });
       c.querySelector("#e1Sem").onchange = e => { P.sem = e.target.value; this.S = null; P.pinta(); };
@@ -8965,7 +9162,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "4.10.2", servidorViejo: false,
+  info: {}, VERSION: "4.10.4", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -9152,7 +9349,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "procedimientos" ? '<span class="contador oculto" id="cntProc"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.10.2")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.10.4")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
