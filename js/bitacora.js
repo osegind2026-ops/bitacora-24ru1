@@ -809,7 +809,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.10.4", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.10.5", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -5828,6 +5828,7 @@ V.hoja = {
 
   // Primera hoja del libro como matriz de celdas (texto o numero)
   B.xlsxFilas = buf => xlsxFilas(buf);
+  B.zipLeer = u8 => zipLeer(u8);      // tambien lo usa la E+1 para leer presentaciones .pptx
   function xlsxFilas(buf) {
     const z = zipLeer(new Uint8Array(buf)), xml = n => new DOMParser().parseFromString(new TextDecoder().decode(z.get(n)()), "application/xml");
     const hoja = [...z.keys()].filter(k => /^xl\/worksheets\/[^/]+\.xml$/.test(k)).sort()[0];
@@ -6571,7 +6572,7 @@ V.hoja = {
 (function () {
   const TJ = B.tj, esc = s => U.esc(s);
   const MES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
-  const num = v => { const x = parseInt(v, 10); return isNaN(x) ? null : x; };
+  const num = v => { const x = parseInt(v, 10); return isNaN(x) ? null : x; }, pad2 = v => String(v).padStart(2, "0");
   const AZUL = "4472C4", NARANJA = "ED7D31", GRIS = "A5A5A5";
 
   const E1 = B.e1 = {
@@ -6618,7 +6619,23 @@ V.hoja = {
       const tot = { t: pag.t + tlc.t, a: s("a"), c: s("c"), ev: s("i") + s("n") + s("x") };
       return { auto, tlc, pag, sac, tot, fila: [tot.a, tot.t, tot.c, s("x"), s("i")], actos: marc("A"), conds: marc("C") };
     },
-    hist(W, fila) { const h = Object.assign({}, B.E1_SEMILLA || {}, this.histEd || this.histD()); if (W && fila) h[W] = fila; return h; },
+    histCalc: {},
+    hist(W, fila) { const h = Object.assign({}, B.E1_SEMILLA || {}, this.histCalc[this.tp()] || {}, this.histEd || this.histD()); if (W && fila) h[W] = fila; return h; },
+    // todas las semanas ISO de "desde" a "hasta"
+    semanasEntre(desde, hasta) { const r = []; if (!/^\d{4}-\d{2}$/.test(desde || "")) return r; for (let k = desde, g = 0; k <= hasta && g < 300; k = TJ.semSig(k, 1), g++) r.push(k); return r; },
+    // semanas sin dato en el historial que SI tienen tarjetas cargadas: se calculan solas (tarjetas y actos/condiciones marcados;
+    // el PAG-28-5 de esas semanas no se conoce y queda en 0 hasta que se capture). Asi la grafica no pierde semanas.
+    async calcularFaltantes(W) {
+      const tp = this.tp(), D = TJ.datos, h = this.hist(W), calc = this.histCalc[tp] = this.histCalc[tp] || {};
+      const desde = [this.S && this.S.g1, this.S && this.S.g2].filter(Boolean).sort()[0] || "2025-16";
+      for (const k of this.semanasEntre(desde, W)) {
+        if (k === W || (h[k] && h[k][1] != null && !calc[k]) || !D.semanas[k]) continue;
+        const L = (await TJ.semana(k, true)).filter(c => TJ.tipo(c) === tp); if (!L.length) continue;
+        const C = this.calc(k, this.base(k), L); calc[k] = C.fila;
+      }
+    },
+    // estado de cada semana del historial: capturada / calculada / inicial / falta
+    estadoSem(k) { const g = Object.assign({}, this.histEd || this.histD()); if (g[k] && g[k][1] != null) return "cap"; if ((this.histCalc[this.tp()] || {})[k]) return "calc"; if ((B.E1_SEMILLA || {})[k]) return "ini"; return "falta"; },
     serie(h, desde, W) { return Object.keys(h).filter(k => /^\d{4}-\d{2}$/.test(k) && k >= desde && k <= W).sort(); },
 
     /* ------------------------------------------------------------ textos propuestos (se pueden corregir). **negritas** */
@@ -6977,6 +6994,139 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
       return this.zip(fijo.concat(arch));
     },
 
+    /* ------------------------------------------------------------ importar una E+1 ya presentada (PPTX o PDF) */
+    // Lee: semana y fecha (portada), tabla resumen, textos y los datos de las graficas. Si una grafica es imagen (sin datos),
+    // se muestra para escribir sus numeros a mano. Todo se revisa antes de guardarse en el historial.
+    async leerPptx(buf) {
+      const z = B.zipLeer(new Uint8Array(buf)), td = new TextDecoder(), xml = n => new DOMParser().parseFromString(td.decode(z.get(n)()), "application/xml");
+      const tx = el => [...el.getElementsByTagName("a:t")].map(x => x.textContent).join("");
+      const slides = [...z.keys()].filter(n => /^ppt\/slides\/slide\d+\.xml$/.test(n)).sort((a, b) => +a.match(/\d+/)[0] - +b.match(/\d+/)[0]);
+      const r = { lams: [], graf: [], imgs: [] };
+      for (const n of slides) {
+        const d = xml(n), relN = n.replace("slides/", "slides/_rels/") + ".rels", rel = z.has(relN) ? td.decode(z.get(relN)()) : "";
+        const parrafos = [...d.getElementsByTagName("p:sp")].map(sp => [...sp.getElementsByTagName("a:p")].map(tx).join("\n").trim()).filter(Boolean);
+        const tabla = [...d.getElementsByTagName("a:tr")].map(tr => [...tr.getElementsByTagName("a:tc")].map(tc => tx(tc).trim()));
+        const graf = [...rel.matchAll(/Target="\.\.\/charts\/(chart\d+\.xml)"/g)].map(m => "ppt/charts/" + m[1]);
+        for (const g of graf) if (z.has(g)) {
+          const cx = xml(g), ser = [...cx.getElementsByTagName("c:ser")].map(s => {
+            const vs = el => el ? [...el.getElementsByTagName("c:pt")].map(p => ({ i: +p.getAttribute("idx"), v: (p.getElementsByTagName("c:v")[0] || {}).textContent })) : [];
+            const nom = s.getElementsByTagName("c:tx")[0], cat = s.getElementsByTagName("c:cat")[0], val = s.getElementsByTagName("c:val")[0];
+            return { n: nom ? tx(nom) || [...nom.getElementsByTagName("c:v")].map(x => x.textContent).join("") : "", cats: vs(cat), vals: vs(val) };
+          });
+          r.graf.push({ lam: r.lams.length, ser });
+        }
+        const pics = [...rel.matchAll(/Target="\.\.\/media\/([^"]+\.(?:png|jpe?g|emf|gif))"/gi)].map(m => "ppt/media/" + m[1]);
+        r.lams.push({ parrafos, tabla, pics, texto: parrafos.join("\n") + "\n" + tabla.map(f => f.join(" | ")).join("\n") });
+      }
+      // imagenes de las laminas que hablan de las graficas pero no traen grafica con datos (para capturarlas a mano)
+      r.lams.forEach((l, i) => { if (/Actos\s+y\s+Condiciones|ACCIDENTES\s+INCAPACITANTES/i.test(l.texto) && !r.graf.some(g => g.lam === i)) for (const p of l.pics) if (z.has(p) && !/\.emf$/i.test(p)) r.imgs.push(URL.createObjectURL(new Blob([z.get(p)()], { type: /png$/i.test(p) ? "image/png" : "image/jpeg" }))); });
+      return r;
+    },
+    async leerPdf(buf) {
+      const lib = await B.proc.pdfjs(), doc = await lib.getDocument({ data: new Uint8Array(buf.slice(0)) }).promise, r = { lams: [], graf: [], imgs: [] };
+      for (let i = 1; i <= doc.numPages; i++) {
+        const pg = await doc.getPage(i), c = await pg.getTextContent(); let t = ""; for (const it of c.items) t += it.str + (it.hasEOL ? "\n" : " ");
+        r.lams.push({ parrafos: t.split("\n").map(x => x.replace(/\s+/g, " ").trim()).filter(Boolean), tabla: [], texto: t });
+        // las graficas de un PDF son dibujos: se muestra la pagina para capturar sus numeros a mano
+        if (/ACTOS|ACCIDENTES|INCIDENTES/i.test(t) && /SEM\s*\d/i.test(t)) {
+          const vp = pg.getViewport({ scale: 1.3 }), cv = document.createElement("canvas"); cv.width = vp.width; cv.height = vp.height;
+          // si el dibujo no termina (pestaña en segundo plano), se sigue sin la imagen
+          const ok = await Promise.race([pg.render({ canvasContext: cv.getContext("2d"), viewport: vp }).promise.then(() => 1), new Promise(res => setTimeout(() => res(0), 10000))]).catch(() => 0);
+          if (ok) r.imgs.push(cv.toDataURL("image/jpeg", .85));
+          // etiquetas del eje en el orden en que aparecen (sin quitar repetidas: "SEM 26" puede ser de dos años); acepta "SME 17"
+          const sems = [...t.matchAll(/\bS(?:EM|ME)\s*(\d{1,2})\b(?!\s*\/)/gi)].map(m => +m[1]); r.graf.push({ lam: i - 1, soloSemanas: sems, esAcc: /ACCIDENTES/i.test(t) });
+        }
+      }
+      return r;
+    },
+    // de lo leido: semana, fecha, tabla, textos y renglones del historial (semana -> [actos, obs, cond, acc, inc])
+    interpretar(r) {
+      const todo = r.lams.map(l => l.texto).join("\n"), m = /E\+1\s*SEM\s*(\d{1,2})\s*\/\s*(\d{4})/i.exec(todo) || /SEMANA\s+(\d{1,2})\s*\/\s*(\d{4})/i.exec(todo);
+      const W = m ? m[2] + "-" + pad2(m[1]) : "", MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+      const fm = /(\d{1,2})\s+de\s+([a-záéíóú]+)\s+de\s+(\d{4})/i.exec(todo), mes = fm ? MESES.indexOf(U.norm(fm[2]).toLowerCase()) : -1;
+      const fecha = fm && mes >= 0 ? fm[3] + "-" + pad2(mes + 1) + "-" + pad2(fm[1]) : "";
+      // tabla resumen: renglones PAG-28-5, TARJETAS LIDERES, SACPAC (en un PPTX vienen como tabla; en un PDF, como texto seguido)
+      // en el PDF la tabla viene como texto seguido: se busca solo en la lamina de la tabla resumen ("N/A" no cuenta)
+      const lamTabla = (r.lams.find(l => /TABLA\s+RESUMEN/i.test(l.texto)) || { texto: todo }).texto.replace(/\s+/g, " ");
+      const filaDe = (re) => { for (const l of r.lams) { const f = l.tabla.find(x => re.test(x[0] || "")); if (f) return f.slice(1).map(x => x.replace(/[^\d]/g, "")); }
+        const mt = new RegExp(re.source + "\\s*((?:N\\/A\\s+)?(?:\\d+\\s+){0,5}\\d+)", "i").exec(lamTabla); return mt ? mt[1].trim().split(/\s+/).map(x => /N\/A/i.test(x) ? "" : x) : []; };
+      const fila6 = a => { const [t, a1, c, i, n, x] = a; return { t: t || "", a: a1 || "", c: c || "", i: i || "", n: n || "", x: x || "" }; };
+      const pag = fila6(filaDe(/PAG\s*-?\s*28\s*-?\s*5/i)), tlc = fila6(filaDe(/TARJETAS\s*L[IÍ]DERES\s*(?:EN\s*CAMPO)?/i)), sacA = filaDe(/SACPAC/i);
+      const sv = sacA.length >= 6 || sacA[0] === "" ? sacA.slice(1) : sacA;      // la columna de tarjetas del SACPAC es "N/A"
+      const sac = { a: sv[0] || "", c: sv[1] || "", i: sv[2] || "", n: sv[3] || "", x: sv[4] || "" };
+      // textos largos bajo la tabla y bajo cada grafica
+      const largos = r.lams.map(l => l.parrafos.filter(p => p.length > 120).sort((a, b) => b.length - a.length)[0] || "");
+      const iTab = r.lams.findIndex(l => /TABLA\s+RESUMEN/i.test(l.texto)), iAct = r.lams.findIndex(l => /se resume de la siguiente manera/i.test(l.texto) && l !== r.lams[iTab]), iAcc = r.lams.findIndex(l => /Durante la Semana/i.test(l.texto) && l !== r.lams[iTab]);
+      const tx1 = iTab >= 0 ? largos[iTab] : "", tx2 = iAct >= 0 ? largos[iAct] : "", tx3 = iAcc >= 0 ? largos[iAcc] : "";
+      // graficas: categorias "SEM nn" de la mas reciente hacia atras (el año baja al cruzar de la 1 a la 52)
+      const filas = {}, anioW = W ? +W.slice(0, 4) : new Date().getFullYear(), semW = W ? +W.slice(5) : 53;
+      const conAnio = nums => { const out = []; let a = anioW, prev = null; for (let j = nums.length - 1; j >= 0; j--) { const s = nums[j]; if (prev == null ? s > semW : s > prev) a--; out.unshift(a + "-" + pad2(s)); prev = s; } return out; };
+      for (const g of r.graf) {
+        if (g.soloSemanas) { for (const k of conAnio(g.soloSemanas)) filas[k] = filas[k] || [null, null, null, null, null]; continue; }
+        const cats = (g.ser[0] || { cats: [] }).cats.map(x => +(/(\d{1,2})/.exec(x.v || "") || [0, 0])[1]), claves = conAnio(cats);
+        for (const s of g.ser) {
+          const N = U.norm(s.n), col = /ACTOS/.test(N) ? 0 : /TOTAL|OBSERVAC/.test(N) ? 1 : /CONDICION/.test(N) ? 2 : /ACCIDENTE/.test(N) ? 3 : /INCIDENTE/.test(N) ? 4 : -1;
+          if (col < 0) continue;
+          for (const p of s.vals) { const k = claves[p.i]; if (!k) continue; (filas[k] = filas[k] || [null, null, null, null, null])[col] = p.v === "" || p.v == null ? null : +p.v; }
+        }
+      }
+      return { W, fecha, pag, tlc, sac, tx1, tx2, tx3, filas, imgs: r.imgs, conDatos: r.graf.some(g => g.ser) };
+    },
+    async importar(file, P) {
+      const buf = await file.arrayBuffer(), esPdf = /\.pdf$/i.test(file.name);
+      B.ui.toast("Leyendo la presentación…", "", 2500);
+      const I = this.interpretar(esPdf ? await this.leerPdf(buf) : await this.leerPptx(buf)), tp0 = this.tp();
+      const D = TJ.datos, n = v => v == null ? "" : v, claves = Object.keys(I.filas).sort();
+      // en gris (placeholder) lo que ya tiene el historial: si se deja vacio, se conserva
+      const H0 = Object.assign({}, B.E1_SEMILLA || {}, this.histD());
+      const gridFila = (k, f) => `<tr data-fk="${k}"><td><input class="inp" data-sem value="${esc(k)}" style="width:86px"></td>${[0, 1, 2, 3, 4].map(i => `<td><input class="inp e1-n" data-c="${i}" value="${n(f[i])}" placeholder="${H0[k] ? n(H0[k][i]) : ""}" inputmode="numeric" style="width:54px"></td>`).join("")}</tr>`;
+      const ent = (o, k) => `<td><input class="inp e1-n" data-t="${o}.${k}" value="${esc((I[o] || {})[k] || "")}" inputmode="numeric" style="width:50px"></td>`;
+      const r = await B.ui.modal({ titulo: "Importar E+1 · " + esc(file.name), icono: "subir", ancho: true,
+        html: `<p class="muted peque" style="margin:0 0 10px">Revisa lo que se leyó de la presentación y corrige antes de guardar. ${I.conDatos ? "Las gráficas traían sus datos: ya están abajo." : "Las gráficas son <b>imágenes</b>: escribe sus números en la tabla (las semanas se tomaron de la imagen)."}</p>
+          <div class="fila"><div class="campo" style="flex:0 0 150px"><label>Semana (año-semana)</label><input class="inp" id="imW" value="${esc(I.W)}" placeholder="2026-41"></div>
+            <div class="campo" style="flex:0 0 170px"><label>Fecha de la presentación</label><input class="inp" type="date" id="imF" value="${esc(I.fecha)}"></div>
+            <div class="campo" style="flex:0 0 260px"><label>Es la E+1 de</label><select class="inp" id="imTp"><option value="RE" ${tp0 === "RE" ? "selected" : ""}>${esc(TJ.nomPeriodo("RE"))}</option><option value="ON" ${tp0 === "ON" ? "selected" : ""}>Operación Normal</option></select></div></div>
+          <h3 style="font-size:13px;margin:4px 0 6px">Tabla resumen</h3>
+          <div class="tabla-cont"><table class="tabla e1-tabla"><thead><tr><th>Fuente</th><th>Tarjetas</th><th>Actos</th><th>Cond.</th><th>Incid.</th><th>Acc. no incap.</th><th>Acc. incap.</th></tr></thead><tbody>
+            <tr><td>PAG-28-5</td>${["t", "a", "c", "i", "n", "x"].map(k => ent("pag", k)).join("")}</tr><tr><td>Líderes en Campo</td>${["t", "a", "c", "i", "n", "x"].map(k => ent("tlc", k)).join("")}</tr><tr><td>SACPAC</td><td>N/A</td>${["a", "c", "i", "n", "x"].map(k => ent("sac", k)).join("")}</tr></tbody></table></div>
+          <h3 style="font-size:13px;margin:12px 0 6px">Datos de las gráficas (se agregan al historial; lo que dejes vacío no cambia lo que ya haya)</h3>
+          <div class="tabla-cont" style="max-height:260px;overflow:auto"><table class="tabla e1-tabla"><thead><tr><th>Semana</th><th>Actos</th><th>Observ.</th><th>Cond.</th><th>Acc. incap.</th><th>Incid.</th></tr></thead><tbody id="imG">${claves.map(k => gridFila(k, I.filas[k])).join("")}</tbody></table></div>
+          <button class="btn chico sec" id="imMas" style="margin-top:6px">${B.ico("mas")} Agregar semana</button>
+          ${I.imgs.length ? `<h3 style="font-size:13px;margin:12px 0 6px">Gráficas de la presentación (para copiar sus números)</h3>${I.imgs.map(u => `<img src="${u}" style="max-width:100%;border:1px solid #ddd;border-radius:6px;margin-bottom:8px">`).join("")}` : ""}
+          <label class="chip-ali" style="margin-top:10px"><input type="checkbox" id="imSem" checked><span>Guardar también la tabla y los textos como la presentación entregada de esa semana</span></label>`,
+        alAbrir: v => { v.querySelector("#imMas").onclick = () => { v.querySelector("#imG").insertAdjacentHTML("beforeend", gridFila("", [null, null, null, null, null])); }; },
+        botones: [{ t: "Cancelar", c: "sec", v: null }, { t: "Guardar en el historial", c: "verde", v: v => ({
+          W: v.querySelector("#imW").value.trim(), fecha: v.querySelector("#imF").value, tp: v.querySelector("#imTp").value, sem: v.querySelector("#imSem").checked,
+          t: Object.fromEntries([...v.querySelectorAll("[data-t]")].map(i => [i.dataset.t, i.value.trim()])),
+          filas: [...v.querySelectorAll("#imG tr")].map(tr => ({ k: tr.querySelector("[data-sem]").value.trim(), v: [...tr.querySelectorAll("[data-c]")].map(i => i.value.trim()) })) }) }] });
+      if (!r) return;
+      if (!/^\d{4}-\d{2}$/.test(r.W)) { B.ui.toast("Escribe la semana como año-semana, por ejemplo 2026-41.", "error"); return; }
+      const prevTp = this.tpSel; this.tpSel = r.tp;
+      const SD = this.semD(), hh = Object.assign({}, this.histD());
+      let n2 = 0;
+      for (const f of r.filas) {
+        if (!/^\d{4}-\d{2}$/.test(f.k)) continue;
+        const ant = hh[f.k] || (B.E1_SEMILLA || {})[f.k] || [null, null, null, 0, 0], nueva = ant.slice();
+        f.v.forEach((x, i) => { if (x !== "") nueva[i] = num(x); }); if (f.v.some(x => x !== "")) { hh[f.k] = nueva; n2++; }
+      }
+      let datos = SD[r.W];
+      if (r.sem || !datos) {
+        const b = this.base(r.W), g = k => r.t[k] || "";
+        datos = Object.assign(b, { fecha: r.fecha || b.fecha, hist: true, importada: file.name, tx1: I.tx1 || b.tx1, tx2: I.tx2 || b.tx2, tx3: I.tx3 || b.tx3,
+          pag: { t: g("pag.t"), a: g("pag.a"), c: g("pag.c"), i: g("pag.i"), n: g("pag.n"), x: g("pag.x") }, tlc: { t: g("tlc.t"), a: g("tlc.a"), c: g("tlc.c"), i: g("tlc.i"), n: g("tlc.n"), x: g("tlc.x") },
+          sac: { a: g("sac.a"), c: g("sac.c"), i: g("sac.i"), n: g("sac.n"), x: g("sac.x") } });
+        // el renglon de la propia semana en el historial: de la tabla importada
+        const s = k => num(g("pag." + k)) || 0, tl = k => num(g("tlc." + k)) || 0, sa = k => num(g("sac." + k)) || 0;
+        if (!r.filas.some(f => f.k === r.W && f.v.some(x => x !== ""))) hh[r.W] = [s("a") + tl("a") + sa("a"), s("t") + tl("t"), s("c") + tl("c") + sa("c"), s("x") + tl("x") + sa("x"), s("i") + tl("i") + sa("i")];
+      }
+      try {
+        await TJ.llamar("semGuardar", { sem: r.W, datos, hist: hh, tipo: r.tp });
+        SD[r.W] = JSON.parse(JSON.stringify(datos)); if (r.tp === "ON") TJ.datos.histON = hh; else TJ.datos.hist = hh;
+        this.histCalc[r.tp] = {}; this.S = null; P.sem = r.W; P.pinta();
+        B.ui.toast(`Presentación de la semana ${+r.W.slice(5)} guardada en el historial (${n2} semana(s) de las gráficas).`, "ok", 6000);
+      } catch (e) { this.tpSel = prevTp; B.ui.error(e); }
+    },
+
     /* ------------------------------------------------------------ pantalla (pestana "Presentacion E+1") */
     async vista(P, c) {
       const D = TJ.datos, tp = this.tp(), SD = this.semD(), semanas = [...new Set(Object.keys(D.semanas).concat(Object.keys(SD)))].sort();
@@ -6985,15 +7135,24 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
       // solo las tarjetas del periodo de esta E+1 (aunque arriba se vean todas)
       const W = P.sem, L = D.semanas[W] ? (await TJ.semana(W, true)).filter(c => TJ.tipo(c) === tp) : [];
       if (this.W !== W || this.Wtp !== tp || !this.S) { this.W = W; this.Wtp = tp; this.S = this.base(W); this.histEd = Object.assign({}, this.histD()); }
+      await this.calcularFaltantes(W);
       const S = this.S, C = this.calc(W, S, L), prop = this.textos(W, C, L), h = this.hist(W, C.fila);
+      // semanas de las graficas (desde g1 o g2) hasta antes de esta: las que no tienen ningun dato se avisan
+      const rangoH = this.semanasEntre([S.g1, S.g2].filter(x => /^\d{4}-\d{2}$/.test(x || "")).sort()[0] || "2025-16", W).filter(k => k !== W);
+      // falta: sin actos/observaciones desde la semana de inicio de la grafica 1, o sin accidentes/incidentes desde la de la grafica 2
+      const sinDatos = k => { const f = h[k]; return (k >= S.g1 && !(f && f[1] != null)) || (k >= S.g2 && !(f && (f[3] != null || f[4] != null))); };
+      const faltan = rangoH.filter(sinDatos), calculadas = rangoH.filter(k => this.estadoSem(k) === "calc");
+      const ETQ = { cap: ["v", "capturada"], calc: ["a", "calculada"], ini: ["n", "inicial"], falta: ["r", "falta"] };
       const ent = (k, ph, w) => `<input class="inp e1-n" data-k="${k}" value="${esc(k.split(".").reduce((o, p) => o[p], S))}" placeholder="${ph}" inputmode="numeric" style="width:${w || 52}px">`;
       const fila = (t, o, auto) => `<tr><td><b>${t}</b></td>${["t", "a", "c", "i", "n", "x"].map(k => `<td>${o === "sac" && k === "t" ? "N/A" : ent(o + "." + k, auto && auto[k] != null ? auto[k] : "0")}</td>`).join("")}</tr>`;
-      const ult = this.serie(h, "0000-00", W).slice(-8).filter(k => k !== W);
+      const ult = rangoH.slice();
       const lista = (t, l, col) => l.length ? `<div class="e1-marc"><b style="color:var(--${col})">${t} (${l.length})</b>${l.map(x => `<a href="#" data-ver="${esc(x.id)}">#${esc(x.id)} · ${esc((x.qp || x.doc || "").slice(0, 150))}${(x.qp || "").length > 150 ? "…" : ""}${D.marcas[x.id].nota ? ` <i>(${esc(D.marcas[x.id].nota)})</i>` : ""}${(TJ.fechaMal(x) || {}).grave ? ` <b style="color:var(--rojo)">⚠ fecha dudosa</b>` : ""}</a>`).join("")}</div>` : "";
       c.innerHTML = `
         <div class="tarjeta">${cab("pdf", "g", "Presentación E+1", "Se arma con las tarjetas que marcaste como acto o condición insegura. Todo se puede corregir antes de generarla.",
-          `<select class="inp" id="e1Tp" style="width:auto" title="Cada periodo tiene su propia E+1: sus tarjetas, sus números y su historial"><option value="RE" ${tp === "RE" ? "selected" : ""}>E+1 de ${esc(TJ.nomPeriodo("RE"))}</option><option value="ON" ${tp === "ON" ? "selected" : ""}>E+1 de Operación Normal</option></select><select class="inp" id="e1Sem" style="width:auto;min-width:220px">${semanas.map(s => `<option value="${s}" ${s === W ? "selected" : ""}>${TJ.semTxt(s)}</option>`).join("")}</select>`)}
+          `<label class="btn chico sec" style="cursor:pointer" title="Copia los números, textos y gráficas de una E+1 ya presentada (PowerPoint o PDF) al historial">${B.ico("subir")} Importar E+1 (PPTX o PDF)<input type="file" id="e1Imp" accept=".pptx,.pdf" hidden></label><select class="inp" id="e1Tp" style="width:auto" title="Cada periodo tiene su propia E+1: sus tarjetas, sus números y su historial"><option value="RE" ${tp === "RE" ? "selected" : ""}>E+1 de ${esc(TJ.nomPeriodo("RE"))}</option><option value="ON" ${tp === "ON" ? "selected" : ""}>E+1 de Operación Normal</option></select><select class="inp" id="e1Sem" style="width:auto;min-width:220px">${semanas.map(s => `<option value="${s}" ${s === W ? "selected" : ""}>${TJ.semTxt(s)}${(SD[s] || {}).hist ? " · entregada" : ""}</option>`).join("")}</select>`)}
           ${(SD[W] || {}).hist ? `<div class="aviso a">${B.ico("historial")}<div><b>Presentación ya entregada</b> (historial de consulta). Aquí están sus números y textos tal como se presentaron${!B.modoMovil && tp === "RE" && (B.E1_ORIGINALES || {})[W] ? `; también puedes abrir el <a href="${esc(B.E1_ORIGINALES[W])}" target="_blank"><b>PDF original</b></a>` : ""}. Si la modificas y guardas, se conserva tu versión.</div></div>` : ""}
+          ${faltan.length ? `<div class="aviso r">${B.ico("alerta")}<div><b>Faltan datos de ${faltan.length} semana(s) en las gráficas:</b> ${faltan.map(k => "SEM " + +k.slice(5) + "/" + k.slice(2, 4)).join(", ")}. No tienen tarjetas cargadas ni presentación guardada. Impórtalas con <b>Importar E+1 (PPTX o PDF)</b> desde una presentación que ya las incluya, o escribe sus números en el <b>historial</b> (abajo).</div></div>` : ""}
+          ${calculadas.length ? `<div class="aviso a">${B.ico("info")}<div>${calculadas.length} semana(s) del historial se calcularon de las tarjetas cargadas porque no se guardó su E+1 (${calculadas.map(k => +k.slice(5)).join(", ")}). Revísalas: el PAG-28-5 de esas semanas queda en 0. Al <b>Guardar</b> quedan en el historial.</div></div>` : ""}
           <div class="fila"><div class="campo" style="flex:0 0 190px"><label>Fecha de la presentación</label><input class="inp" type="date" data-k="fecha" value="${esc(S.fecha)}"></div>
             <div class="campo" style="flex:0 0 190px"><label>Gráfica de actos: desde la semana</label><input class="inp" data-k="g1" value="${esc(S.g1)}" placeholder="2025-26"><span class="ayuda">Año-semana, p. ej. 2025-26</span></div>
             <div class="campo" style="flex:0 0 190px"><label>Gráfica de accidentes: desde</label><input class="inp" data-k="g2" value="${esc(S.g2)}" placeholder="2025-16"></div>
@@ -7005,9 +7164,9 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
             <div class="tabla-cont"><table class="tabla e1-tabla"><thead><tr><th>Fuente</th><th>Tarjetas</th><th>Actos</th><th>Condiciones</th><th>Incidentes</th><th>Acc. no incap.</th><th>Acc. incap.</th></tr></thead><tbody>
               ${fila("PAG-28-5", "pag")}${fila("Tarjetas Líderes en Campo", "tlc", { t: C.auto.t, a: C.auto.a, c: C.auto.c })}${fila("SACPAC", "sac")}
               <tr class="e1-tot"><td><b>TOTAL</b></td><td id="e1Tt">${C.tot.t}</td><td id="e1Ta">${C.tot.a}</td><td id="e1Tc">${C.tot.c}</td><td colspan="3" id="e1Te">${C.tot.ev}</td></tr></tbody></table></div></div>
-          <div class="tarjeta c5">${cab("historial", "a", "Historial de las gráficas", "Semanas anteriores. Corrige un número si la presentación de esa semana cambió.")}
-            <div class="tabla-cont" style="max-height:268px;overflow:auto"><table class="tabla e1-tabla"><thead><tr><th>Sem.</th><th>Actos</th><th>Observ.</th><th>Cond.</th><th>Acc. incap.</th><th>Incid.</th></tr></thead><tbody id="e1Hist">
-              ${ult.reverse().map(k => `<tr><td><b>${k.slice(5)}</b>/${k.slice(2, 4)}</td>${[0, 1, 2, 3, 4].map(i => `<td><input class="inp e1-n" data-h="${k}" data-i="${i}" value="${h[k][i] ?? ""}" inputmode="numeric" style="width:46px"></td>`).join("")}</tr>`).join("")}</tbody></table></div></div>
+          <div class="tarjeta c5">${cab("historial", "a", "Historial de las gráficas", "Todas las semanas de las gráficas. Capturada = guardada o importada; calculada = de las tarjetas cargadas; falta = escribe sus números o impórtala.")}
+            <div class="tabla-cont" style="max-height:300px;overflow:auto"><table class="tabla e1-tabla"><thead><tr><th>Sem.</th><th></th><th>Actos</th><th>Observ.</th><th>Cond.</th><th>Acc. incap.</th><th>Incid.</th></tr></thead><tbody id="e1Hist">
+              ${ult.reverse().map(k => { const es = sinDatos(k) ? "falta" : this.estadoSem(k); return `<tr style="${es === "falta" ? "background:#FDECEC" : ""}"><td><b>${k.slice(5)}</b>/${k.slice(2, 4)}</td><td><span class="badge ${ETQ[es][0]}">${ETQ[es][1]}</span></td>${[0, 1, 2, 3, 4].map(i => `<td><input class="inp e1-n" data-h="${k}" data-i="${i}" value="${(h[k] || [])[i] ?? ""}" inputmode="numeric" style="width:46px"></td>`).join("")}</tr>`; }).join("")}</tbody></table></div></div>
         </div>
         <div class="tarjeta" id="e1Ver"></div>
         <div class="tarjeta">${cab("editar", "v", "Textos de las láminas", "Vacío = se usa el texto propuesto (en gris). Entre **dobles asteriscos** va en negritas.", `<button class="btn chico sec" id="e1Prop">${B.ico("reutilizar")} Usar los propuestos para editarlos</button>`)}
@@ -7057,7 +7216,8 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
       };
       pintaVer();
       c.querySelectorAll("[data-k]").forEach(i => i.oninput = () => { const p = i.dataset.k.split("."); if (p.length === 2) S[p[0]][p[1]] = i.value.trim(); else S[p[0]] = i.type === "textarea" ? i.value : i.value.trim(); tot(); prevLento(); });
-      c.querySelectorAll("[data-h]").forEach(i => i.oninput = () => { const k = i.dataset.h, f = (this.histEd[k] || h[k]).slice(); f[+i.dataset.i] = num(i.value); this.histEd[k] = f; prevLento(); });
+      c.querySelectorAll("[data-h]").forEach(i => i.oninput = () => { const k = i.dataset.h, f = (this.histEd[k] || h[k] || [null, null, null, 0, 0]).slice(); f[+i.dataset.i] = num(i.value); this.histEd[k] = f; prevLento(); });
+      const imp = c.querySelector("#e1Imp"); if (imp) imp.onchange = async () => { const f = imp.files[0]; imp.value = ""; if (f) { try { await this.importar(f, P); } catch (e) { B.ui.error(e); } } };
       c.querySelector("#e1Sem").onchange = e => { P.sem = e.target.value; this.S = null; P.pinta(); };
       c.querySelector("#e1Tp").onchange = e => { this.tpSel = e.target.value; this.S = null; P.pinta(); };
       const ir = c.querySelector("#e1Ir"); if (ir) ir.onclick = e => { e.preventDefault(); P.tab = "tend"; P.fil.ver = "sug"; P.pinta().then(() => { const l = document.getElementById("tjLista"); if (l) l.scrollIntoView({ behavior: "smooth" }); }); };
@@ -7070,8 +7230,8 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
       };
       const guardar = async callado => {
         if (!valida()) return false;
-        const k = this.calc(W, S, L), hh = Object.assign({}, this.histEd); hh[W] = k.fila;
-        try { await TJ.llamar("semGuardar", { sem: W, datos: S, hist: hh, tipo: tp }); SD[W] = JSON.parse(JSON.stringify(S)); if (tp === "ON") D.histON = hh; else D.hist = hh; this.histEd = Object.assign({}, hh); if (!callado) B.ui.toast("Datos de la E+1 guardados.", "ok"); return true; }
+        const k = this.calc(W, S, L), hh = Object.assign({}, this.histCalc[tp] || {}, this.histEd); hh[W] = k.fila;
+        try { await TJ.llamar("semGuardar", { sem: W, datos: S, hist: hh, tipo: tp }); SD[W] = JSON.parse(JSON.stringify(S)); if (tp === "ON") D.histON = hh; else D.hist = hh; this.histCalc[tp] = {}; this.histEd = Object.assign({}, hh); if (!callado) B.ui.toast("Datos de la E+1 guardados.", "ok"); return true; }
         catch (e) { B.ui.error(e); return false; }
       };
       c.querySelector("#e1Guardar").onclick = () => guardar();
@@ -9162,7 +9322,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "4.10.4", servidorViejo: false,
+  info: {}, VERSION: "4.10.5", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -9349,7 +9509,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "procedimientos" ? '<span class="contador oculto" id="cntProc"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.10.4")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.10.5")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
