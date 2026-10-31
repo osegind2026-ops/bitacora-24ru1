@@ -809,7 +809,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.10.5", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.11", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -833,7 +833,7 @@ B.local = {
      En el celular los datos llegan en el paquete de la PC; lo que se hace aqui se anota en pendientes y viaja a la PC. */
   async tarjLeer() {
     const T = (await this.leer("tarjetas")) || {};
-    for (const k of ["marcas", "sem", "hist", "cfg", "semanas", "graf", "correos", "envios", "ubic", "correoTpl", "noAplica", "semON", "histON", "fijas"]) if (!T[k] || typeof T[k] !== "object") T[k] = {};
+    for (const k of ["marcas", "sem", "hist", "cfg", "semanas", "graf", "correos", "envios", "ubic", "correoTpl", "noAplica", "semON", "histON", "fijas", "msj"]) if (!T[k] || typeof T[k] !== "object") T[k] = {};
     T.decl = Array.isArray(T.decl) ? T.decl : [];
     for (const d of T.decl) if (!d.uid) d.uid = "d" + d.id;
     return T;
@@ -862,7 +862,7 @@ B.local = {
     switch (acc) {
       case "ver": {
         const r = { ok: true, editor: ed, esp: ed && !sup, editores: eds, cfg: T.cfg };
-        if (ed) Object.assign(r, { decl: T.decl, marcas: T.marcas, sem: T.sem, hist: T.hist, semanas: T.semanas, graf: T.graf, correos: T.correos, envios: T.envios, ubic: T.ubic, correoTpl: T.correoTpl, noAplica: T.noAplica, semON: T.semON, histON: T.histON, fijas: T.fijas });
+        if (ed) Object.assign(r, { decl: T.decl, marcas: T.marcas, sem: T.sem, hist: T.hist, semanas: T.semanas, graf: T.graf, correos: T.correos, envios: T.envios, ubic: T.ubic, correoTpl: T.correoTpl, noAplica: T.noAplica, semON: T.semON, histON: T.histON, fijas: T.fijas, msj: T.msj });
         else r.decl = T.decl.filter(x => U.ini(x.ini) === s.ini || x.est === "C").map(x => U.ini(x.ini) === s.ini ? x : { ini: x.ini, f: x.f, t: x.t, est: "C" });
         return r;
       }
@@ -950,6 +950,15 @@ B.local = {
         return fin();
       }
       case "org": { soloEd(); const o = (await this.leer("organigrama")) || {}; let n = Array.isArray(o.nodos) ? o.nodos : []; if (b.sinFotos) n = n.map(x => { const y = Object.assign({}, x); delete y.f; return y; }); return { ok: true, nodos: n, fuente: o.fuente || "", mod: o.mod || "" }; }
+      case "msjGuardar": {
+        soloEd();
+        const m = b.m; if (!m) { delete T.msj[b.borrar]; await this.escribir("tarjetas", T); return { ok: true }; }
+        if (!m.id || !String(m.txt || "").trim()) throw new Error("Mensaje no válido.");
+        if (m.est === "A" && (T.msj[m.id] || {}).est !== "A" && !sup) throw new Error("Solo un supervisor registra la aprobación de la Subgerencia o la Gerencia.");
+        T.msj[m.id] = Object.assign({}, m, { por: s.ini, fh: ahora() });
+        if (m.est === "A") { const cat = await this.leer("catalogos") || {}; this.agregarCatalogo(cat, "difusion", m.txt, { txt: String(m.txt).trim(), tema: m.tema || "", aprob: m.aprob || "", faprob: m.faprob || "" }); await this.escribir("catalogos", cat); }
+        await this.escribir("tarjetas", T); return { ok: true };
+      }
       case "orgNodo": case "correosGuardar": case "envio": case "noAplica": case "tplGuardar": {
         soloEd();
         if (B.modoMovil) throw new Error("El organigrama y los correos se editan en la bitácora de la PC.");
@@ -1117,8 +1126,9 @@ B.local = {
   agregarCatalogo(cat, tipo, texto, item) {
     if (!["espacios", "vigilancias", "difusion"].includes(tipo) || !String(texto || "").trim()) return false;
     const l = cat[tipo] = cat[tipo] || [], k = U.norm(texto);
-    if (l.some(x => U.norm(typeof x === "string" ? x : (x.desc || x.txt)) === k)) return false;
-    l.push(tipo === "espacios" ? texto.trim() : tipo === "vigilancias" ? (item || { desc: texto.trim() }) : { txt: texto.trim(), tema: "" });
+    const ya = l.find(x => U.norm(typeof x === "string" ? x : (x.desc || x.txt)) === k);
+    if (ya) { if (tipo === "difusion" && item && item.aprob && typeof ya === "object") { ya.aprob = item.aprob; ya.faprob = item.faprob || ""; if (!ya.tema) ya.tema = item.tema || ""; return true; } return false; }
+    l.push(tipo === "espacios" ? texto.trim() : tipo === "vigilancias" ? (item || { desc: texto.trim() }) : (item || { txt: texto.trim(), tema: "" }));
     return true;
   },
 
@@ -3737,6 +3747,8 @@ V.turno = {
         <div class="tarjeta c6" data-tour="sup-difusion">${cab("info", "a", "Difusión", "Elige un mensaje del catálogo o escribe uno nuevo.")}
           <div style="display:flex;gap:8px;align-items:flex-start"><div class="campo" style="flex:1"><input class="inp" id="tDifBus" placeholder="Buscar en el catálogo de difusión…"></div>
             <button class="btn sec btn-icono" id="tDifMas" title="Agregar un mensaje nuevo al catálogo" style="height:40px;width:40px;flex:none">${B.ico("mas")}</button></div>
+          ${(() => { const ap = (B.estado.catalogos.difusion || []).filter(d => d.aprob).sort((a, b) => String(b.faprob || "").localeCompare(String(a.faprob || ""))).slice(0, 6);
+            return ap.length ? `<div class="peque muted" style="margin:0 0 4px">Mensajes de seguridad aprobados (toca uno para usarlo):</div><div style="display:flex;flex-direction:column;gap:5px;margin-bottom:8px">${ap.map(d => `<button class="btn chico sec" data-difap="${U.esc(d.txt)}" style="text-align:left;white-space:normal;height:auto;padding:6px 10px;font-weight:700;font-style:italic" title="Aprobado por la ${U.esc(d.aprob)}${d.faprob ? " el " + U.esc(U.corta(d.faprob)) : ""}">${U.esc(d.txt)}</button>`).join("")}</div>` : ""; })()}
           <div class="campo"><textarea class="inp" id="tDif" rows="3">${U.esc(td.dif || "")}</textarea></div></div>
       </div>
       <div class="tarjeta" style="margin-top:18px">${cab("doc", "d", "Notas adicionales", "Una nota por renglón; en el reporte aparecen con viñetas.")}
@@ -3786,6 +3798,7 @@ V.turno = {
       try { await B.api.op("catalogos", "agregar", { tipo: "difusion", texto: r }); (B.estado.catalogos.difusion = B.estado.catalogos.difusion || []).some(d => U.norm(d.txt) === U.norm(r)) || B.estado.catalogos.difusion.push({ txt: r, tema: "" });
         c.querySelector("#tDif").value = r; ui.toast("Mensaje agregado al catálogo. Presiona Guardar para dejarlo en este turno.", "ok", 5000); } catch (e) { ui.error(e); }
     };
+    c.querySelectorAll("[data-difap]").forEach(b => b.onclick = () => { c.querySelector("#tDif").value = b.dataset.difap; c.querySelector("#tDif").dispatchEvent(new Event("input", { bubbles: true })); });
     ui.combo(c.querySelector("#tDifBus"), {
       items: () => (B.estado.catalogos.difusion || []).map(d => ({ value: d.txt, label: d.txt, sub: d.tema })), estricto: false,
       alElegir: v => { if (v) { c.querySelector("#tDif").value = v; c.querySelector("#tDifBus").value = ""; } }
@@ -6222,8 +6235,8 @@ V.hoja = {
     pinta() {
       const c = this.c, D = TJ.datos, sup = B.dom.esSup(), comp = this.completa(), y0 = window.scrollY;
       c.style.minHeight = c.offsetHeight + "px";
-      const tabs = [["marcador", "Marcador"], ["mias", "Mis tarjetas"]].concat(!D.editor ? [] : comp ? [["tend", "Tarjetas y tendencias"], ["tarj", "Tarjetas y correos"], ["graf", "Gráficas y reportes"], ["e1", "Presentación E+1"], ["org", "Organigrama"]] : [["res", "Resumen"], ["org", "Organigrama"]]).concat(sup ? [["ajustes", "Ajustes"]] : D.editor && comp ? [["ajustes", "Semanas cargadas"]] : []);
-      if (!tabs.some(x => x[0] === this.tab)) this.tab = this.tab === "tend" || this.tab === "e1" || this.tab === "graf" || this.tab === "tarj" ? "res" : this.tab === "res" ? "tend" : "marcador";
+      const tabs = [["marcador", "Marcador"], ["mias", "Mis tarjetas"]].concat(!D.editor ? [] : comp ? [["tend", "Tarjetas y tendencias"], ["tarj", "Tarjetas y correos"], ["graf", "Gráficas y reportes"], ["e1", "Presentación E+1"], ["msj", "Mensajes de seguridad"], ["org", "Organigrama"]] : [["res", "Resumen"], ["org", "Organigrama"]]).concat(sup ? [["ajustes", "Ajustes"]] : D.editor && comp ? [["ajustes", "Semanas cargadas"]] : []);
+      if (!tabs.some(x => x[0] === this.tab)) this.tab = this.tab === "tend" || this.tab === "e1" || this.tab === "msj" || this.tab === "graf" || this.tab === "tarj" ? "res" : this.tab === "res" ? "tend" : "marcador";
       c.innerHTML = `${B.modoMovil && D.editor ? `<div class="tj-modo"><span>${comp ? "<b>Vista completa</b>: trabajo remoto con todas las funciones." : "<b>Vista resumida</b> para celular."}</span><a href="#" id="tjModo">${comp ? "Cambiar a la vista resumida" : "Usar la vista completa (trabajo remoto)"}</a></div>` : ""}
         ${D.editor ? `<div class="chips-ali" style="margin:0 0 10px;align-items:center"><span class="peque muted" style="margin-right:2px">Tarjetas de:</span>${[["RE", TJ.nomPeriodo("RE")], ["ON", "Operación Normal"], ["", "Todas"]].map(([k, t]) => `<label class="chip-ali"><input type="radio" name="tjPer" value="${k}" ${TJ.periodo === k ? "checked" : ""}><span>${t}</span></label>`).join("")}</div>` : ""}
         <div class="pestanas">${tabs.map(([k, t]) => `<button data-t="${k}" class="${k === this.tab ? "on" : ""}">${t}</button>`).join("")}</div><div id="tjCuerpo"></div>`;
@@ -6517,6 +6530,7 @@ V.hoja = {
 
     /* ------------------------------------------------------------ PRESENTACION E+1 (en e1.js) */
     t_e1(c) { return B.e1.vista(this, c); },
+    t_msj(c) { return B.msj.vista(this, c); },
     // graficas: el reporte semanal o la tendencia del dia (imagen y mensaje para WhatsApp)
     t_graf(c) {
       let m = this.grafModo; if (!m) { try { m = localStorage.getItem("b_graf_modo"); } catch (e) { } }
@@ -7023,7 +7037,7 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
       return r;
     },
     async leerPdf(buf) {
-      const lib = await B.proc.pdfjs(), doc = await lib.getDocument({ data: new Uint8Array(buf.slice(0)) }).promise, r = { lams: [], graf: [], imgs: [] };
+      const lib = await B.proc.pdfjs(), doc = await lib.getDocument({ data: new Uint8Array(buf.slice(0)) }).promise, r = { lams: [], graf: [], imgs: [], pdf: true };
       for (let i = 1; i <= doc.numPages; i++) {
         const pg = await doc.getPage(i), c = await pg.getTextContent(); let t = ""; for (const it of c.items) t += it.str + (it.hasEOL ? "\n" : " ");
         r.lams.push({ parrafos: t.split("\n").map(x => x.replace(/\s+/g, " ").trim()).filter(Boolean), tabla: [], texto: t });
@@ -7034,7 +7048,10 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
           const ok = await Promise.race([pg.render({ canvasContext: cv.getContext("2d"), viewport: vp }).promise.then(() => 1), new Promise(res => setTimeout(() => res(0), 10000))]).catch(() => 0);
           if (ok) r.imgs.push(cv.toDataURL("image/jpeg", .85));
           // etiquetas del eje en el orden en que aparecen (sin quitar repetidas: "SEM 26" puede ser de dos años); acepta "SME 17"
-          const sems = [...t.matchAll(/\bS(?:EM|ME)\s*(\d{1,2})\b(?!\s*\/)/gi)].map(m => +m[1]); r.graf.push({ lam: i - 1, soloSemanas: sems, esAcc: /ACCIDENTES/i.test(t) });
+          const sems = [...t.matchAll(/\bS(?:EM|ME)[\s.]*(\d{1,2})\b(?!\s*\/)/gi)].map(m => +m[1]), esAcc = /ACCIDENTES/i.test(t);
+          // despues de la leyenda suele venir la grafica chica de las ultimas semanas con sus etiquetas: "SEM 42 / 3 / 20" = actos y observaciones
+          const iL = t.search(/TOTAL\s+DE\s+OBSERVACIONES/i), pares = esAcc || iL < 0 ? [] : [...t.slice(iL).matchAll(/S(?:EM|ME)[\s.]*(\d{1,2})[ \t]*\n\s*(\d+)[ \t]*\n\s*(\d+)[ \t]*(?=\n|$)/gi)].map(m => [+m[1], +m[2], +m[3]]);
+          r.graf.push({ lam: i - 1, soloSemanas: sems, esAcc, pares });
         }
       }
       return r;
@@ -7056,13 +7073,21 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
       const sac = { a: sv[0] || "", c: sv[1] || "", i: sv[2] || "", n: sv[3] || "", x: sv[4] || "" };
       // textos largos bajo la tabla y bajo cada grafica
       const largos = r.lams.map(l => l.parrafos.filter(p => p.length > 120).sort((a, b) => b.length - a.length)[0] || "");
-      const iTab = r.lams.findIndex(l => /TABLA\s+RESUMEN/i.test(l.texto)), iAct = r.lams.findIndex(l => /se resume de la siguiente manera/i.test(l.texto) && l !== r.lams[iTab]), iAcc = r.lams.findIndex(l => /Durante la Semana/i.test(l.texto) && l !== r.lams[iTab]);
-      const tx1 = iTab >= 0 ? largos[iTab] : "", tx2 = iAct >= 0 ? largos[iAct] : "", tx3 = iAcc >= 0 ? largos[iAcc] : "";
+      const iTab = r.lams.findIndex(l => /TABLA\s+RESUMEN/i.test(l.texto)), iAct = r.lams.findIndex(l => /se\s+resume\s+de\s+la\s+siguiente\s+manera/i.test(l.texto) && l !== r.lams[iTab]), iAcc = r.lams.findIndex(l => /Durante\s+la\s+Semana/i.test(l.texto) && l !== r.lams[iTab]);
+      // en el PDF un parrafo viene partido en renglones: se junta desde la frase de inicio hasta los numeros de la grafica
+      const bloque = (i, re) => { if (i < 0) return ""; const ls = r.lams[i].texto.split("\n").map(x => x.replace(/\s+/g, " ").trim()), a = ls.findIndex(x => re.test(x)); if (a < 0) return "";
+        const out = []; for (let j = a; j < ls.length && !/^[\d.\s]+$|^S(?:EM|ME)\b|^Actos y Condiciones|^ACCIDENTES/i.test(ls[j]); j++) out.push(ls[j]);
+        return out.join(" ").replace(/\s+/g, " ").replace(/(\d) \. (\d)/g, "$1.$2").replace(/\s+([,.:;)])/g, "$1").replace(/\(\s+/g, "(").replace(/\s*-\s*(?=\d)/g, "-").trim(); };
+      const tx1 = iTab >= 0 ? (r.pdf ? bloque(iTab, /se resume de la siguiente manera|El desempe/i) : largos[iTab]) : "", tx2 = iAct >= 0 ? (r.pdf ? bloque(iAct, /se resume de la siguiente manera/i) : largos[iAct]) : "", tx3 = iAcc >= 0 ? (r.pdf ? bloque(iAcc, /Durante la Semana/i) : largos[iAcc]) : "";
       // graficas: categorias "SEM nn" de la mas reciente hacia atras (el año baja al cruzar de la 1 a la 52)
       const filas = {}, anioW = W ? +W.slice(0, 4) : new Date().getFullYear(), semW = W ? +W.slice(5) : 53;
       const conAnio = nums => { const out = []; let a = anioW, prev = null; for (let j = nums.length - 1; j >= 0; j--) { const s = nums[j]; if (prev == null ? s > semW : s > prev) a--; out.unshift(a + "-" + pad2(s)); prev = s; } return out; };
       for (const g of r.graf) {
-        if (g.soloSemanas) { for (const k of conAnio(g.soloSemanas)) filas[k] = filas[k] || [null, null, null, null, null]; continue; }
+        if (g.soloSemanas) {
+          const ks = conAnio(g.soloSemanas); for (const k of ks) filas[k] = filas[k] || [null, null, null, null, null];
+          for (const [s, a, o] of g.pares || []) { const k = ks.slice().reverse().find(x => +x.slice(5) === s); if (k) { filas[k][0] = a; filas[k][1] = o; } }
+          continue;
+        }
         const cats = (g.ser[0] || { cats: [] }).cats.map(x => +(/(\d{1,2})/.exec(x.v || "") || [0, 0])[1]), claves = conAnio(cats);
         for (const s of g.ser) {
           const N = U.norm(s.n), col = /ACTOS/.test(N) ? 0 : /TOTAL|OBSERVAC/.test(N) ? 1 : /CONDICION/.test(N) ? 2 : /ACCIDENTE/.test(N) ? 3 : /INCIDENTE/.test(N) ? 4 : -1;
@@ -7141,8 +7166,11 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
       const rangoH = this.semanasEntre([S.g1, S.g2].filter(x => /^\d{4}-\d{2}$/.test(x || "")).sort()[0] || "2025-16", W).filter(k => k !== W);
       // falta: sin actos/observaciones desde la semana de inicio de la grafica 1, o sin accidentes/incidentes desde la de la grafica 2
       const sinDatos = k => { const f = h[k]; return (k >= S.g1 && !(f && f[1] != null)) || (k >= S.g2 && !(f && (f[3] != null || f[4] != null))); };
-      const faltan = rangoH.filter(sinDatos), calculadas = rangoH.filter(k => this.estadoSem(k) === "calc");
-      const ETQ = { cap: ["v", "capturada"], calc: ["a", "calculada"], ini: ["n", "inicial"], falta: ["r", "falta"] };
+      // semanas faltantes que el usuario ya no quiere que se avisen (por periodo, en esta PC)
+      const DK = "b_e1_desc_" + tp; let desc = []; try { desc = JSON.parse(localStorage.getItem(DK) || "[]"); } catch (e) { }
+      const guardaDesc = l => { try { localStorage.setItem(DK, JSON.stringify(l)); } catch (e) { } };
+      const faltanTodas = rangoH.filter(sinDatos), faltan = faltanTodas.filter(k => !desc.includes(k)), descartadas = faltanTodas.filter(k => desc.includes(k)), calculadas = rangoH.filter(k => this.estadoSem(k) === "calc");
+      const ETQ = { cap: ["v", "capturada"], calc: ["a", "calculada"], ini: ["n", "inicial"], falta: ["r", "falta"], desc: ["n", "sin dato"] };
       const ent = (k, ph, w) => `<input class="inp e1-n" data-k="${k}" value="${esc(k.split(".").reduce((o, p) => o[p], S))}" placeholder="${ph}" inputmode="numeric" style="width:${w || 52}px">`;
       const fila = (t, o, auto) => `<tr><td><b>${t}</b></td>${["t", "a", "c", "i", "n", "x"].map(k => `<td>${o === "sac" && k === "t" ? "N/A" : ent(o + "." + k, auto && auto[k] != null ? auto[k] : "0")}</td>`).join("")}</tr>`;
       const ult = rangoH.slice();
@@ -7151,7 +7179,7 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
         <div class="tarjeta">${cab("pdf", "g", "Presentación E+1", "Se arma con las tarjetas que marcaste como acto o condición insegura. Todo se puede corregir antes de generarla.",
           `<label class="btn chico sec" style="cursor:pointer" title="Copia los números, textos y gráficas de una E+1 ya presentada (PowerPoint o PDF) al historial">${B.ico("subir")} Importar E+1 (PPTX o PDF)<input type="file" id="e1Imp" accept=".pptx,.pdf" hidden></label><select class="inp" id="e1Tp" style="width:auto" title="Cada periodo tiene su propia E+1: sus tarjetas, sus números y su historial"><option value="RE" ${tp === "RE" ? "selected" : ""}>E+1 de ${esc(TJ.nomPeriodo("RE"))}</option><option value="ON" ${tp === "ON" ? "selected" : ""}>E+1 de Operación Normal</option></select><select class="inp" id="e1Sem" style="width:auto;min-width:220px">${semanas.map(s => `<option value="${s}" ${s === W ? "selected" : ""}>${TJ.semTxt(s)}${(SD[s] || {}).hist ? " · entregada" : ""}</option>`).join("")}</select>`)}
           ${(SD[W] || {}).hist ? `<div class="aviso a">${B.ico("historial")}<div><b>Presentación ya entregada</b> (historial de consulta). Aquí están sus números y textos tal como se presentaron${!B.modoMovil && tp === "RE" && (B.E1_ORIGINALES || {})[W] ? `; también puedes abrir el <a href="${esc(B.E1_ORIGINALES[W])}" target="_blank"><b>PDF original</b></a>` : ""}. Si la modificas y guardas, se conserva tu versión.</div></div>` : ""}
-          ${faltan.length ? `<div class="aviso r">${B.ico("alerta")}<div><b>Faltan datos de ${faltan.length} semana(s) en las gráficas:</b> ${faltan.map(k => "SEM " + +k.slice(5) + "/" + k.slice(2, 4)).join(", ")}. No tienen tarjetas cargadas ni presentación guardada. Impórtalas con <b>Importar E+1 (PPTX o PDF)</b> desde una presentación que ya las incluya, o escribe sus números en el <b>historial</b> (abajo).</div></div>` : ""}
+          ${faltan.length ? `<div class="aviso r">${B.ico("alerta")}<div><b>Faltan datos de ${faltan.length} semana(s) en las gráficas:</b> ${faltan.map(k => "SEM " + +k.slice(5) + "/" + k.slice(2, 4)).join(", ")}. No tienen tarjetas cargadas ni presentación guardada. Impórtalas con <b>Importar E+1 (PPTX o PDF)</b> desde una presentación que ya las incluya, o escribe sus números en el <b>historial</b> (abajo). Si esas presentaciones ya no existen, puedes <a href="#" id="e1Desc"><b>descartar este aviso</b></a> (se vuelve a avisar solo si falta otra semana).</div></div>` : ""}
           ${calculadas.length ? `<div class="aviso a">${B.ico("info")}<div>${calculadas.length} semana(s) del historial se calcularon de las tarjetas cargadas porque no se guardó su E+1 (${calculadas.map(k => +k.slice(5)).join(", ")}). Revísalas: el PAG-28-5 de esas semanas queda en 0. Al <b>Guardar</b> quedan en el historial.</div></div>` : ""}
           <div class="fila"><div class="campo" style="flex:0 0 190px"><label>Fecha de la presentación</label><input class="inp" type="date" data-k="fecha" value="${esc(S.fecha)}"></div>
             <div class="campo" style="flex:0 0 190px"><label>Gráfica de actos: desde la semana</label><input class="inp" data-k="g1" value="${esc(S.g1)}" placeholder="2025-26"><span class="ayuda">Año-semana, p. ej. 2025-26</span></div>
@@ -7166,7 +7194,8 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
               <tr class="e1-tot"><td><b>TOTAL</b></td><td id="e1Tt">${C.tot.t}</td><td id="e1Ta">${C.tot.a}</td><td id="e1Tc">${C.tot.c}</td><td colspan="3" id="e1Te">${C.tot.ev}</td></tr></tbody></table></div></div>
           <div class="tarjeta c5">${cab("historial", "a", "Historial de las gráficas", "Todas las semanas de las gráficas. Capturada = guardada o importada; calculada = de las tarjetas cargadas; falta = escribe sus números o impórtala.")}
             <div class="tabla-cont" style="max-height:300px;overflow:auto"><table class="tabla e1-tabla"><thead><tr><th>Sem.</th><th></th><th>Actos</th><th>Observ.</th><th>Cond.</th><th>Acc. incap.</th><th>Incid.</th></tr></thead><tbody id="e1Hist">
-              ${ult.reverse().map(k => { const es = sinDatos(k) ? "falta" : this.estadoSem(k); return `<tr style="${es === "falta" ? "background:#FDECEC" : ""}"><td><b>${k.slice(5)}</b>/${k.slice(2, 4)}</td><td><span class="badge ${ETQ[es][0]}">${ETQ[es][1]}</span></td>${[0, 1, 2, 3, 4].map(i => `<td><input class="inp e1-n" data-h="${k}" data-i="${i}" value="${(h[k] || [])[i] ?? ""}" inputmode="numeric" style="width:46px"></td>`).join("")}</tr>`; }).join("")}</tbody></table></div></div>
+              ${ult.reverse().map(k => { const es = sinDatos(k) ? (desc.includes(k) ? "desc" : "falta") : this.estadoSem(k); return `<tr style="${es === "falta" ? "background:#FDECEC" : ""}"><td><b>${k.slice(5)}</b>/${k.slice(2, 4)}</td><td><span class="badge ${ETQ[es][0]}">${ETQ[es][1]}</span></td>${[0, 1, 2, 3, 4].map(i => `<td><input class="inp e1-n" data-h="${k}" data-i="${i}" value="${(h[k] || [])[i] ?? ""}" inputmode="numeric" style="width:46px"></td>`).join("")}</tr>`; }).join("")}</tbody></table></div>
+            ${descartadas.length ? `<div class="peque muted" style="margin-top:6px">${descartadas.length} semana(s) sin dato con el aviso descartado. <a href="#" id="e1DescNo">Volver a avisar</a></div>` : ""}</div>
         </div>
         <div class="tarjeta" id="e1Ver"></div>
         <div class="tarjeta">${cab("editar", "v", "Textos de las láminas", "Vacío = se usa el texto propuesto (en gris). Entre **dobles asteriscos** va en negritas.", `<button class="btn chico sec" id="e1Prop">${B.ico("reutilizar")} Usar los propuestos para editarlos</button>`)}
@@ -7222,6 +7251,8 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
       c.querySelector("#e1Tp").onchange = e => { this.tpSel = e.target.value; this.S = null; P.pinta(); };
       const ir = c.querySelector("#e1Ir"); if (ir) ir.onclick = e => { e.preventDefault(); P.tab = "tend"; P.fil.ver = "sug"; P.pinta().then(() => { const l = document.getElementById("tjLista"); if (l) l.scrollIntoView({ behavior: "smooth" }); }); };
       c.querySelectorAll("[data-ver]").forEach(a => a.onclick = e => { e.preventDefault(); P.detalle(L.find(x => x.id === a.dataset.ver), null, () => P.pinta()); });
+      const dsc = c.querySelector("#e1Desc"); if (dsc) dsc.onclick = e => { e.preventDefault(); guardaDesc([...new Set(desc.concat(faltan))]); B.ui.toast("Aviso descartado. Esas semanas quedan como «sin dato».", "ok"); P.pinta(); };
+      const dno = c.querySelector("#e1DescNo"); if (dno) dno.onclick = e => { e.preventDefault(); guardaDesc([]); P.pinta(); };
       c.querySelector("#e1Prop").onclick = () => { for (const k of ["tx1", "tx2", "tx3"]) if (!S[k]) { S[k] = prop[k]; c.querySelector(`[data-k="${k}"]`).value = prop[k]; } prev(); };
       const valida = () => {
         for (const k of ["g1", "g2"]) if (!/^\d{4}-\d{2}$/.test(S[k])) { B.ui.toast("La semana inicial de las gráficas se escribe como <b>año-semana</b>, por ejemplo 2025-26.", "error"); return false; }
@@ -8000,6 +8031,255 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
       };
       prev();
     }
+  };
+})();
+;
+/* ---- msjseg.js ---- */
+/* =====================================================================
+   BITACORA 24RU1 - MENSAJES DE SEGURIDAD
+   Se carga la presentacion "Tendencias Rapidas" (PDF o PPTX); de los comportamientos
+   que requieren reforzamiento y de las observaciones en campo salen los temas, y de
+   cada tema se proponen mensajes genericos para toda la organizacion (130 a 190
+   caracteres) que se pueden editar en vivo, copiar y compartir.
+   Un mensaje queda "propuesto" hasta que la Subgerencia o la Gerencia lo aprueba;
+   al aprobarlo entra al catalogo de difusion y aparece en los Datos del turno.
+   Todo se analiza en el navegador (sin internet): los mensajes salen de una lista
+   por tema escrita aqui abajo.
+   ===================================================================== */
+"use strict";
+(function () {
+  const TJ = B.tj, esc = s => U.esc(s), MIN = 130, MAX = 190;
+  // temas de reforzamiento: re = como se reconoce en la presentacion (texto sin acentos y en mayusculas); m = mensajes genericos (130 a 190 caracteres)
+  const TEMAS = [
+    { k: "alturas", n: "Trabajos en alturas", re: /ALTURA|ARNES|LINEAS? DE VIDA|ANDAMIO|ESCALERA|CANASTILLA|PLATAFORMA|AZOTEA/, m: [
+      "En las alturas no hay atajos: arnés puesto, línea de vida anclada y tres puntos de apoyo. Si olvidaste algo, baja seguro y regresa protegido.",
+      "Subir o bajar rápido también es trabajo en altura. Antes de dar un paso revisa tu arnés y tu anclaje: un segundo de prisa puede costar una vida.",
+      "Tu vida depende de tu anclaje. Arnés bien ajustado, línea de vida conectada y área delimitada en todo momento, sin excepciones y sin pretextos."] },
+    { k: "epp", n: "Equipo de protección personal", re: /CASCO|LENTES|GAFAS|GUANTE|TAPON|AUDITIV|CARETA|RESPIRADOR|\bEPP\b|PROTECCION PERSONAL|BOTAS|CALZADO DE SEGURIDAD/, m: [
+      "El EPP solo protege si lo traes puesto. Casco, lentes, guantes y protección auditiva desde que entras al área hasta que sales de ella, sin pausas.",
+      "Quitarte el EPP solo un momento es quedar expuesto por completo. Si necesitas retirarlo, sal primero del área de riesgo: tu protección no descansa.",
+      "Tu equipo de protección es tu última barrera. Úsalo completo, en buen estado y bien ajustado en cada tarea; cuidarte también es parte del trabajo."] },
+    { k: "radiologica", n: "Control de la exposición", re: /RADIOL|DOSIS|DOSIMETR|CONTAMINACI|EXPOSICI|OREX|ZONA CONTROLADA|BLINDAJE|ALARA/, m: [
+      "Tiempo, distancia y blindaje: menos dosis siempre es mejor. Trabaja con la inspección radiológica documentada, nunca con una indicación de palabra.",
+      "La protección radiológica se verifica, no se supone. Antes de entrar confirma tu permiso, la dosis esperada y los controles por escrito en el área.",
+      "Cada dosis cuenta. Planea la tarea, reduce el tiempo en el área, respeta las barreras y pregunta si algún control no está claro antes de iniciar."] },
+    { k: "error", n: "Conciencia sobre el impacto de un error", re: /ERROR|AUTOVERIFIC|OLVID|DISTRA|PRISA|IMPACTO|STAR\b/, m: [
+      "Un pequeño error puede tener grandes consecuencias. Detente, piensa, actúa y revisa antes de cada paso crítico: la prisa nunca es buena consejera.",
+      "Antes de actuar pregúntate qué es lo peor que puede pasar si te equivocas. Esa respuesta define cuánta atención merece tu siguiente movimiento.",
+      "La autoverificación salva vidas: detente un segundo, confirma lo que vas a hacer y hazlo con plena atención. Lo urgente nunca justifica lo inseguro."] },
+    { k: "proc", n: "Uso y apego a procedimientos", re: /PROCEDIMIENT|INSTRUCCION DE TRABAJO|APEGO|PASO A PASO|DOCUMENTO DE TRABAJO/, m: [
+      "Si está escrito, se sigue paso a paso. Si algo no está claro o no aplica, detente y consulta; nunca improvises ni confíes solo en tu memoria.",
+      "El procedimiento es la experiencia de muchos puesta en papel. Léelo antes, tenlo a la mano durante la tarea y respeta cada paso aunque parezca simple.",
+      "Hacerlo como siempre no es lo mismo que hacerlo bien. Verifica el procedimiento vigente, sigue la secuencia y reporta cualquier diferencia en campo."] },
+    { k: "comunicacion", n: "Comunicación efectiva", re: /COMUNICACI|DE VOZ|VERBAL|TRES VIAS|MALENTEND|CONFIRMA/, m: [
+      "Lo que no se confirma no se da por hecho. Usa la comunicación de tres vías: escucha, repite y confirma; una indicación de palabra no sustituye un registro.",
+      "Una comunicación clara previene errores. Habla con precisión, verifica que te entendieron y documenta lo importante: el supuesto es el inicio del error.",
+      "Antes de actuar, confirma: ¿qué, dónde, cuándo y con qué controles? Preguntar a tiempo evita corregir tarde. La comunicación también es seguridad."] },
+    { k: "actitud", n: "Actitud interrogativa", re: /ACTITUD INTERROG|DUDA|SUPUEST|DETENER(SE)? EL TRABAJO|STOP WORK/, m: [
+      "Si tienes duda, detente y pregunta. Una actitud interrogativa no retrasa el trabajo: lo protege. Nadie debe continuar una tarea con incertidumbre.",
+      "Cuestionar no es desconfiar, es cuidarnos. Ante algo diferente a lo esperado, detén la tarea, analiza la situación y continúa solo cuando esté claro.",
+      "Tienes la autoridad y la obligación de detener cualquier trabajo inseguro. Pregunta, verifica y actúa con certeza: la duda se resuelve antes de seguir."] },
+    { k: "energias", n: "Control de energías peligrosas", re: /BLOQUEO|CANDADO|ETIQUET|LIBRANZA|ENERGIZ|ELECTRIC|TABLERO|VOLTAJE|ENERGIA PELIGROSA|RUEDA DE LA ENERGIA/, m: [
+      "Toda energía se controla antes de intervenir. Bloquea, etiqueta y comprueba la ausencia de energía: nunca supongas que un equipo está desenergizado.",
+      "Identifica todas las energías de tu tarea con la rueda de la energía: eléctrica, mecánica, presión, temperatura y gravedad. Lo que no ves también lastima.",
+      "Sin libranza, bloqueo y verificación no se trabaja. Tu candado es tu seguridad: colócalo tú, retíralo tú y comprueba cero energía antes de iniciar."] },
+    { k: "fuego", n: "Línea de fuego", re: /LINEA DE FUEGO|ATRAPA|PRENSAD|PELLIZC|GOLPEAD|APLAST/, m: [
+      "Mantente fuera de la línea de fuego. Antes de cada tarea identifica qué se puede mover, caer, liberar o golpear y colócate siempre en un lugar seguro.",
+      "Tus manos y tu cuerpo no son herramientas. Evita puntos de atrapamiento, cargas en movimiento y energía acumulada: ubícate donde nada te pueda alcanzar.",
+      "Observa tu posición antes de actuar: si algo falla, ¿estás en su camino? Salir de la línea de fuego toma un segundo y puede salvarte de una lesión."] },
+    { k: "izaje", n: "Maniobras de izaje", re: /IZAJE|GRUA|ESLINGA|GRILLETE|ESTROBO|POLIPASTO|CARGA SUSPENDIDA|MANIOBRA/, m: [
+      "Nunca bajo una carga suspendida. Delimita el área de maniobra, revisa eslingas y accesorios y sigue las señales de una sola persona autorizada.",
+      "Una maniobra segura se planea antes de levantar. Verifica la capacidad, el estado de los accesorios y el área despejada: si algo cambia, detén el izaje.",
+      "En cada maniobra de izaje, la carga manda y el área se respeta. Mantén distancia, usa cabos guía y comunica cada movimiento con señales claras."] },
+    { k: "orden", n: "Orden y limpieza", re: /ORDEN|LIMPIEZA|DERRAME|OBSTRUC|TROPIEZ|RESBAL|RESIDUO|BASURA/, m: [
+      "Un área ordenada es un área segura. Retira materiales sobrantes, limpia derrames de inmediato y mantén libres pasillos, salidas y equipos de emergencia.",
+      "El orden empieza y termina contigo. Deja tu área de trabajo mejor de como la encontraste: herramientas guardadas, cables recogidos y pasillos despejados.",
+      "Tropiezos y resbalones se previenen con orden. Cada objeto en su lugar, cada derrame atendido y cada residuo en su contenedor desde el inicio del trabajo."] },
+    { k: "confinados", n: "Espacios confinados", re: /ESPACIO CONFINADO|ESPACIOS CONFINADOS|ATMOSFERA|MONITOREO DE GASES|VIGIA/, m: [
+      "En un espacio confinado la atmósfera no se adivina, se mide. Con permiso vigente, monitoreo continuo y vigía en todo momento; sin eso, nadie entra.",
+      "Antes de entrar a un espacio confinado verifica permiso, monitoreo, ventilación, rescate y comunicación. Si algo falta o cambia, sal de inmediato.",
+      "El vigía no se distrae ni se retira. En espacios confinados el trabajo es en equipo: quien entra depende de quien vigila y de los controles en sitio."] },
+    { k: "herramientas", n: "Herramientas y equipos", re: /HERRAMIENTA|ESMERIL|PULIDOR|TALADRO|GUARDA|DISCO|SOLDADURA|EQUIPO DAÑADO/, m: [
+      "La herramienta correcta, en buen estado y con sus guardas. Inspecciónala antes de usarla y retira de servicio cualquiera dañada; no improvises.",
+      "Una herramienta mal usada es un riesgo en tus manos. Úsala solo para lo que fue diseñada, con su protección completa y con el EPP que requiere.",
+      "Antes de iniciar revisa cables, guardas, mangos y discos. Una inspección de un minuto previene lesiones graves; lo que falla en el taller falla en campo."] },
+    { k: "transito", n: "Tránsito y vehículos", re: /VEHICUL|MANEJ|VELOCIDAD|CINTURON|PEATON|MONTACARGA|CAMION|ESTACIONA/, m: [
+      "Al volante, cero distracciones: cinturón puesto, velocidad permitida y celular guardado. El peatón siempre tiene la preferencia dentro de la central.",
+      "Maneja a la defensiva y respeta los límites de velocidad. Antes de mover un vehículo da una vuelta de inspección: lo que no ves también puede lastimar.",
+      "Peatones por las rutas marcadas y vehículos a velocidad segura. Haz contacto visual antes de cruzar o avanzar; la prisa al conducir no vale una vida."] },
+    { k: "quimicos", n: "Manejo de sustancias químicas", re: /QUIMIC|SUSTANCIA|HOJA DE (DATOS DE )?SEGURIDAD|SOLVENTE|INFLAMABLE|COMBUSTIBLE|CILINDRO/, m: [
+      "Conoce lo que manejas: revisa la hoja de datos de seguridad, usa el EPP indicado y mantén cada sustancia etiquetada, tapada y en su lugar asignado.",
+      "Sustancias químicas e inflamables se manejan con respeto: lejos de fuentes de ignición, con ventilación adecuada y siempre en recipientes identificados.",
+      "Antes de usar un producto químico pregúntate: ¿sé qué es, cómo me afecta y qué hago si se derrama? Si no lo sabes, detente y consulta primero."] },
+    { k: "supervision", n: "Supervisión en campo", re: /SUPERVISION EN CAMPO|LIDERES EN CAMPO|FALTA DE SUPERVISION/, m: [
+      "Lo que se tolera se repite. Si ves un comportamiento inseguro, intervén con respeto, corrígelo en el momento y reconoce también lo que se hace bien.",
+      "La seguridad se construye en campo: observa, pregunta y retroalimenta. Una conversación a tiempo puede evitar el accidente que nadie quiere reportar.",
+      "Ser líder en campo es cuidar a todos. Detén lo inseguro, explica el porqué y acompaña la corrección: el ejemplo enseña más que cualquier indicación."] },
+  ];
+  // para un tema que no esta en la lista ({t} = el tema como viene en la presentacion)
+  const GENERICOS = [
+    "Hoy reforzamos {t}. Haz cada tarea con atención, sigue lo establecido y detente si algo no está claro: la seguridad empieza con tu decisión.",
+    "{T} es tarea de todos. Revisa los riesgos antes de iniciar, aplica los controles y corrige a tiempo: lo que hoy previenes mañana no lo lamentas.",
+  ];
+  const MESES = { ENE: 1, FEB: 2, MAR: 3, ABR: 4, MAY: 5, JUN: 6, JUL: 7, AGO: 8, SEP: 9, OCT: 10, NOV: 11, DIC: 12 };
+  const largo = t => [...String(t || "")].length;
+  const ESTADOS = { P: ["a", "Por aprobar"], A: ["v", "Aprobado"], D: ["n", "Descartado"] };
+
+  const MS = B.msj = {
+    A: null, filtro: "P",
+    lista() { return Object.values((TJ.datos && TJ.datos.msj) || {}).sort((a, b) => String(b.f || "").localeCompare(String(a.f || ""))); },
+
+    /* ---------------- lectura de la presentacion: texto de todas las laminas y, en PPTX, las categorias de las graficas */
+    async leer(file) {
+      const buf = await file.arrayBuffer(), r = { texto: "", graf: [] };
+      if (/\.pdf$/i.test(file.name)) {
+        const lib = await B.proc.pdfjs(), doc = await lib.getDocument({ data: new Uint8Array(buf) }).promise;
+        for (let i = 1; i <= doc.numPages; i++) { const c = await (await doc.getPage(i)).getTextContent(); for (const it of c.items) r.texto += it.str + (it.hasEOL ? "\n" : " "); r.texto += "\n"; }
+      } else {
+        const p = await B.e1.leerPptx(buf); r.texto = p.lams.map(l => l.texto).join("\n");
+        for (const g of p.graf || []) for (const s of g.ser || []) for (const v of s.vals || []) { const cat = (s.cats || [])[v.i]; if (cat && cat.v && +v.v > 0) r.graf.push({ n: String(cat.v), c: +v.v }); }
+      }
+      return r;
+    },
+    // fecha, temas (de la grafica de comportamientos y de las observaciones) y las observaciones en campo
+    analizar(r, nombre) {
+      const t = r.texto.replace(/[ \t]+/g, " "), plano = t.replace(/\s+/g, " ");
+      let fecha = "";
+      const mf = /(\d{1,2})\s*-\s*([a-z]{3})[a-z]*\s*-\s*(\d{4})/i.exec(plano), mn = /(20\d\d)(\d\d)(\d\d)/.exec(nombre || "");
+      if (mf && MESES[U.norm(mf[2])]) fecha = mf[3] + "-" + String(MESES[U.norm(mf[2])]).padStart(2, "0") + "-" + mf[1].padStart(2, "0");
+      else if (mn) fecha = mn[1] + "-" + mn[2] + "-" + mn[3];
+      // observaciones numeradas: "1. Durante ... (ID 5167 )"
+      const iObs = plano.search(/OBSERVACIONES EN CAMPO/i), obsTxt = iObs >= 0 ? plano.slice(iObs) : plano;
+      const obs = [...obsTxt.matchAll(/(?:^|\s)\d{1,2}\.\s+(.+?)\(\s*ID\s*(\d+)\s*\)/g)].map(m => ({ txt: m[1].replace(/\s+([,.:;])/g, "$1").trim(), id: m[2] }));
+      // etiquetas de la grafica "Comportamientos que requieren reforzamiento": "Trabajos en Alturas, 1"
+      const etq = r.graf.slice();
+      if (!etq.length) {
+        const iC = plano.search(/COMPORTAMIENTOS QUE REQUIERE/i);
+        if (iC >= 0) {
+          const antes = plano.slice(0, iC), ini = Math.max(antes.lastIndexOf(")"), antes.search(/OBSERVACIONES EN CAMPO/i));
+          for (const m of antes.slice(ini + 1).matchAll(/([A-Za-zÁÉÍÓÚÑÜáéíóúñü][A-Za-zÁÉÍÓÚÑÜáéíóúñü ]{2,70}?),\s*(\d{1,3})(?=\s|$)/g)) etq.push({ n: m[1].trim(), c: +m[2] });
+        }
+      }
+      // temas: cada etiqueta pesa por su numero (x3) y cada observacion que lo menciona suma 1
+      const temas = new Map(), suma = (k, n, c, de) => { const e = temas.get(k) || { k, n, c: 0, de: new Set() }; e.c += c; e.de.add(de); temas.set(k, e); };
+      for (const e of etq) { const T = TEMAS.find(x => x.re.test(U.norm(e.n))); suma(T ? T.k : "x:" + U.norm(e.n), T ? T.n : e.n, 3 * (e.c || 1), "gráfica: " + e.n + " (" + e.c + ")"); }
+      for (const o of obs) for (const T of TEMAS) if (T.re.test(U.norm(o.txt))) suma(T.k, T.n, 1, "obs. ID " + o.id);
+      if (!temas.size) for (const T of TEMAS) if (T.re.test(U.norm(plano))) suma(T.k, T.n, 1, "texto de la presentación");
+      return { fecha, obs, etq, temas: [...temas.values()].sort((a, b) => b.c - a.c).map(x => Object.assign(x, { de: [...x.de] })) };
+    },
+    // mensajes de un tema (los de la lista, o los genericos con el nombre del tema)
+    opciones(k, n) {
+      const T = TEMAS.find(x => x.k === k);
+      if (T) return T.m.slice();
+      const t = String(n || "").toLowerCase();
+      return GENERICOS.map(g => g.replace("{t}", t).replace("{T}", t.charAt(0).toUpperCase() + t.slice(1)));
+    },
+
+    /* ---------------- copiar en negritas e itálicas (para correo y documentos) o con el formato de WhatsApp */
+    async copiar(txt, wa) {
+      const t = String(txt || "").trim();
+      const ok = wa ? await B.correos.copiarTexto("*_" + t + "_*") : await B.correos.copiarHtml("<b><i>" + esc(t) + "</i></b>", t);
+      B.ui.toast(ok ? (wa ? "Copiado con formato de WhatsApp (negritas e itálicas)." : "Copiado en negritas e itálicas.") : "No se pudo copiar.", ok ? "ok" : "error", 2500);
+    },
+    async guardar(m) { await TJ.llamar("msjGuardar", { m }); (TJ.datos.msj = TJ.datos.msj || {})[m.id] = Object.assign({}, m, { por: U.ini(B.usuario.ini) }); },
+
+    // tarjeta de un mensaje: texto editable en vivo (negritas e itálicas) con su contador
+    caja(id, txt, extra) {
+      const n = largo(txt), bien = n >= MIN && n <= MAX;
+      return `<div class="msj-caja" data-caja="${id}"><textarea class="inp msj-txt" data-txt="${id}" rows="3">${esc(txt)}</textarea>
+        <div class="msj-pie"><span class="badge ${bien ? "v" : "r"}" data-cnt="${id}">${n} caracteres</span><span class="peque muted">ideal: ${MIN} a ${MAX}</span>
+        <span style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap"><button class="btn chico sec" data-cp="${id}" title="Copia el mensaje en negritas e itálicas">${B.ico("doc")} Copiar</button><button class="btn chico sec" data-wa="${id}" title="Copia el mensaje con *_formato_* de WhatsApp">WhatsApp</button>${extra || ""}</span></div></div>`;
+    },
+    css: `.msj-caja{border:1px solid var(--borde,#e3ded6);border-radius:10px;padding:10px;margin:8px 0;background:var(--fondo2,#fffdf9)}
+      .msj-txt{font-weight:700;font-style:italic;font-size:15px;line-height:1.45;resize:vertical;min-height:72px}
+      .msj-pie{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px}
+      .msj-tema{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;margin:14px 0 2px}.msj-tema h3{font-size:14px;margin:0}
+      .msj-obs{font-size:12.5px;color:var(--texto2,#555);margin:4px 0 0 0;padding-left:18px}.msj-obs li{margin:3px 0}`,
+
+    /* ---------------- vista */
+    async vista(P, c) {
+      const A = this.A, L = this.lista(), f = this.filtro, cuenta = k => L.filter(m => m.est === k).length;
+      c.innerHTML = `<style>${this.css}</style>
+        <div class="tarjeta">${cab("info", "g", "Mensajes de seguridad", "Carga la presentación <b>Tendencias Rápidas</b> (PDF o PowerPoint): se leen los comportamientos que requieren reforzamiento y las observaciones en campo, y se proponen mensajes genéricos para toda la organización. Edítalos aquí mismo antes de copiarlos.",
+          `<label class="btn chico verde" style="cursor:pointer">${B.ico("subir")} Cargar Tendencias Rápidas (PDF o PPTX)<input type="file" id="msjArch" accept=".pdf,.pptx" hidden></label><button class="btn chico sec" id="msjNuevo">${B.ico("mas")} Escribir un mensaje</button>`)}
+          <div id="msjProp">${A ? this.propuestas(A) : `<p class="muted peque" style="margin:6px 0 0">Todavía no se ha cargado ninguna presentación en esta sesión.</p>`}</div></div>
+        <div class="tarjeta">${cab("lista", "a", "Mensajes guardados", "Un mensaje queda <b>por aprobar</b> hasta que la Subgerencia o la Gerencia lo autoriza. Al aprobarlo entra al <b>catálogo de difusión</b> y aparece en los <b>Datos del turno</b>.")}
+          <div class="chips-ali" style="margin:0 0 8px">${Object.entries(ESTADOS).map(([k, [, t]]) => `<label class="chip-ali"><input type="radio" name="msjF" value="${k}" ${f === k ? "checked" : ""}><span>${t} (${cuenta(k)})</span></label>`).join("")}</div>
+          <div id="msjLista">${L.filter(m => m.est === f).map(m => this.caja(m.id, m.txt, (m.est === "P" ? `<button class="btn chico verde" data-apr="${m.id}">${B.ico("ok")} Aprobar</button><button class="btn chico fantasma" data-des="${m.id}">Descartar</button>`
+              : m.est === "D" ? `<button class="btn chico sec" data-rea="${m.id}">Volver a proponer</button><button class="btn chico fantasma" data-bor="${m.id}">Borrar</button>` : `<button class="btn chico fantasma" data-rea="${m.id}" title="Regresa el mensaje a por aprobar (ya no se ofrece en los Datos del turno)">Quitar la aprobación</button>`) + `<button class="btn chico sec" data-gu="${m.id}" title="Guarda los cambios del texto">${B.ico("ok")} Guardar texto</button>`)
+              .replace('<div class="msj-pie">', `<div class="peque muted" style="margin:6px 0 0">${esc(m.tema || "Sin tema")}${m.fdoc ? " · Tendencias del " + esc(U.corta ? U.corta(m.fdoc) : m.fdoc) : ""}${m.est === "A" ? ` · <b style="color:var(--verde,#1E6B4A)">Aprobado por la ${esc(m.aprob || "")} el ${esc(U.corta ? U.corta(m.faprob) : m.faprob)}</b>` : ""}</div><div class="msj-pie">`)).join("")
+              || `<p class="muted peque">${f === "P" ? "No hay mensajes por aprobar." : f === "A" ? "Todavía no hay mensajes aprobados." : "No hay mensajes descartados."}</p>`}</div></div>`;
+      this.eventos(P, c);
+    },
+    propuestas(A) {
+      return `<div class="peque muted" style="margin:6px 0 0"><b>${esc(A.nombre)}</b>${A.fecha ? " · " + esc(U.corta ? U.corta(A.fecha) : A.fecha) : ""} · ${A.obs.length} observación(es) en campo · ${A.temas.length} tema(s) a reforzar</div>
+        ${A.obs.length ? `<details style="margin:6px 0"><summary class="peque">Ver las observaciones en campo</summary><ol class="msj-obs">${A.obs.map(o => `<li>${esc(o.txt)} <span class="muted">(ID ${esc(o.id)})</span></li>`).join("")}</ol></details>` : ""}
+        ${A.temas.length ? A.temas.map((T, i) => `<div class="msj-tema"><h3>${i + 1}. ${esc(T.n)}</h3><span class="peque muted">${esc(T.de.join(" · "))}</span></div>
+          ${A.sel[T.k].map((txt, j) => this.caja("p" + i + "_" + j, txt, `<button class="btn chico sec" data-otra="${i}_${j}" title="Cambia por otro mensaje del mismo tema">Otra opción</button><button class="btn chico verde" data-prop="${i}_${j}">${B.ico("ok")} Guardar para aprobación</button>`)).join("")}`).join("")
+          : `<div class="aviso a">${B.ico("info")}<div>No se reconoció ningún tema en la presentación. Escribe el mensaje con <b>Escribir un mensaje</b>.</div></div>`}`;
+    },
+    eventos(P, c) {
+      const A = this.A, re = () => this.vista(P, c);
+      // contador en vivo
+      c.querySelectorAll("[data-txt]").forEach(ta => ta.oninput = () => { const n = largo(ta.value), b = c.querySelector(`[data-cnt="${ta.dataset.txt}"]`); b.textContent = n + " caracteres"; b.className = "badge " + (n >= MIN && n <= MAX ? "v" : "r");
+        const p = /^p(\d+)_(\d+)$/.exec(ta.dataset.txt); if (p && A) A.sel[A.temas[+p[1]].k][+p[2]] = ta.value; });
+      const val = id => c.querySelector(`[data-txt="${id}"]`).value.trim();
+      c.querySelectorAll("[data-cp]").forEach(b => b.onclick = () => this.copiar(val(b.dataset.cp), false));
+      c.querySelectorAll("[data-wa]").forEach(b => b.onclick = () => this.copiar(val(b.dataset.wa), true));
+      c.querySelectorAll("[name=msjF]").forEach(i => i.onchange = () => { this.filtro = i.value; re(); });
+      c.querySelector("#msjArch").onchange = async e => {
+        const file = e.target.files[0]; e.target.value = ""; if (!file) return;
+        try {
+          B.ui.toast("Leyendo la presentación…", "", 2000);
+          const a = this.analizar(await this.leer(file), file.name); a.nombre = file.name; a.sel = {}; a.usadas = {};
+          // dos propuestas por tema (las primeras opciones que no se hayan guardado antes)
+          const ya = new Set(this.lista().map(m => U.norm(m.txt)));
+          for (const T of a.temas.slice(0, 6)) { const op = this.opciones(T.k, T.n), libres = op.filter(x => !ya.has(U.norm(x))); a.sel[T.k] = (libres.length >= 2 ? libres : op).slice(0, 2); }
+          this.A = a; re();
+        } catch (er) { B.ui.error(er); }
+      };
+      c.querySelectorAll("[data-otra]").forEach(b => b.onclick = () => {
+        const [i, j] = b.dataset.otra.split("_").map(Number), T = A.temas[i], op = this.opciones(T.k, T.n), act = A.sel[T.k];
+        const sig = op.filter(x => !act.includes(x)); if (!sig.length) { B.ui.toast("Ya no hay más opciones para este tema; edita el texto a tu gusto.", "", 2500); return; }
+        A.u = (A.u || 0) + 1; act[j] = sig[A.u % sig.length]; re();
+      });
+      c.querySelectorAll("[data-prop]").forEach(b => b.onclick = async () => {
+        const [i, j] = b.dataset.prop.split("_").map(Number), T = A.temas[i], txt = val("p" + i + "_" + j);
+        if (!txt) return;
+        if (this.lista().some(m => U.norm(m.txt) === U.norm(txt))) { B.ui.toast("Ese mensaje ya está guardado.", "error"); return; }
+        try { await this.guardar({ id: "m" + Date.now().toString(36), txt, tema: T.n, fuente: A.nombre, fdoc: A.fecha, est: "P", f: U.ahoraISO() }); B.ui.toast("Guardado. Queda por aprobar.", "ok"); this.filtro = "P"; re(); } catch (er) { B.ui.error(er); }
+      });
+      c.querySelector("#msjNuevo").onclick = async () => {
+        const r = await B.ui.modal({ titulo: "Nuevo mensaje de seguridad", icono: "info", ancho: true,
+          html: `<div class="campo"><label>Tema</label><input class="inp" id="nmTema" list="nmTemas" placeholder="Ej. Trabajos en alturas"><datalist id="nmTemas">${TEMAS.map(T => `<option value="${esc(T.n)}">`).join("")}</datalist></div>
+            <div class="campo"><label>Mensaje (${MIN} a ${MAX} caracteres)</label><textarea class="inp msj-txt" id="nmTxt" rows="4"></textarea><span class="badge r" id="nmCnt">0 caracteres</span></div><style>${this.css}</style>`,
+          alAbrir: v => { const ta = v.querySelector("#nmTxt"), b = v.querySelector("#nmCnt"); ta.oninput = () => { const n = largo(ta.value); b.textContent = n + " caracteres"; b.className = "badge " + (n >= MIN && n <= MAX ? "v" : "r"); }; },
+          botones: [{ t: "Cancelar", c: "sec", v: null }, { t: "Guardar para aprobación", c: "verde", v: v => ({ tema: v.querySelector("#nmTema").value.trim(), txt: v.querySelector("#nmTxt").value.trim() }) }] });
+        if (!r) return; if (!r.txt) { B.ui.toast("Escribe el mensaje.", "error"); return; }
+        try { await this.guardar({ id: "m" + Date.now().toString(36), txt: r.txt, tema: r.tema, fuente: "", fdoc: "", est: "P", f: U.ahoraISO() }); this.filtro = "P"; re(); } catch (er) { B.ui.error(er); }
+      };
+      const msj = id => Object.assign({}, TJ.datos.msj[id], { txt: val(id) });
+      const cambia = async (id, cambios, aviso) => { try { await this.guardar(Object.assign(msj(id), cambios)); if (aviso) B.ui.toast(aviso, "ok", 4000); re(); } catch (er) { B.ui.error(er); } };
+      c.querySelectorAll("[data-gu]").forEach(b => b.onclick = () => cambia(b.dataset.gu, {}, TJ.datos.msj[b.dataset.gu].est === "A" ? "Texto guardado. El texto nuevo también se agregó al catálogo de difusión." : "Texto guardado."));
+      c.querySelectorAll("[data-des]").forEach(b => b.onclick = () => cambia(b.dataset.des, { est: "D" }));
+      c.querySelectorAll("[data-rea]").forEach(b => b.onclick = () => cambia(b.dataset.rea, { est: "P", aprob: "", faprob: "" }));
+      c.querySelectorAll("[data-apr]").forEach(b => b.onclick = async () => {
+        const id = b.dataset.apr, txt = val(id), n = largo(txt);
+        const r = await B.ui.modal({ titulo: "Aprobar mensaje", icono: "ok", ancho: true,
+          html: `<div class="msj-caja"><div class="msj-txt" style="padding:4px">${esc(txt)}</div><span class="badge ${n >= MIN && n <= MAX ? "v" : "r"}">${n} caracteres</span></div><style>${this.css}</style>
+            <div class="fila"><div class="campo" style="flex:1 1 200px"><label>Lo aprobó</label><select class="inp" id="apQuien"><option>Subgerencia</option><option>Gerencia</option></select></div>
+            <div class="campo" style="flex:0 0 180px"><label>Fecha de aprobación</label><input class="inp" type="date" id="apF" value="${U.hoy ? U.hoy() : U.ahoraISO().slice(0, 10)}"></div></div>
+            <p class="muted peque" style="margin:0">Al aprobarlo se agrega al catálogo de difusión y se ofrece en los Datos del turno.</p>`,
+          botones: [{ t: "Cancelar", c: "sec", v: null }, { t: "Aprobar", c: "verde", v: v => ({ aprob: v.querySelector("#apQuien").value, faprob: v.querySelector("#apF").value }) }] });
+        if (!r) return;
+        await cambia(id, { est: "A", aprob: r.aprob, faprob: r.faprob }, "Mensaje aprobado: ya está en el catálogo de difusión y en los Datos del turno.");
+        try { B.estado.catalogos = (await B.api.llamar("estado")).catalogos || B.estado.catalogos; } catch (e) { }
+      });
+      c.querySelectorAll("[data-bor]").forEach(b => b.onclick = async () => {
+        if (!await B.ui.confirmar("¿Borrar este mensaje descartado? No se puede deshacer.")) return;
+        try { await TJ.llamar("msjGuardar", { borrar: b.dataset.bor }); delete TJ.datos.msj[b.dataset.bor]; re(); } catch (er) { B.ui.error(er); }
+      });
+    },
   };
 })();
 ;
@@ -9322,7 +9602,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "4.10.5", servidorViejo: false,
+  info: {}, VERSION: "4.11", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -9509,7 +9789,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "procedimientos" ? '<span class="contador oculto" id="cntProc"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.10.5")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.11")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
