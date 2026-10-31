@@ -809,7 +809,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.11.1", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.11.2", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -8120,6 +8120,14 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
     { k: "emergencias", n: "Preparación para emergencias", re: /EMERGENCIA|EVACUA|PUNTO DE REUNION|PAMCI|SIMULACRO|VOCEO/, m: [] },
     { k: "clima", n: "Condiciones climáticas y estado físico", re: /CALOR|HIDRAT|FATIGA|LLUVIA|VIENTO|FRENTE FRIO|TORMENTA|ESTADO FISICO/, m: [] },
     { k: "excelencia", n: "Profesionalismo nuclear y Nivel de Excelencia Total", re: /PROFESIONALISMO|PROFESIONAL NUCLEAR|EXCELENCIA|CULTURA DE SEGURIDAD|BUENAS PRACTICAS|EXPERIENCIA OPERACIONAL/, m: [] },
+    { k: "ergonomia", n: "Ergonomía y manejo manual de cargas", re: /ERGONOM|POSTURA|MANEJO MANUAL|CARGA MANUAL|LEVANTAR CARGA|ESPALDA/, m: [] },
+    { k: "senalizacion", n: "Señalización y delimitación de áreas", re: /SENALIZ|DELIMITA|ACORDON|BARRICAD/, m: [] },
+    { k: "reporte", n: "Reporte de actos, condiciones y cuasi accidentes", re: /REPORTE DE|CUASI|CASI ACCIDENTE|CONDICION(ES)? INSEGURA|ACTOS? INSEGURO/, m: [] },
+    { k: "fauna", n: "Fauna y entorno natural", re: /FAUNA|SERPIENTE|VIBORA|ABEJA|AVISPA|ALACRAN|PONZON|PICADURA/, m: [] },
+    { k: "ambiental", n: "Cuidado del medio ambiente", re: /AMBIENT|RESIDUOS? PELIGROSO|MANEJO DE RESIDUOS|DRENAJE|RECICL/, m: [] },
+    { k: "seguridadfisica", n: "Seguridad física y control de accesos", re: /SEGURIDAD FISICA|GAFETE|CONTROL DE ACCESO|CREDENCIAL|AREA PROTEGIDA/, m: [] },
+    { k: "presion", n: "Sistemas presurizados y aire comprimido", re: /PRESURIZ|DESPRESURIZ|AIRE COMPRIMIDO|HIDROSTATIC|NEUMATIC|PRESION ATRAPADA/, m: [] },
+    { k: "salud", n: "Salud y bienestar en el trabajo", re: /SALUD|PRIMEROS AUXILIOS|SERVICIO MEDICO|BOTIQUIN|BIENESTAR|ALIMENTACION/, m: [] },
     { k: "supervision", n: "Supervisión en campo", re: /SUPERVISION EN CAMPO|LIDERES EN CAMPO|FALTA DE SUPERVISION/, m: [
       "Lo que se tolera se repite. Si ves un comportamiento inseguro, intervén con respeto, corrígelo en el momento y reconoce también lo que se hace bien.",
       "La seguridad se construye en campo: observa, pregunta y retroalimenta. Una conversación a tiempo puede evitar el accidente que nadie quiere reportar.",
@@ -8276,6 +8284,120 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
     ],
   };
   for (const [k, l] of Object.entries(LOTE)) TEMAS.find(T => T.k === k).m.push(...l);
+  // segundo lote (v4.11.2): 62 mensajes mas, 8 temas nuevos; mismo estilo y largo
+  const LOTE2 = {
+    ergonomia: [
+      "Para levantar una carga dobla las rodillas, mantén la espalda recta y la carga cerca de tu cuerpo. Si es pesada o voluminosa, pide ayuda o usa un equipo.",
+      "Evalúa el peso antes de levantar: si dudas que puedes moverla solo, no lo intentes. Usa carretillas, polipastos o el apoyo de un compañero.",
+      "Cambia de postura y estírate en trabajos prolongados. Las lesiones de espalda y de hombros se acumulan poco a poco; prevenirlas es parte de tu trabajo.",
+      "Al cargar entre dos o más personas, uno coordina y todos levantan, giran y bajan al mismo tiempo. Despeja el camino antes de mover la carga.",
+    ],
+    senalizacion: [
+      "Respeta los acordonamientos y las cintas de delimitación: indican un peligro que quizá no ves. Si necesitas cruzar, solicita autorización al responsable.",
+      "Delimita tu área de trabajo con la cinta y los letreros adecuados y retírala solo al terminar. Un área sin señalizar invita a otros a entrar al peligro.",
+      "Las señales de seguridad no son decoración: indican obligación, prohibición, precaución o emergencia. Léelas y cúmplelas en cada área de la central.",
+      "Si una señal está dañada, caída o ya no corresponde al riesgo del área, repórtala. Una señalización clara y actualizada protege a todos los que pasan.",
+    ],
+    reporte: [
+      "Reportar un cuasi accidente es una oportunidad de aprender sin que nadie salga lastimado. Lo que hoy fue un susto mañana puede ser una lesión.",
+      "Si ves una condición insegura, atiéndela si puedes hacerlo con seguridad y repórtala siempre. El silencio deja el riesgo esperando a la siguiente persona.",
+      "Cada tarjeta Líderes en Campo es una oportunidad de mejora. Describe lo que observaste, lo que corregiste y reconoce también los comportamientos seguros.",
+      "Reportar no es acusar, es prevenir. Una observación oportuna ayuda a corregir condiciones y comportamientos antes de que se conviertan en un accidente.",
+    ],
+    fauna: [
+      "En áreas verdes y exteriores revisa dónde pisas y dónde pones las manos. Serpientes, alacranes y abejas pueden ocultarse entre la hierba y los materiales.",
+      "Si encuentras un panal, una serpiente u otro animal de riesgo, no intentes retirarlo. Aléjate, delimita la zona y repórtalo para su atención.",
+      "Antes de mover materiales almacenados en exteriores, golpéalos ligeramente y revísalos. Usa guantes: los animales ponzoñosos buscan lugares oscuros.",
+      "Si sufres una picadura o mordedura, avisa de inmediato y acude al servicio médico. Informa qué animal fue: ese dato ayuda a que te atiendan mejor.",
+    ],
+    ambiental: [
+      "Separa los residuos en el contenedor correcto: peligrosos, de manejo especial y comunes. Una buena separación protege al personal y al medio ambiente.",
+      "Ningún aceite, solvente o químico va al drenaje ni al suelo. Usa charolas de contención y reporta cualquier derrame para su limpieza adecuada.",
+      "Cuidar el agua, la energía y los materiales también es parte del trabajo seguro. Apaga lo que no uses y reporta las fugas en cuanto las detectes.",
+      "Los residuos peligrosos se identifican, se etiquetan y se almacenan en el área autorizada. Nunca los mezcles ni los dejes abandonados en el área.",
+    ],
+    seguridadfisica: [
+      "Porta tu gafete a la vista en todo momento y úsalo solo tú. Compartirlo o prestarlo pone en riesgo la seguridad física de toda la central.",
+      "No permitas que alguien entre detrás de ti a un área controlada sin pasar su propio gafete. Cada persona registra su acceso, sin excepción.",
+      "Si observas una persona, un paquete o un vehículo sospechoso, no lo enfrentes: repórtalo de inmediato a Seguridad Física con toda la información posible.",
+      "Al pasar por un acceso controlado espera a que la puerta cierre por completo antes de alejarte. Una puerta entreabierta deja el área sin control.",
+    ],
+    presion: [
+      "Antes de abrir un sistema confirma que esté despresurizado, drenado y venteado. La presión atrapada puede liberar fluidos o piezas con gran fuerza.",
+      "Asegura las mangueras de aire y de agua a presión con sus seguros o cadenas. Una manguera que se suelta puede latiguear y causar lesiones graves.",
+      "Nunca uses aire comprimido para limpiar tu ropa o tu cuerpo. El aire a presión puede penetrar la piel y causar daños serios en ojos y oídos.",
+      "En pruebas hidrostáticas o neumáticas delimita el área, mantén al personal fuera de la línea de fuego y sigue la secuencia de presurización autorizada.",
+    ],
+    salud: [
+      "Si te lesionas, por pequeño que parezca, repórtalo y acude al servicio médico. Una herida sin atender a tiempo puede complicarse días después.",
+      "Llega descansado a tu turno: el sueño insuficiente afecta tu atención tanto como el alcohol. Si te sientes fatigado, avisa a tu supervisor.",
+      "Conoce dónde están el botiquín, la camilla y el servicio médico más cercano a tu área. En una emergencia saberlo reduce el tiempo de atención.",
+      "Aliméntate bien e hidrátate durante tu jornada. Un cuerpo en buenas condiciones responde mejor ante los riesgos del trabajo y del entorno.",
+    ],
+    transito: [
+      "Respeta los límites de velocidad dentro de la central y cede el paso a los peatones. Conduce como si en cada cruce hubiera alguien que no te ha visto.",
+      "Usa siempre el cinturón de seguridad, aunque el trayecto sea corto. La mayoría de las lesiones en accidentes viales se evitan con un simple clic.",
+      "Antes de echarte en reversa verifica que no haya personas ni obstáculos y, si no tienes buena visibilidad, pide el apoyo de un señalero.",
+    ],
+    confinados: [
+      "El rescate en un espacio confinado se planea antes de entrar. Si alguien se desmaya dentro, no entres a salvarlo: activa el plan de rescate.",
+      "Ventila el espacio confinado antes y durante el trabajo y registra cada entrada y salida. Saber quién está dentro es parte de su seguridad.",
+    ],
+    supervision: [
+      "Reconoce en público el trabajo seguro y corrige en privado con respeto. Un líder que retroalimenta a tiempo construye una cultura de seguridad.",
+      "Visita el área antes de iniciar los trabajos: verifica permisos, EPP, delimitación y que todos entendieron los riesgos. Supervisar es prevenir.",
+    ],
+    izaje: [
+      "Confirma que el operador de la grúa esté calificado y que el equipo tenga su inspección vigente. La maniobra segura empieza con equipo y personal aptos.",
+      "Con viento fuerte, lluvia o poca visibilidad, evalúa suspender la maniobra de izaje. Ninguna carga es tan urgente como para izarla en malas condiciones.",
+    ],
+    alturas: [
+      "Si un andamio fue modificado, golpeado o lleva días sin uso, solicita su reinspección antes de subir. Un andamio seguro se verifica, no se supone.",
+      "Para trabajar en altura revisa también tu estado físico: si tienes mareo, fatiga o tomaste medicamentos que causan somnolencia, no subas y avisa.",
+    ],
+    epp: [
+      "Ajusta bien tu casco y usa el barbiquejo al trabajar en altura o agachado. Un casco que se cae deja tu cabeza sin protección justo cuando más importa.",
+      "Cuida tu EPP como cuidas tu herramienta: límpialo, guárdalo en un lugar seco y revisa su estado. El equipo bien conservado te protege mejor.",
+    ],
+    orden: [
+      "Enrolla y cuelga las mangueras y extensiones al terminar de usarlas. Los cables y mangueras en el piso son una de las causas más comunes de tropiezos.",
+      "Los materiales sobrantes no se quedan en el área por si se ocupan después. Regrésalos al almacén o retíralos para mantener la zona segura y despejada.",
+    ],
+    celular: [
+      "Hablar por celular mientras operas un equipo divide tu atención a la mitad. Termina la llamada o detén el equipo; no hagas las dos cosas a la vez.",
+      "Los audífonos te aíslan de las alarmas, los avisos y los vehículos. En áreas operativas mantente atento y escucha lo que pasa a tu alrededor.",
+    ],
+    radiologica: [
+      "Respeta la señalización radiológica y las barreras de las áreas. Nunca ingreses a una zona de alta radiación sin la autorización y el control requeridos.",
+      "Si tu dosímetro alarma, detente, retírate del área de manera ordenada y avisa a Protección Radiológica. No ignores ni silencies una alarma dosimétrica.",
+    ],
+    eme: [
+      "Antes de cerrar un sistema realiza la inspección final de limpieza y verifica que no quede ningún material extraño. Un cierre limpio protege la planta.",
+    ],
+    error: [
+      "Antes de cada paso crítico haz una pausa y pregúntate si estás seguro de lo que vas a hacer. Si la respuesta no es un sí claro, detente y verifica.",
+      "Los errores más comunes ocurren al inicio, al final y después de una interrupción de la tarea. Pon atención extra en esos momentos de tu trabajo.",
+    ],
+    comunicacion: [
+      "Usa el alfabeto fonético y los identificadores completos de los equipos al comunicarte. Una letra o un número confundido puede llevar a un error grave.",
+      "Al entregar el turno comunica las condiciones del área, los trabajos en curso y los riesgos pendientes. Una entrega clara evita sorpresas al siguiente.",
+    ],
+    permisos: [
+      "Al terminar el trabajo cierra tu permiso: retira bloqueos, deja el área limpia y entrega el equipo en condiciones. El cierre también es parte de la tarea.",
+      "Si el permiso de trabajo no está en el área o está vencido, el trabajo se detiene. Tener el permiso a la vista es la prueba de que se autorizó.",
+    ],
+    emergencias: [
+      "Al escuchar la alarma de evacuación suspende tu actividad de forma segura, deja el área en condiciones y dirígete a tu punto de reunión sin correr.",
+      "Participa con seriedad en cada simulacro: lo que practicas en calma es lo que harás en una emergencia real. Conoce tu papel y el de tu brigada.",
+    ],
+    caliente: [
+      "No dejes equipos de soldadura, sopletes o cilindros desatendidos ni conectados al terminar. Ciérralos, desconéctalos y retíralos del área de trabajo.",
+    ],
+    excelencia: [
+      "La excelencia se demuestra en los detalles: preparar la tarea, cuidar el área y cumplir lo acordado. Hagamos de la seguridad un hábito de todos los días.",
+    ],
+  };
+  for (const [k, l] of Object.entries(LOTE2)) TEMAS.find(T => T.k === k).m.push(...l);
   // para un tema que no esta en la lista ({t} = el tema como viene en la presentacion)
   const GENERICOS = [
     "Hoy reforzamos {t}. Haz cada tarea con atención, sigue lo establecido y detente si algo no está claro: la seguridad empieza con tu decisión.",
@@ -9795,7 +9917,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "4.11.1", servidorViejo: false,
+  info: {}, VERSION: "4.11.2", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -9982,7 +10104,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "procedimientos" ? '<span class="contador oculto" id="cntProc"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.11.1")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.11.2")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
