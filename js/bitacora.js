@@ -809,7 +809,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.11", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.11.1", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -8075,7 +8075,7 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
       "Lo que no se confirma no se da por hecho. Usa la comunicación de tres vías: escucha, repite y confirma; una indicación de palabra no sustituye un registro.",
       "Una comunicación clara previene errores. Habla con precisión, verifica que te entendieron y documenta lo importante: el supuesto es el inicio del error.",
       "Antes de actuar, confirma: ¿qué, dónde, cuándo y con qué controles? Preguntar a tiempo evita corregir tarde. La comunicación también es seguridad."] },
-    { k: "actitud", n: "Actitud interrogativa", re: /ACTITUD INTERROG|DUDA|SUPUEST|DETENER(SE)? EL TRABAJO|STOP WORK/, m: [
+    { k: "actitud", n: "Actitud cuestionadora", re: /ACTITUD (?:INTERROG|CUESTIONADORA)|DUDA|SUPUEST|DETENER(SE)? EL TRABAJO|STOP WORK/, m: [
       "Si tienes duda, detente y pregunta. Una actitud interrogativa no retrasa el trabajo: lo protege. Nadie debe continuar una tarea con incertidumbre.",
       "Cuestionar no es desconfiar, es cuidarnos. Ante algo diferente a lo esperado, detén la tarea, analiza la situación y continúa solo cuando esté claro.",
       "Tienes la autoridad y la obligación de detener cualquier trabajo inseguro. Pregunta, verifica y actúa con certeza: la duda se resuelve antes de seguir."] },
@@ -8111,11 +8111,171 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
       "Conoce lo que manejas: revisa la hoja de datos de seguridad, usa el EPP indicado y mantén cada sustancia etiquetada, tapada y en su lugar asignado.",
       "Sustancias químicas e inflamables se manejan con respeto: lejos de fuentes de ignición, con ventilación adecuada y siempre en recipientes identificados.",
       "Antes de usar un producto químico pregúntate: ¿sé qué es, cómo me afecta y qué hago si se derrama? Si no lo sabes, detente y consulta primero."] },
+    { k: "celular", n: "Uso de dispositivos móviles", re: /CELULAR|DISPOSITIVOS? MOVIL|TELEFONO|AUDIFONO/, m: [] },
+    { k: "puertas", n: "Apertura y cierre de puertas", re: /PUERTA|MIRILLA/, m: [] },
+    { k: "caliente", n: "Trabajos en caliente y prevención de incendios", re: /EN CALIENTE|INCENDIO|EXTINTOR|HIDRANTE|RETARDANTE|PCI\b/, m: [] },
+    { k: "eme", n: "Exclusión de materiales extraños (EME)", re: /\bEME\b|MATERIALES? EXTRAN/, m: [] },
+    { k: "riesgo", n: "Percepción y evaluación del riesgo", re: /RIESGO DINAMICO|PERCEPCION DEL RIESGO|EVALUACION DEL RIESGO|EXCESO DE CONFIANZA|RUTINARI|IDENTIFICAR Y ELIMINAR/, m: [] },
+    { k: "permisos", n: "Permisos de trabajo", re: /PERMISOS? DE TRABAJO|PETAR|LIBERACION DEL AREA/, m: [] },
+    { k: "emergencias", n: "Preparación para emergencias", re: /EMERGENCIA|EVACUA|PUNTO DE REUNION|PAMCI|SIMULACRO|VOCEO/, m: [] },
+    { k: "clima", n: "Condiciones climáticas y estado físico", re: /CALOR|HIDRAT|FATIGA|LLUVIA|VIENTO|FRENTE FRIO|TORMENTA|ESTADO FISICO/, m: [] },
+    { k: "excelencia", n: "Profesionalismo nuclear y Nivel de Excelencia Total", re: /PROFESIONALISMO|PROFESIONAL NUCLEAR|EXCELENCIA|CULTURA DE SEGURIDAD|BUENAS PRACTICAS|EXPERIENCIA OPERACIONAL/, m: [] },
     { k: "supervision", n: "Supervisión en campo", re: /SUPERVISION EN CAMPO|LIDERES EN CAMPO|FALTA DE SUPERVISION/, m: [
       "Lo que se tolera se repite. Si ves un comportamiento inseguro, intervén con respeto, corrígelo en el momento y reconoce también lo que se hace bien.",
       "La seguridad se construye en campo: observa, pregunta y retroalimenta. Una conversación a tiempo puede evitar el accidente que nadie quiere reportar.",
       "Ser líder en campo es cuidar a todos. Detén lo inseguro, explica el porqué y acompaña la corrección: el ejemplo enseña más que cualquier indicación."] },
   ];
+  // lote de 100 mensajes (v4.12), revisados con el estilo de los mensajes aprobados del catalogo, los estandares de las tarjetas,
+  // las herramientas de desempeno humano y el material POE; todos de 130 a 190 caracteres
+  const LOTE = {
+    epp: [
+      "El casco, los lentes y el calzado de seguridad son parte de tu uniforme de trabajo. Úsalos desde que ingresas al área y hasta que sales de ella.",
+      "Si tu EPP está dañado, sucio o no te ajusta, no lo uses así: repórtalo y cámbialo. Un equipo en mal estado da una falsa sensación de protección.",
+      "La protección auditiva solo funciona bien colocada. Inserta los tapones correctamente y úsalos en todas las áreas señalizadas con ruido alto.",
+      "Los guantes adecuados dependen de la tarea: corte, químicos, electricidad o temperatura. Elige el correcto antes de iniciar y protege tus manos.",
+      "Tus ojos no se reponen. Usa lentes de seguridad en todo momento en áreas operativas y careta adicional cuando esmerilas, cortas o manejas químicos.",
+      "Usar el EPP no es opcional ni depende de lo que dure la tarea. Un minuto sin protección basta para una lesión que puede durar toda la vida.",
+      "Antes de entrar al área revisa tu EPP: casco con barbiquejo, lentes, guantes, tapones y calzado. Si falta algo, consíguelo antes de empezar.",
+      "Da el ejemplo: porta tu EPP completo y correctamente. Si ves a un compañero sin él, detente y recuérdaselo con respeto; cuidarnos es tarea de todos.",
+      "El calor o la incomodidad no son motivo para retirar el EPP. Haz pausas en un área segura, hidrátate y regresa a tu tarea con tu protección completa.",
+    ],
+    orden: [
+      "Al terminar tu jornada deja tu área limpia y despejada: retira materiales, guarda herramientas y desecha residuos en el contenedor que corresponde.",
+      "Un cable atravesado o un material en el pasillo es una caída esperando ocurrir. Mantén libres las rutas de tránsito, las escaleras y las salidas.",
+      "Los derrames de aceite, agua o químicos se atienden de inmediato: señaliza, contén y limpia. Si no puedes hacerlo con seguridad, repórtalo.",
+      "Los equipos de emergencia deben estar siempre a la vista y sin obstrucciones: extintores, regaderas, lavaojos e hidrantes. Nunca los bloquees.",
+      "Orden en el área, orden en la mente. Un lugar limpio permite ver los riesgos a tiempo y trabajar con calma, de forma segura, bien y a la primera.",
+      "Almacena los materiales de forma estable y a la altura correcta. Lo que está mal apilado puede caer y convertirse en un golpe para alguien más.",
+      "La limpieza es parte del trabajo, no algo para después. Recoge conforme avanzas y entrega el área en mejores condiciones de como la recibiste.",
+    ],
+    celular: [
+      "Camina con la vista al frente: no uses el celular al caminar ni al subir o bajar escaleras. Si necesitas contestar, detente en un lugar seguro.",
+      "El celular distrae justo cuando más atención necesitas. Guárdalo durante maniobras, trabajos en altura y al operar equipos o herramientas.",
+      "Un mensaje puede esperar, tu seguridad no. Detente fuera de las rutas de tránsito para usar tu celular y vuelve a tu tarea con toda tu atención.",
+      "Usa el pasamanos al subir o bajar escaleras y deja el celular en tu bolsillo. Tres puntos de apoyo y la mirada en cada escalón evitan caídas.",
+      "Respeta las restricciones para el uso de dispositivos móviles en las áreas de la central. Revisa la señalización antes de usar tu equipo.",
+      "Mirar la pantalla mientras caminas te deja ciego ante los riesgos: desniveles, vehículos y cargas en movimiento. Primero detente, luego revisa.",
+      "Al conducir, el celular se queda guardado. Ninguna llamada justifica una distracción; si es urgente, estaciónate en un lugar permitido y contesta.",
+    ],
+    alturas: [
+      "Antes de usar un andamio verifica que tenga su tarjeta de inspección vigente y en verde. Si no la tiene o está restringido, no subas y repórtalo.",
+      "Inspecciona tu arnés antes de cada uso: costuras, cintas, hebillas y argollas. Si encuentras algún daño, retíralo de servicio y solicita otro.",
+      "Ancla tu línea de vida por encima de tus hombros y a un punto resistente. Nunca la conectes a tuberías, conduit o soportes no diseñados para ello.",
+      "Herramientas amarradas y área inferior delimitada: en trabajos en altura lo que cae puede lesionar a quien está abajo. Cuida también a los demás.",
+      "Las escaleras se usan de frente, con tres puntos de apoyo y sin cargar objetos en las manos. Sube el material con una cuerda o con ayuda.",
+      "Antes de trabajar cerca de bordes, huecos o aberturas, instala barandales o barreras. Donde exista riesgo de caída debe haber una protección.",
+    ],
+    izaje: [
+      "Toda maniobra inicia con un plan: peso de la carga, capacidad del equipo, accesorios inspeccionados y roles definidos. Sin plan, no hay izaje.",
+      "Solo una persona da las señales al operador y todos conocen su papel. Si alguien indica alto, la maniobra se detiene de inmediato y sin discusión.",
+      "Revisa eslingas, grilletes y ganchos antes de usarlos. Un accesorio deformado, cortado o sin identificación de capacidad se retira de servicio.",
+      "Usa cabos guía para controlar la carga y mantén tus manos lejos de los puntos de pellizco. Nunca empujes ni guíes la carga con el cuerpo.",
+      "El área de maniobra se delimita y se respeta. Si no participas en el izaje mantente fuera; si participas, nunca te ubiques bajo la carga.",
+      "En el traslado de materiales verifica la ruta antes de moverte: piso firme, espacio libre y sin personal en el camino. Avisa antes de avanzar.",
+    ],
+    energias: [
+      "Antes de conectar una extensión revisa que el cable, la clavija y el contacto estén en buen estado. El equipo eléctrico dañado se retira de inmediato.",
+      "Trata todo circuito como energizado hasta comprobar lo contrario. Verifica la ausencia de tensión con el equipo adecuado antes de intervenir.",
+      "No retires bloqueos, etiquetas ni candados ajenos. La libranza protege a quien está trabajando en el equipo; respetarla es respetar su vida.",
+      "Mantén los tableros eléctricos cerrados y su frente libre. Solo el personal autorizado y con el EPP contra arco eléctrico puede intervenirlos.",
+      "Agua y electricidad no se mezclan. Evita usar equipo eléctrico en zonas mojadas y aleja los cables de charcos, derrames y bordes filosos.",
+    ],
+    herramientas: [
+      "Usa cada herramienta solo para lo que fue diseñada. Una llave como martillo o un desarmador como palanca son lesiones a punto de ocurrir.",
+      "Nunca retires ni anules la guarda de un esmeril o una pulidora. La guarda está ahí para detener lo que tus manos y tu cara no pueden detener.",
+      "Desconecta la herramienta eléctrica antes de cambiar discos, brocas o accesorios. Un arranque accidental basta para causar una lesión grave.",
+      "Herramienta en mal estado, herramienta fuera de servicio. Etiquétala, repórtala y no la regreses al almacén como si estuviera en buenas condiciones.",
+    ],
+    puertas: [
+      "Abre y cierra las puertas con calma, sujetándolas de la manija y sin soltarlas. Un portazo puede lastimar tus manos o a quien viene del otro lado.",
+      "Antes de abrir una puerta mira por la mirilla, si la tiene, y hazlo despacio. Del otro lado puede haber una persona, una carga o un equipo en movimiento.",
+      "Las puertas contra incendio y de barrera deben permanecer cerradas. No las bloquees ni las dejes abiertas: son parte de la protección de la planta.",
+      "Mantén tus dedos lejos del marco y de las bisagras al cerrar una puerta. Los puntos de pellizco de las puertas causan más lesiones de lo que crees.",
+    ],
+    quimicos: [
+      "Los cilindros de gas siempre van de pie, encadenados y con su capuchón cuando no están en uso. Un cilindro que cae puede convertirse en proyectil.",
+      "Almacena combustibles, inflamables y corrosivos solo en áreas autorizadas, etiquetados y en contenedores cerrados. Lo temporal también se controla.",
+      "Nunca cambies un químico de recipiente sin etiquetarlo. Un envase sin identificación puede causar una intoxicación o una reacción peligrosa.",
+      "Transporta los cilindros con el carro adecuado, nunca rodándolos ni arrastrándolos. Verifica válvulas y reguladores antes de usarlos.",
+    ],
+    caliente: [
+      "Antes de soldar, cortar o esmerilar, retira o protege los materiales combustibles en un radio seguro y confirma que el permiso esté autorizado.",
+      "La vigilancia contra incendio continúa después de terminar el trabajo en caliente. Un rescoldo oculto puede iniciar un incendio horas más tarde.",
+      "Conoce la ubicación del extintor más cercano y cómo usarlo antes de empezar tu actividad. En un conato de incendio cada segundo cuenta.",
+      "Los extintores, hidrantes y mangueras contra incendio no son soportes ni repisas. Mantenlos libres, visibles, señalizados y listos para usarse.",
+      "El fuego necesita combustible, oxígeno y calor. Controla cualquiera de ellos y evitarás un incendio: el orden y el permiso son tu primera barrera.",
+    ],
+    radiologica: [
+      "Antes de ingresar al Área Restringida verifica tu dosímetro y conoce la rapidez de dosis del área y sus puntos calientes. Infórmate antes de entrar.",
+      "Retírate del área al alcanzar el 80 % del ajuste de tu alarma de dosis. No esperes a que suene: la planeación evita la exposición innecesaria.",
+      "Cumple los controles prescritos en el PETAR y usa los accesorios de protección radiológica indicados. Ante cualquier duda consulta a Protección Radiológica.",
+      "No comas, bebas ni fumes en zonas radiológicamente controladas. Evitar la contaminación interna empieza por respetar las reglas básicas del área.",
+      "Antes de salir de una zona controlada monitorea tu cuerpo y tus herramientas. Detectar a tiempo una contaminación evita que se disperse.",
+      "Minimiza los desechos radiactivos: ingresa al área solo lo necesario y retira el empaque antes de entrar. Menos material, menos desecho.",
+    ],
+    eme: [
+      "Todo lo que entra a una zona EME debe registrarse y salir. Anota herramientas y materiales en la bitácora y verifica el inventario al terminar.",
+      "Asegura lentes, plumas, gafetes y herramientas con dispositivos de retención en zonas EME. Un objeto pequeño puede causar un gran problema.",
+      "La exclusión de materiales extraños es responsabilidad de todos: cubre las aberturas de sistemas y componentes y retira las cubiertas solo al cerrar.",
+      "Si pierdes un objeto en una zona EME, detente y repórtalo de inmediato. Reportar a tiempo permite recuperarlo antes de que dañe un sistema.",
+    ],
+    error: [
+      "Aplica STAR en cada paso crítico: detente, piensa, actúa y revisa. Un segundo de pausa evita un error que puede costar mucho más que ese tiempo.",
+      "Antes de operar confirma que estás en la unidad, el tren y el componente correctos. Verifica la etiqueta en sitio y no confíes solo en tu memoria.",
+      "Las interrupciones son trampas para el error. Si te interrumpen, marca dónde te quedaste y, al regresar, revisa el último paso antes de seguir.",
+      "En tareas críticas solicita una verificación concurrente: dos personas confirmando el mismo paso reducen la probabilidad de cometer un error.",
+      "La prisa, la fatiga y el exceso de confianza son precursores de error. Reconócelos en ti y en tu equipo, y haz una pausa cuando aparezcan.",
+    ],
+    actitud: [
+      "Si algo no se ve, no suena o no se siente como esperabas, detente y pregunta. La actitud cuestionadora identifica el riesgo antes del evento.",
+      "No supongas, verifica. Pregúntate qué podría salir mal, qué harías si ocurre y si tienes todo lo necesario antes de comenzar la tarea.",
+      "Detener un trabajo por una duda es una muestra de profesionalismo. Nadie debe ser criticado por hacer una pausa para preguntar y hacerlo bien.",
+      "Cuestiona las condiciones, no a las personas. Una pregunta a tiempo puede corregir un plan, un procedimiento o una condición insegura en campo.",
+    ],
+    proc: [
+      "Usa el procedimiento en la mano cuando así se requiere y marca cada paso que realizas. El seguimiento paso a paso evita saltos y omisiones.",
+      "Si un paso del procedimiento no puede realizarse como está escrito, detente. Consulta a tu supervisor antes de continuar o de modificar algo.",
+      "Verifica que tu procedimiento sea la revisión vigente antes de iniciar. Trabajar con un documento obsoleto es trabajar con información equivocada.",
+      "Los atajos ahorran minutos y pueden costar vidas. Respeta el procedimiento completo aunque la tarea te parezca sencilla o muy conocida.",
+    ],
+    comunicacion: [
+      "En la reunión pre-trabajo todos deben conocer la tarea, los riesgos, los controles y su papel. Si algo no quedó claro, pregúntalo antes de iniciar.",
+      "Comunica cualquier cambio en las condiciones del área a tu equipo y a tu supervisor. Una información compartida a tiempo previene un evento.",
+    ],
+    riesgo: [
+      "Antes de iniciar identifica los peligros de tu tarea y el control para cada uno. Si las condiciones cambian, detente y vuelve a evaluar el riesgo.",
+      "La experiencia es valiosa, pero no te hace inmune. El exceso de confianza baja la guardia; trata cada tarea como si fuera la primera vez.",
+      "Identifica, elimina o controla el riesgo antes de exponerte. Si no puedes controlarlo con seguridad, detén la tarea y solicita apoyo.",
+      "Las tareas rutinarias también tienen riesgos. Lo que hacemos todos los días es justo lo que dejamos de observar con atención; mantente alerta.",
+      "Tu percepción del riesgo te protege. Observa a tu alrededor antes, durante y después de la tarea: los peligros cambian conforme avanza el trabajo.",
+    ],
+    fuego: [
+      "Antes de liberar presión, cortar un fleje o retirar un soporte, pregúntate hacia dónde se moverá la energía y colócate fuera de su trayectoria.",
+      "Nunca te coloques entre una carga y un objeto fijo ni detrás de un vehículo en movimiento. Elige siempre una posición con una salida segura.",
+    ],
+    confinados: [
+      "Antes de entrar a un espacio confinado asiste a la reunión pre-trabajo y aplica la regla de dos personas más un observador. Nadie entra solo.",
+      "La falta de oxígeno no se ve ni se huele. Mide antes y durante el trabajo; si la alarma del monitor se activa, sal de inmediato y avisa.",
+    ],
+    permisos: [
+      "El permiso de trabajo describe los riesgos y los controles de tu tarea. Léelo, compréndelo y cúmplelo; si cambia el alcance, actualízalo.",
+      "Trabaja solo dentro del alcance, el área y el horario autorizados en tu permiso. Lo que no está en el permiso de trabajo no está autorizado.",
+    ],
+    emergencias: [
+      "Conoce tus rutas de evacuación y tu punto de reunión. En una emergencia no hay tiempo para buscarlos; identifícalos al llegar a tu área de trabajo.",
+      "Atiende cada aviso del sistema de voceo y sigue las indicaciones con calma. En una emergencia la disciplina y el orden salvan vidas.",
+    ],
+    clima: [
+      "En temporada de calor hidrátate con frecuencia, descansa en la sombra y vigila a tus compañeros. Mareo o dolor de cabeza son señales de alerta.",
+      "Con lluvia o viento fuerte reduce el paso, sujétate de los pasamanos y suspende trabajos en altura e izajes si las condiciones no son seguras.",
+    ],
+    excelencia: [
+      "Un profesional nuclear hace lo correcto aun cuando nadie lo observa. La seguridad nuclear y la de las personas son la prioridad en cada decisión.",
+      "Nivel de Excelencia Total: preparamos bien, ejecutamos con cuidado y aprendemos de cada trabajo. Hagámoslo seguro, bien y a la primera.",
+      "Aprende de la experiencia operacional: los eventos de otras plantas nos enseñan qué no repetir. Comparte lo aprendido con todo tu equipo.",
+    ],
+  };
+  for (const [k, l] of Object.entries(LOTE)) TEMAS.find(T => T.k === k).m.push(...l);
   // para un tema que no esta en la lista ({t} = el tema como viene en la presentacion)
   const GENERICOS = [
     "Hoy reforzamos {t}. Haz cada tarea con atención, sigue lo establecido y detente si algo no está claro: la seguridad empieza con tu decisión.",
@@ -8126,7 +8286,7 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
   const ESTADOS = { P: ["a", "Por aprobar"], A: ["v", "Aprobado"], D: ["n", "Descartado"] };
 
   const MS = B.msj = {
-    A: null, filtro: "P",
+    A: null, filtro: "P", bib: { t: "", q: "" },
     lista() { return Object.values((TJ.datos && TJ.datos.msj) || {}).sort((a, b) => String(b.f || "").localeCompare(String(a.f || ""))); },
 
     /* ---------------- lectura de la presentacion: texto de todas las laminas y, en PPTX, las categorias de las graficas */
@@ -8203,6 +8363,10 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
         <div class="tarjeta">${cab("info", "g", "Mensajes de seguridad", "Carga la presentación <b>Tendencias Rápidas</b> (PDF o PowerPoint): se leen los comportamientos que requieren reforzamiento y las observaciones en campo, y se proponen mensajes genéricos para toda la organización. Edítalos aquí mismo antes de copiarlos.",
           `<label class="btn chico verde" style="cursor:pointer">${B.ico("subir")} Cargar Tendencias Rápidas (PDF o PPTX)<input type="file" id="msjArch" accept=".pdf,.pptx" hidden></label><button class="btn chico sec" id="msjNuevo">${B.ico("mas")} Escribir un mensaje</button>`)}
           <div id="msjProp">${A ? this.propuestas(A) : `<p class="muted peque" style="margin:6px 0 0">Todavía no se ha cargado ninguna presentación en esta sesión.</p>`}</div></div>
+        <div class="tarjeta">${cab("doc", "v", "Biblioteca de mensajes", `${TEMAS.reduce((s, T) => s + T.m.length, 0)} mensajes listos, clasificados en ${TEMAS.length} temas. Elige un tema o busca una palabra; edítalo, cópialo o guárdalo para aprobación.`)}
+          <div class="fila" style="align-items:flex-end"><div class="campo" style="flex:1 1 260px"><label>Tema</label><select class="inp" id="bibT"><option value="">Elige un tema…</option>${TEMAS.map(T => `<option value="${T.k}" ${this.bib.t === T.k ? "selected" : ""}>${esc(T.n)} (${T.m.length})</option>`).join("")}<option value="cat" ${this.bib.t === "cat" ? "selected" : ""}>Catálogo de difusión actual (${(B.estado.catalogos.difusion || []).length})</option></select></div>
+            <div class="campo" style="flex:1 1 220px"><label>Buscar en todos</label><input class="inp" id="bibQ" value="${esc(this.bib.q)}" placeholder="Ej. arnés, celular, dosímetro…"></div></div>
+          <div id="bibL"></div></div>
         <div class="tarjeta">${cab("lista", "a", "Mensajes guardados", "Un mensaje queda <b>por aprobar</b> hasta que la Subgerencia o la Gerencia lo autoriza. Al aprobarlo entra al <b>catálogo de difusión</b> y aparece en los <b>Datos del turno</b>.")}
           <div class="chips-ali" style="margin:0 0 8px">${Object.entries(ESTADOS).map(([k, [, t]]) => `<label class="chip-ali"><input type="radio" name="msjF" value="${k}" ${f === k ? "checked" : ""}><span>${t} (${cuenta(k)})</span></label>`).join("")}</div>
           <div id="msjLista">${L.filter(m => m.est === f).map(m => this.caja(m.id, m.txt, (m.est === "P" ? `<button class="btn chico verde" data-apr="${m.id}">${B.ico("ok")} Aprobar</button><button class="btn chico fantasma" data-des="${m.id}">Descartar</button>`
@@ -8218,14 +8382,43 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
           ${A.sel[T.k].map((txt, j) => this.caja("p" + i + "_" + j, txt, `<button class="btn chico sec" data-otra="${i}_${j}" title="Cambia por otro mensaje del mismo tema">Otra opción</button><button class="btn chico verde" data-prop="${i}_${j}">${B.ico("ok")} Guardar para aprobación</button>`)).join("")}`).join("")
           : `<div class="aviso a">${B.ico("info")}<div>No se reconoció ningún tema en la presentación. Escribe el mensaje con <b>Escribir un mensaje</b>.</div></div>`}`;
     },
+    // renglones de la biblioteca (tema elegido o busqueda en todos)
+    pintaBib(c, enlazar) {
+      const q = U.norm(this.bib.q), ya = new Set(this.lista().map(m => U.norm(m.txt))), cat = B.estado.catalogos.difusion || [];
+      let l = [];
+      if (q) { for (const T of TEMAS) for (const m of T.m) if (U.norm(m + " " + T.n).includes(q)) l.push({ txt: m, tema: T.n }); for (const d of cat) if (U.norm(d.txt + " " + (d.tema || "")).includes(q)) l.push({ txt: d.txt, tema: d.tema, cat: d }); }
+      else if (this.bib.t === "cat") l = cat.map(d => ({ txt: d.txt, tema: d.tema, cat: d }));
+      else if (this.bib.t) { const T = TEMAS.find(x => x.k === this.bib.t); if (T) l = T.m.map(m => ({ txt: m, tema: T.n })); }
+      this.bibL = l;
+      const box = c.querySelector("#bibL");
+      box.innerHTML = !l.length ? `<p class="muted peque">${q ? "Sin resultados." : "Elige un tema para ver sus mensajes."}</p>`
+        : (l.length > 40 ? `<p class="muted peque">${l.length} resultados; se muestran los primeros 40. Escribe algo más específico.</p>` : "") +
+          l.slice(0, 40).map((x, i) => this.caja("b" + i, x.txt, x.cat ? `<span class="badge ${x.cat.aprob ? "v" : "n"}">${x.cat.aprob ? "En el catálogo · aprobado" : "En el catálogo"}</span>` : ya.has(U.norm(x.txt)) ? `<span class="badge a">Ya guardado</span>` : `<button class="btn chico verde" data-bib="${i}">${B.ico("ok")} Guardar para aprobación</button>`)
+            .replace('<div class="msj-pie">', `<div class="peque muted" style="margin:6px 0 0">${esc(x.tema || "Sin tema")}</div><div class="msj-pie">`)).join("");
+      enlazar(box);
+    },
     eventos(P, c) {
       const A = this.A, re = () => this.vista(P, c);
-      // contador en vivo
-      c.querySelectorAll("[data-txt]").forEach(ta => ta.oninput = () => { const n = largo(ta.value), b = c.querySelector(`[data-cnt="${ta.dataset.txt}"]`); b.textContent = n + " caracteres"; b.className = "badge " + (n >= MIN && n <= MAX ? "v" : "r");
+      // contador en vivo, copiar y guardar (tambien para los renglones de la biblioteca, que se vuelven a dibujar solos)
+      const enlazar = r => {
+        r.querySelectorAll("[data-txt]").forEach(ta => ta.oninput = () => { const n = largo(ta.value), b = c.querySelector(`[data-cnt="${ta.dataset.txt}"]`); b.textContent = n + " caracteres"; b.className = "badge " + (n >= MIN && n <= MAX ? "v" : "r"); });
+        r.querySelectorAll("[data-cp]").forEach(b => b.onclick = () => this.copiar(val(b.dataset.cp), false));
+        r.querySelectorAll("[data-wa]").forEach(b => b.onclick = () => this.copiar(val(b.dataset.wa), true));
+        r.querySelectorAll("[data-bib]").forEach(b => b.onclick = async () => {
+          const x = this.bibL[+b.dataset.bib], txt = val("b" + b.dataset.bib); if (!x || !txt) return;
+          if (this.lista().some(m => U.norm(m.txt) === U.norm(txt))) { B.ui.toast("Ese mensaje ya está guardado.", "error"); return; }
+          try { await this.guardar({ id: "m" + Date.now().toString(36), txt, tema: x.tema || "", fuente: "Biblioteca", fdoc: "", est: "P", f: U.ahoraISO() }); B.ui.toast("Guardado. Queda por aprobar.", "ok"); this.filtro = "P"; re(); } catch (er) { B.ui.error(er); }
+        });
+      };
+      const bibT = c.querySelector("#bibT"), bibQ = c.querySelector("#bibQ");
+      bibT.onchange = () => { this.bib.t = bibT.value; this.bib.q = ""; bibQ.value = ""; this.pintaBib(c, enlazar); };
+      bibQ.oninput = U.debounce(() => { this.bib.q = bibQ.value.trim(); this.pintaBib(c, enlazar); }, 300);
+      c.querySelectorAll("#msjProp [data-txt], #msjLista [data-txt]").forEach(ta => ta.oninput = () => { const n = largo(ta.value), b = c.querySelector(`[data-cnt="${ta.dataset.txt}"]`); b.textContent = n + " caracteres"; b.className = "badge " + (n >= MIN && n <= MAX ? "v" : "r");
         const p = /^p(\d+)_(\d+)$/.exec(ta.dataset.txt); if (p && A) A.sel[A.temas[+p[1]].k][+p[2]] = ta.value; });
       const val = id => c.querySelector(`[data-txt="${id}"]`).value.trim();
-      c.querySelectorAll("[data-cp]").forEach(b => b.onclick = () => this.copiar(val(b.dataset.cp), false));
-      c.querySelectorAll("[data-wa]").forEach(b => b.onclick = () => this.copiar(val(b.dataset.wa), true));
+      c.querySelectorAll("#msjProp [data-cp], #msjLista [data-cp]").forEach(b => b.onclick = () => this.copiar(val(b.dataset.cp), false));
+      c.querySelectorAll("#msjProp [data-wa], #msjLista [data-wa]").forEach(b => b.onclick = () => this.copiar(val(b.dataset.wa), true));
+      this.pintaBib(c, enlazar);
       c.querySelectorAll("[name=msjF]").forEach(i => i.onchange = () => { this.filtro = i.value; re(); });
       c.querySelector("#msjArch").onchange = async e => {
         const file = e.target.files[0]; e.target.value = ""; if (!file) return;
@@ -9602,7 +9795,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "4.11", servidorViejo: false,
+  info: {}, VERSION: "4.11.1", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -9789,7 +9982,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "procedimientos" ? '<span class="contador oculto" id="cntProc"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.11")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.11.1")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
