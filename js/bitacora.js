@@ -809,7 +809,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.12", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.12.1", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -1678,10 +1678,11 @@ B.local = {
         const c = (await this.leer("config")) || {};
         if (d.quitar) delete c.nube;
         else {
-          const url = String(d.url || "").trim(), clave = String(d.clave || "").trim();
+          const url = String(d.url || "").trim(), clave = String(d.clave || "").trim(), hoja = String(d.hoja || "").trim();
+          if (hoja && !/^[\w-]{20,100}$/.test(hoja)) throw new Error("La dirección de la hoja no es válida.");
           if (url && !/^https:\/\/script\.google\.com\/(a\/[^/]+\/)?macros\/s\/[\w-]+\/exec$/.test(url)) throw new Error("La dirección debe ser la de la aplicación web de Apps Script.");
           if (!/^[A-Za-z0-9]{20,100}$/.test(clave)) throw new Error("Clave no válida.");
-          c.nube = { url, clave, mod: U.ahoraISO() + " " + s.ini };
+          c.nube = { url, hoja, clave, mod: U.ahoraISO() + " " + s.ini };
         }
         await this.escribir("config", c); return { ok: true };
       }
@@ -9712,7 +9713,7 @@ B.nube = {
   // consulta a la hoja (GET): probar, lista, ver, marcar
   async llamar(n, params) {
     const q = new URLSearchParams(Object.assign({ t: await B.cod.token(n.clave) }, params)); let r, j;
-    try { r = await fetch(n.url + "?" + q, { cache: "no-store" }); } catch (e) { throw new Error("No hay conexión con la hoja de Google. Revisa el internet de este equipo."); }
+    try { r = await fetch(n.url + "?" + q, { cache: "no-store" }); } catch (e) { throw Object.assign(new Error("Este equipo no llega a script.google.com (sin internet o la red lo bloquea)."), { red: true }); }
     try { j = await r.json(); } catch (e) { throw new Error("La dirección no respondió como la hoja de la bitácora. Revisa que esté implementada como «Aplicación web» con acceso «Cualquier usuario»."); }
     if (!j.ok) throw new Error(j.error === "clave" ? "La clave no coincide con el código de Apps Script. Copia de nuevo el código desde la bitácora y vuelve a implementarlo." : "La hoja de Google respondió: " + j.error);
     return j;
@@ -9743,16 +9744,53 @@ B.nube = {
     if (this.ocupado) throw new Error("Ya se están recibiendo capturas, espera un momento.");
     this.ocupado = true;
     try {
-      const j = await this.llamar(n, todos ? { accion: "lista", todos: "1" } : { accion: "lista" }), res = [], ok = [];
-      for (const it of j.items || []) {
+      let items, porHoja = false;
+      try { items = (await this.llamar(n, todos ? { accion: "lista", todos: "1" } : { accion: "lista" })).items || []; }
+      catch (e) { if (!e.red || !n.hoja) throw e; items = await this.leerHoja(n); porHoja = true; }
+      const vistos = new Set(this.vistos()), res = [], ok = [];
+      // leyendo la hoja no se puede marcar lo importado: esta PC recuerda que envios ya proceso
+      if (porHoja && !todos) items = items.filter(it => !vistos.has(it.id));
+      for (const it of items) {
         try { res.push({ it, r: await B.inter.importarCapturas(await B.cod.descifrar(it.d, n.clave)) }); ok.push(it.id); }
         catch (e) { res.push({ it, error: e.message }); }
       }
-      if (ok.length) await this.llamar(n, { accion: "marcar", ids: ok.join(",") });
-      this.ultima = { fh: U.ahoraISO(), n: ok.length }; this.error = "";
+      if (ok.length && !porHoja) try { await this.llamar(n, { accion: "marcar", ids: ok.join(",") }); } catch (e) { }
+      this.vistos(ok);
+      this.ultima = { fh: U.ahoraISO(), n: ok.length, porHoja }; this.error = "";
       return res;
     } catch (e) { this.error = e.message; throw e; }
     finally { this.ocupado = false; }
+  },
+  // envios ya procesados en esta PC (para la lectura por la hoja, que no puede marcarlos)
+  vistos(nuevos) {
+    let l = []; try { l = JSON.parse(localStorage.getItem("b_nube_vistos") || "[]"); } catch (e) { }
+    if (nuevos && nuevos.length) { l = l.filter(x => !nuevos.includes(x)).concat(nuevos).slice(-1000); try { localStorage.setItem("b_nube_vistos", JSON.stringify(l)); } catch (e) { } }
+    return l;
+  },
+  // id de la hoja a partir de su direccion (https://docs.google.com/spreadsheets/d/<id>/edit...)
+  hojaId(t) { t = String(t || "").trim(); const m = /\/spreadsheets\/d\/([\w-]{20,100})/.exec(t); return m ? m[1] : /^[\w-]{20,100}$/.test(t) ? t : ""; },
+  /* Lectura de la hoja por docs.google.com (consulta de Google Visualization con respuesta JSONP), para cuando la red bloquea
+     script.google.com. La hoja debe estar compartida como "Cualquier persona con el enlace: Lector" (solo tiene datos cifrados). */
+  leerHoja(n) {
+    return new Promise((ok, mal) => {
+      const cb = "b24Hoja" + Date.now(), s = document.createElement("script");
+      const fin = () => { clearTimeout(t); try { delete window[cb]; } catch (e) { window[cb] = undefined; } s.remove(); };
+      const noComp = () => Object.assign(new Error("No se pudo leer la hoja de Google desde esta PC. Revisa que esté compartida como «Cualquier persona con el enlace: Lector» y que la dirección de la hoja sea la correcta."), { hoja: true });
+      const t = setTimeout(() => { fin(); mal(noComp()); }, 25000);
+      window[cb] = r => {
+        fin();
+        if (!r || r.status !== "ok") return mal(new Error("La hoja de Google respondió con error: " + ((r && r.errors && r.errors[0] && (r.errors[0].detailed_message || r.errors[0].message)) || "desconocido") + ". Revisa que tenga la pestaña «Capturas» (se crea con el primer envío)."));
+        const fecha = v => { const m = /Date\((\d+),(\d+),(\d+)(?:,(\d+),(\d+),(\d+))?\)/.exec(String(v || "")); return m ? new Date(+m[1], +m[2], +m[3], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0)).toISOString() : String(v || ""); };
+        ok(((r.table && r.table.rows) || []).map(f => { const c = f.c || [], v = i => c[i] && c[i].v != null ? c[i].v : "";
+          return { id: String(v(0)), f: fecha(v(1)), n: v(2), d: c.slice(5).map(x => x && x.v != null ? String(x.v).replace(/^~/, "") : "").join("") }; })
+          .filter(it => /^env-/.test(it.id) && /^B24X1:/.test(it.d)));
+      };
+      s.onerror = () => { fin(); mal(noComp()); };
+      // si Google contesta con su pagina de acceso (hoja no compartida) el script carga pero nunca llama a la funcion
+      s.onload = () => setTimeout(() => { if (window[cb]) { fin(); mal(noComp()); } }, 300);
+      s.src = "https://docs.google.com/spreadsheets/d/" + encodeURIComponent(n.hoja) + "/gviz/tq?tqx=responseHandler:" + cb + "&sheet=Capturas&headers=1&tq=" + encodeURIComponent("select *") + "&_=" + Date.now();
+      document.head.appendChild(s);
+    });
   },
   autoOn() { try { return localStorage.getItem("b_nube_auto") === "1"; } catch (e) { return false; } },
   // PC con la casilla marcada: revisa sola cada 10 minutos (solo supervisores)
@@ -9770,9 +9808,10 @@ B.nube = {
   script(token) {
     return `// Bitacora 24RU1 - buzon de capturas de los celulares (Google Apps Script).
 // Pega TODO este codigo en Extensiones > Apps Script de una hoja de calculo nueva e implementalo como Aplicacion web.
-// Las capturas llegan cifradas: en la hoja solo se ve texto ilegible. Lo importado se borra solo a los 15 dias.
+// Las capturas llegan cifradas: en la hoja solo se ve texto ilegible. Lo importado se borra a los 15 dias y todo a los 30.
+// Version 2 (bitacora 4.12.1).
 const TOKEN = "${token}";
-const HOJA = "Capturas", PARTE = 45000, DIAS = 15;
+const HOJA = "Capturas", PARTE = 45000, DIAS = 15, DIAS_MAX = 30;
 function salida(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }
 function hoja() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -9789,8 +9828,9 @@ function doPost(e) {
     if (!/^env-[\\w-]+$/.test(id) || d.indexOf("B24X1:") !== 0) return salida({ ok: false, error: "datos no validos" });
     const lock = LockService.getScriptLock(); lock.waitLock(20000);
     try {
-      const h = hoja();
-      if (!filas(h).some(function (r) { return String(r[0]) === id; })) {
+      const h = hoja(), F = filas(h), lim = Date.now() - DIAS_MAX * 864e5;
+      for (let i = F.length - 1; i >= 0; i--) if (F[i][1] instanceof Date && F[i][1].getTime() < lim) h.deleteRow(i + 2);
+      if (!F.some(function (r) { return String(r[0]) === id; })) {
         const fila = [id, new Date(), Number(b.n) || 0, "nuevo", ""];
         for (let i = 0; i < d.length; i += PARTE) fila.push("~" + d.slice(i, i + PARTE));
         h.appendRow(fila);
@@ -9802,7 +9842,7 @@ function doPost(e) {
 function doGet(e) {
   const p = (e && e.parameter) || {};
   if (p.t !== TOKEN) return salida({ ok: false, error: "clave" });
-  if (p.accion === "probar") return salida({ ok: true, version: 1 });
+  if (p.accion === "probar") return salida({ ok: true, version: 2 });
   const h = hoja(), F = filas(h);
   if (p.accion === "ver") return salida({ ok: true, existe: F.some(function (r) { return String(r[0]) === p.id; }) });
   if (p.accion === "marcar") {
@@ -9839,16 +9879,19 @@ V.celular = {
       ${!seg ? `<div class="aviso a">${B.ico("info")}<div>En este equipo la bitácora está abierta por la red. El envío por internet solo funciona en la PC donde está instalada (dirección <b>localhost</b>).</div></div>` : ""}
       ${n && sup && seg ? `<div class="fila" style="align-items:center;gap:10px"><button class="btn verde" id="nubeRec">${B.ico("descargar")} Recibir capturas por internet</button>
           <label class="peque" style="display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" id="nubeAuto" ${B.nube.autoOn() ? "checked" : ""} style="width:18px;height:18px"> Revisar sola cada 10 minutos mientras la bitácora esté abierta en esta PC</label></div>
-        <p class="muted peque" style="margin:8px 0 0">${ul ? "Última revisión: " + U.fh(ul.fh) + " (" + ul.n + " envío(s) recibidos)." : "Aún no se ha revisado en esta sesión."}${B.nube.error ? ` <span style="color:var(--rojo)">Última falla: ${U.esc(B.nube.error)}</span>` : ""}
-          · <a href="#" id="nubeTodo">Volver a traer todo lo de los últimos 15 días</a> (lo ya recibido se ignora).</p><div id="nubeRes"></div>` : ""}
+        <p class="muted peque" style="margin:8px 0 0">${ul ? "Última revisión: " + U.fh(ul.fh) + " (" + ul.n + " envío(s) recibidos" + (ul.porHoja ? ", leídos de la hoja" : "") + ")." : "Aún no se ha revisado en esta sesión."}${B.nube.error ? ` <span style="color:var(--rojo)">Última falla: ${U.esc(B.nube.error)}</span>` : ""}
+          · <a href="#" id="nubeTodo">Volver a traer todo lo de los últimos 15 días</a> (lo ya recibido se ignora).</p>
+        <p class="muted peque" style="margin:6px 0 0">Si nada de esto conecta: abre la hoja de Google, selecciona las filas de los envíos, cópialas (Ctrl+C) y usa <b>«Pegar del portapapeles»</b> arriba.</p><div id="nubeRes"></div>` : ""}
       ${adm ? `<details style="margin-top:10px" ${n ? "" : "open"}><summary class="peque" style="cursor:pointer;font-weight:600">${n ? "Configuración (administrador)" : "Cómo activarlo (administrador)"}</summary>
         <ol class="peque" style="margin:8px 0;padding-left:20px;line-height:1.7"><li>Toca <b>Copiar el código para Apps Script</b>.</li>
           <li>Con tu cuenta de Google abre <b>sheets.new</b> (hoja nueva) → <b>Extensiones → Apps Script</b>, borra lo que haya, pega el código y guarda.</li>
           <li><b>Implementar → Nueva implementación → Aplicación web</b>. Ejecutar como: <b>Yo</b>. Quién tiene acceso: <b>Cualquier usuario</b>. Autoriza los permisos.</li>
-          <li>Copia la <b>URL de la aplicación web</b> (termina en /exec), pégala abajo y toca <b>Probar y guardar</b>.</li>
+          <li>Copia la <b>URL de la aplicación web</b> (termina en /exec) y pégala abajo.</li>
+          <li>Comparte la hoja: <b>Compartir → Acceso general → Cualquier persona con el enlace → Lector</b> (solo contiene datos cifrados). Copia la dirección de la hoja (la de la barra del navegador), pégala abajo y toca <b>Probar y guardar</b>. Así esta PC lee los envíos por docs.google.com aunque la red bloquee script.google.com.</li>
           <li>Genera un <b>paquete de datos nuevo</b> y mándalo: así cada celular recibe la dirección y la clave.</li></ol>
         <div class="fila" style="gap:8px;flex-wrap:wrap"><button class="btn sec" id="nubeCod" ${seg ? "" : "disabled"}>${B.ico("doc")} Copiar el código para Apps Script</button></div>
         <div class="campo" style="margin-top:10px"><label>URL de la aplicación web</label><input class="inp" id="nubeUrl" value="${U.esc(cf.url || "")}" placeholder="https://script.google.com/macros/s/…/exec"></div>
+        <div class="campo"><label>Dirección de la hoja de cálculo</label><input class="inp" id="nubeHoja" value="${cf.hoja ? "https://docs.google.com/spreadsheets/d/" + U.esc(cf.hoja) + "/edit" : ""}" placeholder="https://docs.google.com/spreadsheets/d/…/edit"></div>
         <div class="fila" style="gap:8px;flex-wrap:wrap"><button class="btn dorado" id="nubeGuardar" ${seg ? "" : "disabled"}>${B.ico("ok")} Probar y guardar</button>
           ${cf.clave ? `<button class="btn fantasma chico" id="nubeClave">Cambiar la clave</button>` : ""}${n ? `<button class="btn fantasma chico" id="nubeQuitar">Desactivar</button>` : ""}</div>
         ${cf.mod ? `<p class="muted peque" style="margin:8px 0 0">Último cambio: ${U.esc(String(cf.mod).replace("T", " "))}. La clave solo viaja en el paquete de datos; la hoja de Google solo guarda las capturas cifradas.</p>` : ""}</details>` : ""}
@@ -9865,7 +9908,7 @@ V.celular = {
     if ($("#nubeCod")) $("#nubeCod").onclick = async () => {
       try {
         const cf = B.estado.config.nube || {}, clave = cf.clave || B.cod.claveNueva();
-        if (!cf.clave) await B.api.llamar("op", { col: "intercambio", accion: "nube", datos: { url: "", clave } });
+        if (!cf.clave) await B.api.llamar("op", { col: "intercambio", accion: "nube", datos: { url: "", hoja: "", clave } });
         const cod = B.nube.script(await B.cod.token(clave));
         if (await B.cod.copiar(cod)) ui.toast("Código copiado. Pégalo en Apps Script (paso 2).", "ok", 7000);
         else await ui.modal({ titulo: "Código para Apps Script", icono: "doc", ancho: true, html: `<p class="muted peque">Selecciónalo todo y cópialo.</p><textarea class="inp" readonly style="min-height:50vh;font-family:monospace;font-size:12px">${U.esc(cod)}</textarea>`, botones: [{ t: "Cerrar", c: "sec", v: null }] });
@@ -9876,13 +9919,24 @@ V.celular = {
       const b = e.currentTarget, url = $("#nubeUrl").value.trim(), clave = (B.estado.config.nube || {}).clave;
       if (!clave) { ui.toast("Primero toca «Copiar el código para Apps Script» y pégalo en la hoja.", "error", 8000); return; }
       if (!B.nube.URL.test(url)) { ui.toast("La URL debe ser la de la aplicación web: https://script.google.com/macros/s/…/exec", "error", 9000); return; }
+      const ht = $("#nubeHoja").value.trim(), hoja = B.nube.hojaId(ht);
+      if (ht && !hoja) { ui.toast("La dirección de la hoja debe ser como https://docs.google.com/spreadsheets/d/…/edit", "error", 9000); return; }
       b.disabled = true;
-      try { await B.nube.llamar({ url, clave }, { accion: "probar" }); await guardar({ url, clave }, "Conexión correcta. Ahora genera un <b>paquete de datos nuevo</b> y mándalo a los celulares."); }
-      catch (er) { ui.error(er); b.disabled = false; }
+      try {
+        // la PC prueba los dos caminos; los celulares usan siempre la aplicacion web
+        let sc = "", hj = "";
+        try { await B.nube.llamar({ url, clave }, { accion: "probar" }); sc = "ok"; } catch (er) { if (!er.red) throw er; sc = "bloqueado"; }
+        if (hoja) try { const l = await B.nube.leerHoja({ hoja }); hj = "ok (" + l.length + " envío(s) en la hoja)"; } catch (er) { hj = er.message; }
+        const lee = sc === "ok" || /^ok/.test(hj);
+        const txt = `<b>Aplicación web (la usan los celulares):</b> ${sc === "ok" ? "conecta desde esta PC." : "esta PC no llega a script.google.com (la red lo bloquea). Los celulares con datos móviles sí podrán enviar."}<br>
+          <b>Lectura de la hoja desde esta PC:</b> ${!hoja ? "no se llenó la dirección de la hoja." : U.esc(hj)}<br><br>${lee ? "Esta PC <b>sí podrá recibir</b>." : "Esta PC <b>todavía no podrá recibir</b> automáticamente; quedará el pegado manual (copiar las filas de la hoja y «Pegar del portapapeles»)."}`;
+        if (!lee && !(await ui.confirmar(txt + "<br><br>¿Guardar de todos modos?", "Resultado de la prueba", "Guardar", false))) { b.disabled = false; return; }
+        await guardar({ url, hoja, clave }, (lee ? txt : "Guardado.") + "<br>Ahora genera un <b>paquete de datos nuevo</b> y mándalo a los celulares.");
+      } catch (er) { ui.error(er); b.disabled = false; }
     };
     if ($("#nubeClave")) $("#nubeClave").onclick = async () => {
       if (!(await ui.confirmar("Se crea una clave nueva. Después tendrás que <b>copiar el código otra vez, pegarlo en Apps Script e implementarlo de nuevo</b> (Implementar → Gestionar implementaciones → Editar → Nueva versión), y mandar un paquete nuevo a los celulares. Hasta entonces los celulares no podrán enviar por internet.", "Cambiar la clave", "Cambiar la clave", true))) return;
-      try { await guardar({ url: (B.estado.config.nube || {}).url || "", clave: B.cod.claveNueva() }, "Clave nueva guardada. Copia el código otra vez y actualiza Apps Script."); } catch (e) { ui.error(e); }
+      try { const cf = B.estado.config.nube || {}; await guardar({ url: cf.url || "", hoja: cf.hoja || "", clave: B.cod.claveNueva() }, "Clave nueva guardada. Copia el código otra vez y actualiza Apps Script."); } catch (e) { ui.error(e); }
     };
     if ($("#nubeQuitar")) $("#nubeQuitar").onclick = async () => {
       if (!(await ui.confirmar("Los celulares dejarán de ver «Enviar a la PC por internet» cuando carguen el siguiente paquete. La hoja de Google no se borra: puedes eliminarla tú desde tu cuenta.", "Desactivar el envío por internet", "Desactivar", true))) return;
@@ -9890,9 +9944,23 @@ V.celular = {
     };
   },
   // texto pegado: codigos B24C1 (uno o varios) o el mensaje antiguo con el JSON entre llaves
+  // envios cifrados copiados de la hoja de Google: una fila por renglon, partes separadas por tabulador y con "~" al inicio
+  cifradosDe(t) {
+    const l = [];
+    for (const lin of String(t || "").split(/\r?\n/)) {
+      const s = lin.split("\t").map(x => x.trim().replace(/^"|"$/g, "")).filter(x => /^~/.test(x) || /^B24X1:/.test(x)).map(x => x.replace(/^~/, "")).join(""), i = s.indexOf("B24X1:");
+      if (i >= 0) l.push(s.slice(i));
+    }
+    return l;
+  },
   async importarPegado(t) {
-    const cods = await B.cod.leer(t), out = [];
-    if (!cods.length) {
+    const cods = await B.cod.leer(t), out = [], cif = this.cifradosDe(t);
+    if (cif.length) {
+      const n = B.estado.config.nube || {};
+      if (!n.clave) throw new Error("Esas filas vienen de la hoja de Google, pero esta bitácora no tiene la clave del envío por internet.");
+      for (const x of cif) { try { cods.push(await B.cod.descifrar(x, n.clave)); } catch (e) { out.push(this.errHtml("Fila de la hoja", e.message + " Si la fila es muy larga, cópiala completa (toda la fila).")); } }
+    }
+    if (!cods.length && !cif.length) {
       const a = t.indexOf("{"), z = t.lastIndexOf("}");
       if (a < 0 || z <= a) throw new Error("No encontré ningún código de capturas. Copia el mensaje completo de WhatsApp (empieza con «Bitácora 24RU1 · capturas de …») y pégalo.");
       cods.push(t.slice(a, z + 1));
@@ -9914,7 +9982,7 @@ V.celular = {
         <p class="muted peque" style="margin:10px 0 0">Las capturas entran con el nombre de quien las hizo y con las reglas de siempre: no se duplican actividades ni espacios confinados, y el número de espacio confinado lo asigna la PC.
           Si el mismo archivo se importa dos veces no pasa nada: lo ya recibido se ignora. ${sup ? "" : "Solo puedes importar tus propias capturas."}</p>
         <button class="btn sec bloque" id="celClip" style="margin-top:8px">${B.ico("doc")} Pegar del portapapeles (código de WhatsApp)</button>
-        <p class="muted peque" style="margin:6px 0 0">Si llegó como <b>código</b>: en WhatsApp Web copia el mensaje (o varios a la vez) y toca este botón.</p>
+        <p class="muted peque" style="margin:6px 0 0">Si llegó como <b>código</b>: en WhatsApp Web copia el mensaje (o varios a la vez) y toca este botón. También acepta filas copiadas de la hoja de Google del envío por internet.</p>
         <details style="margin-top:8px"><summary class="peque" style="cursor:pointer;font-weight:600">¿El botón no pega? Pégalo aquí a mano</summary>
           <textarea class="inp" id="celTxt" rows="4" style="margin-top:8px;font-size:12px" placeholder="Pega aquí el mensaje completo de WhatsApp (empieza con «Bitácora 24RU1 · capturas de …»). Puedes pegar varios mensajes juntos."></textarea>
           <button class="btn sec chico" id="celPegar" style="margin-top:6px">${B.ico("subir")} Importar el texto pegado</button></details>
@@ -10175,7 +10243,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "4.12", servidorViejo: false,
+  info: {}, VERSION: "4.12.1", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -10362,7 +10430,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "procedimientos" ? '<span class="contador oculto" id="cntProc"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.12")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.12.1")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
