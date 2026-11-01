@@ -809,7 +809,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.11.2", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.12", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -1672,7 +1672,19 @@ B.local = {
       }
       case "catalogos.reemplazar": soloSup(); await this.escribir("catalogos", d.catalogos || {}); return { ok: true };
       case "catalogos.agregar": { const cat = await this.leer("catalogos") || {}; if (this.agregarCatalogo(cat, d.tipo, d.texto, d.item)) await this.escribir("catalogos", cat); return { ok: true }; }
-      case "config.guardar": { soloSup(); const ant = (await this.leer("config")) || {}, c = d.config || {}; for (const k of ["recibidos", "cargas", "admins", "procVig", "pasImpA", "pasHoras"]) if (k in ant) c[k] = ant[k]; await this.escribir("config", c); return { ok: true }; }
+      case "config.guardar": { soloSup(); const ant = (await this.leer("config")) || {}, c = d.config || {}; for (const k of ["recibidos", "cargas", "admins", "procVig", "pasImpA", "pasHoras", "nube"]) if (k in ant) c[k] = ant[k]; await this.escribir("config", c); return { ok: true }; }
+      case "intercambio.nube": {
+        if (!(s && B.usuario && B.usuario.admin)) throw new Error("Solo el administrador de la bitácora puede hacer este cambio.");
+        const c = (await this.leer("config")) || {};
+        if (d.quitar) delete c.nube;
+        else {
+          const url = String(d.url || "").trim(), clave = String(d.clave || "").trim();
+          if (url && !/^https:\/\/script\.google\.com\/(a\/[^/]+\/)?macros\/s\/[\w-]+\/exec$/.test(url)) throw new Error("La dirección debe ser la de la aplicación web de Apps Script.");
+          if (!/^[A-Za-z0-9]{20,100}$/.test(clave)) throw new Error("Clave no válida.");
+          c.nube = { url, clave, mod: U.ahoraISO() + " " + s.ini };
+        }
+        await this.escribir("config", c); return { ok: true };
+      }
       case "intercambio.registrar": {
         const c = (await this.leer("config")) || {}; let l = (c.recibidos || []).map(String);
         for (const u of d.uids || []) { const x = String(u); if (x && x.length <= 40 && !l.includes(x)) l.push(x); }
@@ -9621,9 +9633,10 @@ B.inter = {
     const pdf = this.pdfDatos("Bitacora 24RU1 - Capturas del celular", ["Persona: " + u.ini + " - " + u.nombre, "Capturas: " + ops.length, "Generado: " + U.fh(U.ahoraISO()),
       "", "Este PDF lleva las capturas dentro. En la bitacora de la PC:", "Celulares > Importar capturas de un celular > elige este PDF."], texto);
     let file = null; try { file = new File([pdf], nombre, { type: "application/pdf" }); } catch (e) { }
-    return { nombre, texto, pdf, file, n: ops.length };
+    let codigo = ""; try { codigo = await B.cod.hacer(texto); } catch (e) { }
+    return { nombre, texto, pdf, file, codigo, n: ops.length };
   },
-  // modo: "" = compartir el archivo; "descargar" = guardarlo en el celular; "texto" = mandarlo como mensaje de texto (ultimo recurso)
+  // modo: "" = compartir el archivo; "descargar" = guardarlo en el celular; "texto" = copiar el codigo para WhatsApp; "nube" = por internet
   async exportarCapturas(modo, prep) {
     if (modo === true) modo = "descargar";
     const p = prep || await this.prepararCapturas();
@@ -9631,21 +9644,262 @@ B.inter = {
     const fin = async (m, error) => { try { await B.local.escribir("ultimoEnvio", { fecha: U.ahoraISO(), n: p.n }); } catch (e) { } return { modo: m, nombre: p.nombre, n: p.n, error: error || "" }; };
     let error = "";
     if (modo === "texto") {
-      const msg = "Capturas de la Bitácora 24RU1 · " + B.usuario.ini + " (en la PC: Celulares → Pegar capturas)\n" + p.texto;
-      if (navigator.share) try { await navigator.share({ text: msg }); return fin("texto"); } catch (e) { if (e.name === "AbortError") return fin("cancelado"); error = e.name + ": " + e.message; }
-      try { await navigator.clipboard.writeText(msg); return fin("copiado", error); } catch (e) { return fin("fallo", (error ? error + " · " : "") + e.name + ": " + e.message); }
+      const cod = p.codigo || await B.cod.hacer(p.texto);
+      if (cod.length > 60000) return { modo: "largo", n: p.n, error: "" };
+      const msg = "Bitácora 24RU1 · capturas de " + B.usuario.ini + " (" + p.n + "). En la PC: Celulares → Pegar del portapapeles.\n" + cod;
+      return (await B.cod.copiar(msg)) ? fin("copiado") : fin("fallo", "el navegador no dejó copiar");
     }
+    if (modo === "nube") { await B.nube.enviar(p); return fin("nube"); }
     if (!modo) { const r = await this.compartirArchivo(p.file, p.nombre, p.pdf, "application/pdf"); return fin(r.modo, r.error); }
     U.descargar(p.nombre, p.pdf, "application/pdf");
     return fin("descargado", error);
   }
 };
 
+/* ---------- Envio sin archivo (v4.12): WhatsApp rechaza los archivos que llegan por el menu Compartir del navegador.
+   A) Codigo para WhatsApp: las capturas comprimidas en un texto "B24C1:..." que se copia, se pega en un chat y en la PC se pega
+      de vuelta. No usa archivos ni el menu Compartir. Se pueden pegar varios codigos (varios mensajes) a la vez.
+   B) Por internet: el celular manda sus capturas CIFRADAS a una hoja de Google (Apps Script del administrador) y la PC las recoge.
+      Google solo guarda texto cifrado: la llave sale de una clave que viaja en el paquete de datos, nunca en la pagina publicada. */
+B.cod = {
+  b64(u8) { let s = ""; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s); },
+  deb64(s) { const b = atob(s), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return u; },
+  utf8(s) { return new TextEncoder().encode(s); },
+  async flujo(u8, T) { return new Uint8Array(await new Response(new Blob([u8]).stream().pipeThrough(T)).arrayBuffer()); },
+  async comprimir(txt) { const u = this.utf8(txt); return typeof CompressionStream === "function" ? { z: true, u: await this.flujo(u, new CompressionStream("deflate")) } : { z: false, u }; },
+  async descomprimir(u8, z) {
+    if (z && typeof DecompressionStream !== "function") throw new Error("Este navegador no puede leer el código. Usa Chrome o Edge actualizado.");
+    return new TextDecoder().decode(z ? await this.flujo(u8, new DecompressionStream("deflate")) : u8);
+  },
+  // texto -> "B24C1:..." (comprimido) o "B24J1:..." (navegadores viejos, sin compresion)
+  async hacer(txt) { const r = await this.comprimir(txt); return (r.z ? "B24C1:" : "B24J1:") + this.b64(r.u); },
+  // todos los codigos de un texto pegado (uno o varios mensajes de WhatsApp) -> lista de textos JSON
+  async leer(txt) {
+    const l = [], re = /B24([CJ])1:([A-Za-z0-9+/=]+)/g; let m;
+    while ((m = re.exec(String(txt || "")))) {
+      try { l.push(await this.descomprimir(this.deb64(m[2]), m[1] === "C")); }
+      catch (e) { throw new Error(/navegador/.test(e.message) ? e.message : "Un código está incompleto o dañado. Cópialo completo de WhatsApp (toca «Leer más» si aparece) y vuelve a pegarlo."); }
+    }
+    return l;
+  },
+  // cifrado para la nube: AES-GCM con llave derivada de la clave; la hoja solo conoce el "token" (otra derivacion)
+  async hash(s) { return new Uint8Array(await crypto.subtle.digest("SHA-256", this.utf8(s))); },
+  async token(clave) { return [...await this.hash("b24-token|" + clave)].map(b => b.toString(16).padStart(2, "0")).join(""); },
+  async llave(clave) { return crypto.subtle.importKey("raw", await this.hash("b24-cifra|" + clave), "AES-GCM", false, ["encrypt", "decrypt"]); },
+  async cifrar(txt, clave) {
+    const iv = crypto.getRandomValues(new Uint8Array(12)), r = await this.comprimir(txt);
+    const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, await this.llave(clave), r.u)), u = new Uint8Array(13 + ct.length);
+    u[0] = r.z ? 1 : 0; u.set(iv, 1); u.set(ct, 13);
+    return "B24X1:" + this.b64(u);
+  },
+  async descifrar(d, clave) {
+    const u = this.deb64(String(d || "").replace(/^B24X1:/, "")); let p;
+    try { p = new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: u.subarray(1, 13) }, await this.llave(clave), u.subarray(13))); }
+    catch (e) { throw new Error("No se pudo descifrar: la clave no coincide o el envío está dañado."); }
+    return this.descomprimir(p, u[0] === 1);
+  },
+  claveNueva() { const A = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789"; return [...crypto.getRandomValues(new Uint8Array(32))].map(b => A[b % A.length]).join(""); },
+  async copiar(txt) {
+    try { await navigator.clipboard.writeText(txt); return true; }
+    catch (e) { const a = document.createElement("textarea"); a.value = txt; a.setAttribute("readonly", ""); a.style.position = "fixed"; a.style.opacity = "0"; document.body.appendChild(a); a.select(); let ok = false; try { ok = document.execCommand("copy"); } catch (x) { } a.remove(); return ok; }
+  }
+};
+
+B.nube = {
+  URL: /^https:\/\/script\.google\.com\/(a\/[^/]+\/)?macros\/s\/[\w-]+\/exec$/,
+  cfg() { const n = B.estado && B.estado.config && B.estado.config.nube; return n && n.url && n.clave ? n : null; },
+  segura() { return !!(window.isSecureContext && window.crypto && crypto.subtle); },
+  // consulta a la hoja (GET): probar, lista, ver, marcar
+  async llamar(n, params) {
+    const q = new URLSearchParams(Object.assign({ t: await B.cod.token(n.clave) }, params)); let r, j;
+    try { r = await fetch(n.url + "?" + q, { cache: "no-store" }); } catch (e) { throw new Error("No hay conexión con la hoja de Google. Revisa el internet de este equipo."); }
+    try { j = await r.json(); } catch (e) { throw new Error("La dirección no respondió como la hoja de la bitácora. Revisa que esté implementada como «Aplicación web» con acceso «Cualquier usuario»."); }
+    if (!j.ok) throw new Error(j.error === "clave" ? "La clave no coincide con el código de Apps Script. Copia de nuevo el código desde la bitácora y vuelve a implementarlo." : "La hoja de Google respondió: " + j.error);
+    return j;
+  },
+  // celular: manda las capturas pendientes (cifradas)
+  async enviar(prep) {
+    const n = this.cfg(); if (!n) throw new Error("El envío por internet no está configurado. Pide al supervisor el paquete de datos más reciente.");
+    if (!this.segura()) throw new Error("Este navegador no permite el envío cifrado. Usa «Copiar código para WhatsApp».");
+    if (navigator.onLine === false) throw new Error("No tienes conexión a internet. Intenta cuando tengas señal o usa «Copiar código para WhatsApp».");
+    const id = "env-" + U.ini(B.usuario.ini) + "-" + Date.now().toString(36);
+    const body = JSON.stringify({ t: await B.cod.token(n.clave), id, n: prep.n, d: await B.cod.cifrar(prep.texto, n.clave) });
+    try {
+      const j = await (await fetch(n.url, { method: "POST", body })).json();
+      if (!j.ok) throw Object.assign(new Error(j.error === "clave" ? "La clave de este celular no coincide con la de la hoja. Carga el paquete de datos más reciente." : "La hoja de Google respondió: " + j.error), { resp: true });
+    } catch (e) {
+      if (e.resp) throw e;
+      // si el navegador no deja leer la respuesta, se manda de todos modos y se comprueba que haya llegado
+      try { await fetch(n.url, { method: "POST", body, mode: "no-cors" }); } catch (x) { throw new Error("No se pudo conectar con la hoja de Google. Revisa tu señal o usa «Copiar código para WhatsApp»."); }
+      const v = await this.llamar(n, { accion: "ver", id });
+      if (!v.existe) throw new Error("No se pudo confirmar que el envío llegó. Intenta de nuevo o usa «Copiar código para WhatsApp».");
+    }
+    return id;
+  },
+  // PC: trae lo que no se ha importado, lo importa y lo marca en la hoja (todos = tambien lo ya importado; lo repetido se ignora)
+  async recibir(todos) {
+    const n = this.cfg(); if (!n) throw new Error("El envío por internet no está configurado.");
+    if (!this.segura()) throw new Error("Para recibir por internet abre la bitácora en la PC donde está instalada (dirección localhost).");
+    if (this.ocupado) throw new Error("Ya se están recibiendo capturas, espera un momento.");
+    this.ocupado = true;
+    try {
+      const j = await this.llamar(n, todos ? { accion: "lista", todos: "1" } : { accion: "lista" }), res = [], ok = [];
+      for (const it of j.items || []) {
+        try { res.push({ it, r: await B.inter.importarCapturas(await B.cod.descifrar(it.d, n.clave)) }); ok.push(it.id); }
+        catch (e) { res.push({ it, error: e.message }); }
+      }
+      if (ok.length) await this.llamar(n, { accion: "marcar", ids: ok.join(",") });
+      this.ultima = { fh: U.ahoraISO(), n: ok.length }; this.error = "";
+      return res;
+    } catch (e) { this.error = e.message; throw e; }
+    finally { this.ocupado = false; }
+  },
+  autoOn() { try { return localStorage.getItem("b_nube_auto") === "1"; } catch (e) { return false; } },
+  // PC con la casilla marcada: revisa sola cada 10 minutos (solo supervisores)
+  async auto() {
+    if (B.modoMovil || !B.usuario || !B.dom.esSup() || !this.cfg() || !this.autoOn() || !this.segura() || this.ocupado) return;
+    try {
+      const bien = (await this.recibir()).filter(x => x.r), n = bien.reduce((s, x) => s + x.r.ok, 0);
+      if (bien.length) {
+        B.ui.toast(`Llegaron por internet <b>${n}</b> captura(s) de ${U.esc([...new Set(bien.map(x => x.r.de))].join(", "))}. Ya están en la bitácora.`, "ok", 9000);
+        if (/^#\/celular/.test(location.hash)) B.app.render();
+      }
+    } catch (e) { }
+  },
+  // codigo de Apps Script para pegar en la hoja de Google (lleva el token, no la clave: Google no puede descifrar)
+  script(token) {
+    return `// Bitacora 24RU1 - buzon de capturas de los celulares (Google Apps Script).
+// Pega TODO este codigo en Extensiones > Apps Script de una hoja de calculo nueva e implementalo como Aplicacion web.
+// Las capturas llegan cifradas: en la hoja solo se ve texto ilegible. Lo importado se borra solo a los 15 dias.
+const TOKEN = "${token}";
+const HOJA = "Capturas", PARTE = 45000, DIAS = 15;
+function salida(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }
+function hoja() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let h = ss.getSheetByName(HOJA);
+  if (!h) { h = ss.insertSheet(HOJA); h.appendRow(["envio", "recibido", "capturas", "estado", "importado", "datos cifrados"]); h.setFrozenRows(1); }
+  return h;
+}
+function filas(h) { const n = h.getLastRow() - 1; return n > 0 ? h.getRange(2, 1, n, Math.max(6, h.getLastColumn())).getValues() : []; }
+function doPost(e) {
+  try {
+    const b = JSON.parse(e && e.postData ? e.postData.contents : "{}");
+    if (b.t !== TOKEN) return salida({ ok: false, error: "clave" });
+    const id = String(b.id || "").slice(0, 60), d = String(b.d || "");
+    if (!/^env-[\\w-]+$/.test(id) || d.indexOf("B24X1:") !== 0) return salida({ ok: false, error: "datos no validos" });
+    const lock = LockService.getScriptLock(); lock.waitLock(20000);
+    try {
+      const h = hoja();
+      if (!filas(h).some(function (r) { return String(r[0]) === id; })) {
+        const fila = [id, new Date(), Number(b.n) || 0, "nuevo", ""];
+        for (let i = 0; i < d.length; i += PARTE) fila.push("~" + d.slice(i, i + PARTE));
+        h.appendRow(fila);
+      }
+    } finally { lock.releaseLock(); }
+    return salida({ ok: true, id: id });
+  } catch (er) { return salida({ ok: false, error: String(er) }); }
+}
+function doGet(e) {
+  const p = (e && e.parameter) || {};
+  if (p.t !== TOKEN) return salida({ ok: false, error: "clave" });
+  if (p.accion === "probar") return salida({ ok: true, version: 1 });
+  const h = hoja(), F = filas(h);
+  if (p.accion === "ver") return salida({ ok: true, existe: F.some(function (r) { return String(r[0]) === p.id; }) });
+  if (p.accion === "marcar") {
+    const ids = String(p.ids || "").split(","), lim = Date.now() - DIAS * 864e5;
+    F.forEach(function (r, i) { if (ids.indexOf(String(r[0])) >= 0 && r[3] !== "importado") h.getRange(i + 2, 4, 1, 2).setValues([["importado", new Date()]]); });
+    for (let i = F.length - 1; i >= 0; i--) if (F[i][3] === "importado" && F[i][4] instanceof Date && F[i][4].getTime() < lim) h.deleteRow(i + 2);
+    return salida({ ok: true });
+  }
+  const items = F.filter(function (r) { return r[0] && (p.todos === "1" || r[3] !== "importado"); }).map(function (r) {
+    return { id: String(r[0]), f: r[1] instanceof Date ? r[1].toISOString() : String(r[1]), n: r[2], d: r.slice(5).map(function (x) { return String(x).replace(/^~/, ""); }).join("") };
+  });
+  return salida({ ok: true, items: items });
+}
+`;
+  }
+};
+setTimeout(() => B.nube.auto(), 30000); setInterval(() => B.nube.auto(), 10 * 60000);
+
 /* ===================================================================== VISTA: Celulares / Enviar y recibir */
 V.celular = {
   titulo: "Celulares", sup: true,          // por ahora, solo supervisores
   sub() { return B.modoMovil ? "Enviar mis capturas a la PC y recibir los datos del turno" : "Intercambio de información con la versión para celular (por WhatsApp o correo)"; },
   leerArchivo(file) { return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result)); r.onerror = () => rej(new Error("No se pudo leer el archivo.")); r.readAsText(file); }); },
+  resHtml(r, etq) {
+    return `<div class="aviso ${r.fallas.length ? "d" : "v"}" style="margin-top:10px">${B.ico("ok")}<div><b>${U.esc(r.de || "")} ${U.esc(r.nombre)}</b> · ${U.esc(etq)}<br>
+      ${r.ok} captura(s) aplicadas${r.unidas ? " (" + r.unidas + " se unieron a registros que ya existían, sin duplicar)" : ""}${r.repetidas ? " · " + r.repetidas + " ya se habían recibido antes" : ""}.</div></div>` + this.fallasHtml(r.fallas);
+  },
+  errHtml(etq, msg) { return `<div class="aviso r" style="margin-top:10px">${B.ico("alerta")}<div><b>${U.esc(etq)}</b><br>${U.esc(msg)}</div></div>`; },
+  // tarjeta "Envio por internet" de la PC: recibir (supervisores) y configurar (administrador)
+  nubeHtml(sup) {
+    const n = B.nube.cfg(), cf = B.estado.config.nube || {}, adm = B.dom.esAdmin(), seg = B.nube.segura(), ul = B.nube.ultima;
+    if (!adm && !(n && sup)) return "";
+    return `<div class="tarjeta" data-tour="cel-nube">${cab("subir", "a", "Envío por internet (hoja de Google)", n ? "Activo: los celulares mandan sus capturas cifradas a la hoja de Google y esta PC las recoge, sin WhatsApp." : "Opcional: que los celulares manden sus capturas por internet, sin WhatsApp. Lo configura el administrador una sola vez.")}
+      ${!seg ? `<div class="aviso a">${B.ico("info")}<div>En este equipo la bitácora está abierta por la red. El envío por internet solo funciona en la PC donde está instalada (dirección <b>localhost</b>).</div></div>` : ""}
+      ${n && sup && seg ? `<div class="fila" style="align-items:center;gap:10px"><button class="btn verde" id="nubeRec">${B.ico("descargar")} Recibir capturas por internet</button>
+          <label class="peque" style="display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" id="nubeAuto" ${B.nube.autoOn() ? "checked" : ""} style="width:18px;height:18px"> Revisar sola cada 10 minutos mientras la bitácora esté abierta en esta PC</label></div>
+        <p class="muted peque" style="margin:8px 0 0">${ul ? "Última revisión: " + U.fh(ul.fh) + " (" + ul.n + " envío(s) recibidos)." : "Aún no se ha revisado en esta sesión."}${B.nube.error ? ` <span style="color:var(--rojo)">Última falla: ${U.esc(B.nube.error)}</span>` : ""}
+          · <a href="#" id="nubeTodo">Volver a traer todo lo de los últimos 15 días</a> (lo ya recibido se ignora).</p><div id="nubeRes"></div>` : ""}
+      ${adm ? `<details style="margin-top:10px" ${n ? "" : "open"}><summary class="peque" style="cursor:pointer;font-weight:600">${n ? "Configuración (administrador)" : "Cómo activarlo (administrador)"}</summary>
+        <ol class="peque" style="margin:8px 0;padding-left:20px;line-height:1.7"><li>Toca <b>Copiar el código para Apps Script</b>.</li>
+          <li>Con tu cuenta de Google abre <b>sheets.new</b> (hoja nueva) → <b>Extensiones → Apps Script</b>, borra lo que haya, pega el código y guarda.</li>
+          <li><b>Implementar → Nueva implementación → Aplicación web</b>. Ejecutar como: <b>Yo</b>. Quién tiene acceso: <b>Cualquier usuario</b>. Autoriza los permisos.</li>
+          <li>Copia la <b>URL de la aplicación web</b> (termina en /exec), pégala abajo y toca <b>Probar y guardar</b>.</li>
+          <li>Genera un <b>paquete de datos nuevo</b> y mándalo: así cada celular recibe la dirección y la clave.</li></ol>
+        <div class="fila" style="gap:8px;flex-wrap:wrap"><button class="btn sec" id="nubeCod" ${seg ? "" : "disabled"}>${B.ico("doc")} Copiar el código para Apps Script</button></div>
+        <div class="campo" style="margin-top:10px"><label>URL de la aplicación web</label><input class="inp" id="nubeUrl" value="${U.esc(cf.url || "")}" placeholder="https://script.google.com/macros/s/…/exec"></div>
+        <div class="fila" style="gap:8px;flex-wrap:wrap"><button class="btn dorado" id="nubeGuardar" ${seg ? "" : "disabled"}>${B.ico("ok")} Probar y guardar</button>
+          ${cf.clave ? `<button class="btn fantasma chico" id="nubeClave">Cambiar la clave</button>` : ""}${n ? `<button class="btn fantasma chico" id="nubeQuitar">Desactivar</button>` : ""}</div>
+        ${cf.mod ? `<p class="muted peque" style="margin:8px 0 0">Último cambio: ${U.esc(String(cf.mod).replace("T", " "))}. La clave solo viaja en el paquete de datos; la hoja de Google solo guarda las capturas cifradas.</p>` : ""}</details>` : ""}
+    </div>`;
+  },
+  nubeEventos(c) {
+    const $ = s => c.querySelector(s), re = () => this.render(c);
+    const muestra = res => { const caja = $("#nubeRes"); if (caja) caja.innerHTML = !res.length ? `<p class="muted peque" style="margin-top:8px">No hay envíos nuevos en la hoja.</p>` : res.map(x => x.r ? this.resHtml(x.r, "por internet " + (isNaN(new Date(x.it.f)) ? "" : U.fh(U.isoFH(new Date(x.it.f))))) : this.errHtml("Envío " + x.it.id, x.error)).join(""); };
+    const recibir = async (todos, b) => { b.disabled = true; try { muestra(await B.nube.recibir(todos)); } catch (e) { const caja = $("#nubeRes"); if (caja) caja.innerHTML = this.errHtml("Recibir por internet", e.message); } b.disabled = false; };
+    if ($("#nubeRec")) $("#nubeRec").onclick = e => recibir(false, e.currentTarget);
+    if ($("#nubeTodo")) $("#nubeTodo").onclick = e => { e.preventDefault(); recibir(true, $("#nubeRec")); };
+    if ($("#nubeAuto")) $("#nubeAuto").onchange = e => { try { localStorage.setItem("b_nube_auto", e.target.checked ? "1" : "0"); } catch (x) { } if (e.target.checked) B.nube.auto(); };
+    const guardar = async (d, msg) => { await B.api.llamar("op", { col: "intercambio", accion: "nube", datos: d }); await B.api.recargar(); if (msg) ui.toast(msg, "ok", 10000); re(); };
+    if ($("#nubeCod")) $("#nubeCod").onclick = async () => {
+      try {
+        const cf = B.estado.config.nube || {}, clave = cf.clave || B.cod.claveNueva();
+        if (!cf.clave) await B.api.llamar("op", { col: "intercambio", accion: "nube", datos: { url: "", clave } });
+        const cod = B.nube.script(await B.cod.token(clave));
+        if (await B.cod.copiar(cod)) ui.toast("Código copiado. Pégalo en Apps Script (paso 2).", "ok", 7000);
+        else await ui.modal({ titulo: "Código para Apps Script", icono: "doc", ancho: true, html: `<p class="muted peque">Selecciónalo todo y cópialo.</p><textarea class="inp" readonly style="min-height:50vh;font-family:monospace;font-size:12px">${U.esc(cod)}</textarea>`, botones: [{ t: "Cerrar", c: "sec", v: null }] });
+        if (!cf.clave) { await B.api.recargar(); re(); }
+      } catch (e) { ui.error(e); }
+    };
+    if ($("#nubeGuardar")) $("#nubeGuardar").onclick = async e => {
+      const b = e.currentTarget, url = $("#nubeUrl").value.trim(), clave = (B.estado.config.nube || {}).clave;
+      if (!clave) { ui.toast("Primero toca «Copiar el código para Apps Script» y pégalo en la hoja.", "error", 8000); return; }
+      if (!B.nube.URL.test(url)) { ui.toast("La URL debe ser la de la aplicación web: https://script.google.com/macros/s/…/exec", "error", 9000); return; }
+      b.disabled = true;
+      try { await B.nube.llamar({ url, clave }, { accion: "probar" }); await guardar({ url, clave }, "Conexión correcta. Ahora genera un <b>paquete de datos nuevo</b> y mándalo a los celulares."); }
+      catch (er) { ui.error(er); b.disabled = false; }
+    };
+    if ($("#nubeClave")) $("#nubeClave").onclick = async () => {
+      if (!(await ui.confirmar("Se crea una clave nueva. Después tendrás que <b>copiar el código otra vez, pegarlo en Apps Script e implementarlo de nuevo</b> (Implementar → Gestionar implementaciones → Editar → Nueva versión), y mandar un paquete nuevo a los celulares. Hasta entonces los celulares no podrán enviar por internet.", "Cambiar la clave", "Cambiar la clave", true))) return;
+      try { await guardar({ url: (B.estado.config.nube || {}).url || "", clave: B.cod.claveNueva() }, "Clave nueva guardada. Copia el código otra vez y actualiza Apps Script."); } catch (e) { ui.error(e); }
+    };
+    if ($("#nubeQuitar")) $("#nubeQuitar").onclick = async () => {
+      if (!(await ui.confirmar("Los celulares dejarán de ver «Enviar a la PC por internet» cuando carguen el siguiente paquete. La hoja de Google no se borra: puedes eliminarla tú desde tu cuenta.", "Desactivar el envío por internet", "Desactivar", true))) return;
+      try { await guardar({ quitar: true }, "Envío por internet desactivado."); } catch (e) { ui.error(e); }
+    };
+  },
+  // texto pegado: codigos B24C1 (uno o varios) o el mensaje antiguo con el JSON entre llaves
+  async importarPegado(t) {
+    const cods = await B.cod.leer(t), out = [];
+    if (!cods.length) {
+      const a = t.indexOf("{"), z = t.lastIndexOf("}");
+      if (a < 0 || z <= a) throw new Error("No encontré ningún código de capturas. Copia el mensaje completo de WhatsApp (empieza con «Bitácora 24RU1 · capturas de …») y pégalo.");
+      cods.push(t.slice(a, z + 1));
+    }
+    for (const j of cods) { try { out.push(this.resHtml(await B.inter.importarCapturas(j), "código pegado")); } catch (e) { out.push(this.errHtml("Código pegado", e.message)); } }
+    return out.join("");
+  },
   fallasHtml(fallas) {
     return fallas.length ? `<div class="aviso r" style="margin-top:10px">${B.ico("alerta")}<div><b>${fallas.length} captura(s) no se pudieron aplicar</b>; revísalas y captúralas a mano si hace falta:
       <ul style="margin:6px 0 0;padding-left:18px">${fallas.map(x => `<li><b>${U.esc(x.op.ini)}</b> · ${U.esc(B.inter.describir(x.op))}<br><span class="muted">${U.esc(x.error)}</span></li>`).join("")}</ul></div></div>` : "";
@@ -9659,8 +9913,10 @@ V.celular = {
         <label class="btn verde bloque" style="cursor:pointer">${B.ico("subir")} Elegir archivo(s) de capturas…<input type="file" id="celImp" accept=".pdf,.txt,.json,application/pdf,text/plain,application/json" multiple hidden></label>
         <p class="muted peque" style="margin:10px 0 0">Las capturas entran con el nombre de quien las hizo y con las reglas de siempre: no se duplican actividades ni espacios confinados, y el número de espacio confinado lo asigna la PC.
           Si el mismo archivo se importa dos veces no pasa nada: lo ya recibido se ignora. ${sup ? "" : "Solo puedes importar tus propias capturas."}</p>
-        <details style="margin-top:10px"><summary class="peque" style="cursor:pointer;font-weight:600">¿Llegaron como mensaje de texto? Pégalas aquí</summary>
-          <textarea class="inp" id="celTxt" rows="4" style="margin-top:8px;font-size:12px" placeholder="Copia el mensaje completo de WhatsApp (empieza con «Capturas de la Bitácora 24RU1 …») y pégalo aquí"></textarea>
+        <button class="btn sec bloque" id="celClip" style="margin-top:8px">${B.ico("doc")} Pegar del portapapeles (código de WhatsApp)</button>
+        <p class="muted peque" style="margin:6px 0 0">Si llegó como <b>código</b>: en WhatsApp Web copia el mensaje (o varios a la vez) y toca este botón.</p>
+        <details style="margin-top:8px"><summary class="peque" style="cursor:pointer;font-weight:600">¿El botón no pega? Pégalo aquí a mano</summary>
+          <textarea class="inp" id="celTxt" rows="4" style="margin-top:8px;font-size:12px" placeholder="Pega aquí el mensaje completo de WhatsApp (empieza con «Bitácora 24RU1 · capturas de …»). Puedes pegar varios mensajes juntos."></textarea>
           <button class="btn sec chico" id="celPegar" style="margin-top:6px">${B.ico("subir")} Importar el texto pegado</button></details>
         <div id="celRes"></div>
       </div>
@@ -9672,28 +9928,27 @@ V.celular = {
           <div class="aviso a" style="margin-top:10px">${B.ico("info")}<div>El paquete contiene <b>toda la información de la bitácora</b> (incluye horas extra y los accesos del personal). Compártelo solo en el grupo del personal de Seguridad Industrial.</div></div>`
         : `<div class="aviso a">${B.ico("info")}<div>El paquete lo genera un <b>supervisor</b> y lo manda al grupo de WhatsApp. En tu celular: <b>Celulares → Recibir datos</b>.</div></div>`}
         <p class="muted peque" style="margin:10px 0 0">Capturas de celular recibidas hasta ahora: <b>${nRec}</b>.</p>
-      </div></div>`;
+      </div></div>
+      ${this.nubeHtml(sup)}`;
+    this.nubeEventos(c);
     c.querySelector("#celImp").onchange = async e => {
       const files = [...e.target.files], caja = c.querySelector("#celRes"); if (!files.length) return;
       caja.innerHTML = `<p class="muted peque" style="margin-top:10px">Importando…</p>`; let h = "";
       for (const f of files) {
-        try {
-          const r = await B.inter.importarCapturas(B.inter.datosDe(await this.leerArchivo(f)));
-          h += `<div class="aviso ${r.fallas.length ? "d" : "v"}" style="margin-top:10px">${B.ico("ok")}<div><b>${U.esc(r.de || "")} ${U.esc(r.nombre)}</b> · ${U.esc(f.name)}<br>
-            ${r.ok} captura(s) aplicadas${r.unidas ? " (" + r.unidas + " se unieron a registros que ya existían, sin duplicar)" : ""}${r.repetidas ? " · " + r.repetidas + " ya se habían recibido antes" : ""}.</div></div>` + this.fallasHtml(r.fallas);
-        } catch (err) { h += `<div class="aviso r" style="margin-top:10px">${B.ico("alerta")}<div><b>${U.esc(f.name)}</b><br>${U.esc(err.message)}</div></div>`; }
+        try { h += this.resHtml(await B.inter.importarCapturas(B.inter.datosDe(await this.leerArchivo(f))), f.name); }
+        catch (err) { h += this.errHtml(f.name, err.message); }
       }
       caja.innerHTML = h; e.target.value = "";
     };
-    c.querySelector("#celPegar").onclick = async () => {
-      const caja = c.querySelector("#celRes"), t = c.querySelector("#celTxt").value, a = t.indexOf("{"), z = t.lastIndexOf("}");
-      if (a < 0 || z <= a) { ui.toast("Pega el mensaje completo: debe incluir todo el texto entre llaves { … }. Si WhatsApp lo cortó, toca «Leer más» antes de copiarlo.", "error", 9000); return; }
-      try {
-        const r = await B.inter.importarCapturas(t.slice(a, z + 1));
-        caja.innerHTML = `<div class="aviso ${r.fallas.length ? "d" : "v"}" style="margin-top:10px">${B.ico("ok")}<div><b>${U.esc(r.de || "")} ${U.esc(r.nombre)}</b> · texto pegado<br>
-          ${r.ok} captura(s) aplicadas${r.unidas ? " (" + r.unidas + " se unieron a registros que ya existían, sin duplicar)" : ""}${r.repetidas ? " · " + r.repetidas + " ya se habían recibido antes" : ""}.</div></div>` + this.fallasHtml(r.fallas);
-        c.querySelector("#celTxt").value = "";
-      } catch (err) { caja.innerHTML = `<div class="aviso r" style="margin-top:10px">${B.ico("alerta")}<div><b>Texto pegado</b><br>${U.esc(err.message)}${/JSON|leer/i.test(err.message) ? "<br>Parece incompleto: en WhatsApp toca «Leer más» y copia el mensaje entero." : ""}</div></div>`; }
+    const pegar = async t => {
+      const caja = c.querySelector("#celRes");
+      if (!String(t || "").trim()) { ui.toast("No hay nada que pegar: primero copia el mensaje de WhatsApp.", "error", 7000); return false; }
+      try { caja.innerHTML = await this.importarPegado(t); return true; } catch (err) { caja.innerHTML = this.errHtml("Texto pegado", err.message); return false; }
+    };
+    c.querySelector("#celPegar").onclick = async () => { if (await pegar(c.querySelector("#celTxt").value)) c.querySelector("#celTxt").value = ""; };
+    c.querySelector("#celClip").onclick = async () => {
+      let t; try { t = await navigator.clipboard.readText(); } catch (e) { c.querySelector("#celTxt").closest("details").open = true; ui.toast("El navegador no dejó leer el portapapeles: pega el mensaje en la caja (Ctrl+V).", "aviso", 8000); c.querySelector("#celTxt").focus(); return; }
+      await pegar(t);
     };
     const bp = c.querySelector("#celPaq");
     const bpc = c.querySelector("#celPaqC");
@@ -9701,16 +9956,19 @@ V.celular = {
     if (bp) bp.onclick = async () => { bp.disabled = true; try { const n = await B.inter.generarPaquete(); ui.toast("Paquete generado: <b>" + U.esc(n) + "</b>. Está en Descargas; mándalo al grupo de WhatsApp.", "ok", 9000); } catch (e) { ui.error(e); } bp.disabled = false; };
   },
   async movil(c) {
-    const pend = await B.inter.pendientes(), paq = await B.inter.infoPaquete(), ult = await B.local.leer("ultimoEnvio");
+    const pend = await B.inter.pendientes(), paq = await B.inter.infoPaquete(), ult = await B.local.leer("ultimoEnvio"), nube = !!(B.nube.cfg() && B.nube.segura());
     const horas = paq && paq.generado ? Math.round((Date.now() - new Date(paq.generado + ":00").getTime()) / 36e5) : null;
     c.innerHTML = `
       <div class="cuadricula">
       <div class="tarjeta c6" data-tour="cel-enviar">${cab("subir", "v", "Enviar mis capturas a la PC", pend.length ? `<b>${pend.length}</b> captura(s) guardadas en este celular que la PC todavía no confirma.` : "No hay capturas pendientes: la PC ya tiene todo lo de este celular.")}
-        <button class="btn verde bloque" id="mEnviar" ${pend.length ? "" : "disabled"} style="min-height:52px;font-size:15px">${B.ico("subir")} Enviar por WhatsApp (${pend.length})</button>
-        ${pend.length ? `<button class="btn sec bloque" id="mDescargar" style="margin-top:8px">${B.ico("descargar")} Guardar el archivo en el celular</button>
-          <button class="btn fantasma bloque" id="mTexto" style="margin-top:8px">Si el archivo no se envía: mandar como mensaje de texto</button>` : ""}
+        ${!pend.length ? `<button class="btn verde bloque" disabled style="min-height:52px;font-size:15px">${B.ico("ok")} Nada pendiente de enviar</button>`
+        : (nube ? `<button class="btn verde bloque" id="mNube" style="min-height:52px;font-size:15px">${B.ico("subir")} Enviar a la PC por internet (${pend.length})</button>` : "") +
+          `<button class="btn ${nube ? "sec" : "verde"} bloque" id="mTexto" style="${nube ? "margin-top:8px" : "min-height:52px;font-size:15px"}">${B.ico("doc")} Copiar código para WhatsApp (${pend.length})</button>
+          <details style="margin-top:8px"><summary class="peque" style="cursor:pointer;font-weight:600">Otras formas de enviar (archivo)</summary>
+            <button class="btn sec bloque" id="mEnviar" style="margin-top:8px">${B.ico("subir")} Compartir el archivo por WhatsApp</button>
+            <button class="btn sec bloque" id="mDescargar" style="margin-top:8px">${B.ico("descargar")} Guardar el archivo en el celular</button></details>`}
         <div id="mAviso"></div>
-        <p class="muted peque" style="margin:10px 0 0">Se genera un archivo «Bitacora24RU1 CAPTURAS ${U.esc(B.usuario.ini)} …»: elige <b>WhatsApp</b> y mándalo al grupo del turno o a tu propio chat. En la PC se importa en <b>Celulares → Importar capturas</b>.
+        <p class="muted peque" style="margin:10px 0 0">${nube ? "<b>Por internet</b> llega directo a la PC (necesitas señal). " : ""}<b>Copiar código</b> copia un texto: abre WhatsApp, pégalo en tu propio chat o en el del turno y envíalo; en la PC se pega en <b>Celulares → Pegar del portapapeles</b>.
           Puedes enviarlo varias veces: la PC ignora lo que ya recibió.${ult ? `<br>Último envío: ${U.fh(ult.fecha)} (${ult.n} capturas).` : ""}</p>
         ${pend.length ? `<details style="margin-top:10px"><summary class="peque" style="cursor:pointer;color:var(--azul);font-weight:600">Ver lo pendiente de enviar</summary><div class="lista" style="margin-top:8px">${pend.slice(-60).reverse().map(o => `<div class="item"><div class="cuerpo"><div class="tit" style="font-weight:500">${U.esc(B.inter.describir(o))}</div><div class="meta"><span>${U.esc(o.ini)}</span><span>capturado ${U.fh(o.t)}</span></div></div></div>`).join("")}</div></details>` : ""}
       </div>
@@ -9722,7 +9980,7 @@ V.celular = {
       </div></div>
       <div class="tarjeta">${cab("info", "a", "Cómo funciona en el celular")}
         <ol style="margin:0;padding-left:20px;line-height:1.7;font-size:13.5px"><li>Al iniciar el turno carga el <b>paquete de datos</b> que mandó el supervisor.</li><li>Captura normalmente (actividades, espacios confinados, vigilancias, horas extra). Funciona <b>sin señal</b>.</li>
-        <li>Antes de salir, toca <b>Enviar por WhatsApp</b>. Tus capturas aparecen en los reportes cuando se importan en la PC.</li></ol>
+        <li>Antes de salir, toca <b>${nube ? "Enviar a la PC por internet" : "Copiar código para WhatsApp"}</b>. Tus capturas aparecen en los reportes cuando llegan a la PC.</li></ol>
         <button class="btn fantasma chico" id="mBorrar" style="margin-top:12px">${B.ico("basura")} Borrar los datos de la bitácora de este celular</button>
         <div id="mPwa"></div>
       </div>`;
@@ -9732,16 +9990,16 @@ V.celular = {
     const aviso = (r) => {
       const caja = c.querySelector("#mAviso"); if (!caja) return;
       caja.innerHTML = r.modo === "compartido" ? `<div class="aviso v" style="margin-top:10px">${B.ico("ok")}<div><b>Archivo compartido.</b> Cuando se importe en la PC y cargues el siguiente paquete, estas capturas dejarán de aparecer como pendientes.</div></div>`
-        : r.modo === "texto" ? `<div class="aviso v" style="margin-top:10px">${B.ico("ok")}<div><b>Enviado como mensaje de texto.</b> En la PC se importa en Celulares → «¿Llegaron como mensaje de texto? Pégalas aquí».</div></div>`
-        : r.modo === "copiado" ? `<div class="aviso a" style="margin-top:10px">${B.ico("info")}<div><b>Texto copiado.</b> Abre WhatsApp, pégalo en el chat y envíalo.</div></div>`
-        : r.modo === "descargado" ? `<div class="aviso ${r.error ? "d" : "v"}" style="margin-top:10px">${B.ico(r.error ? "alerta" : "ok")}<div>${r.error ? "<b>No se pudo compartir directo</b> (" + U.esc(r.error) + ").<br>" : ""}El archivo <b>${U.esc(r.nombre)}</b> quedó en <b>Descargas</b>: en WhatsApp toca el clip → <b>Documento</b> y elígelo.${r.error ? " Si tampoco funciona, usa «mandar como mensaje de texto»." : ""}</div></div>`
-        : r.modo === "fallo" ? `<div class="aviso r" style="margin-top:10px">${B.ico("alerta")}<div><b>No se pudo enviar ni copiar</b> (${U.esc(r.error)}). Usa «Guardar el archivo en el celular» y adjúntalo como Documento.</div></div>` : "";
+        : r.modo === "nube" ? `<div class="aviso v" style="margin-top:10px">${B.ico("ok")}<div><b>Enviado por internet (${r.n} capturas).</b> La PC lo recibe en Celulares → «Recibir capturas por internet» (o sola, si está activada la revisión automática). Seguirán como pendientes hasta que cargues el siguiente paquete.</div></div>`
+        : r.modo === "copiado" ? `<div class="aviso v" style="margin-top:10px">${B.ico("ok")}<div><b>Código copiado (${r.n} capturas).</b> Abre WhatsApp, mantén presionado en el chat → <b>Pegar</b> y envíalo (a tu propio chat o al del turno). En la PC: Celulares → «Pegar del portapapeles».</div></div>`
+        : r.modo === "largo" ? `<div class="aviso d" style="margin-top:10px">${B.ico("alerta")}<div><b>Son demasiadas capturas para un mensaje de WhatsApp.</b> ${nube ? "Usa «Enviar a la PC por internet» o" : "Usa"} «Guardar el archivo en el celular» y adjúntalo como Documento.</div></div>`
+        : r.modo === "descargado" ? `<div class="aviso ${r.error ? "d" : "v"}" style="margin-top:10px">${B.ico(r.error ? "alerta" : "ok")}<div>${r.error ? "<b>No se pudo compartir directo</b> (" + U.esc(r.error) + ").<br>" : ""}El archivo <b>${U.esc(r.nombre)}</b> quedó en <b>Descargas</b>: en WhatsApp toca el clip → <b>Documento</b> y elígelo.${r.error ? " Si tampoco funciona, usa «Copiar código para WhatsApp»." : ""}</div></div>`
+        : r.modo === "fallo" ? `<div class="aviso r" style="margin-top:10px">${B.ico("alerta")}<div><b>No se pudo copiar</b> (${U.esc(r.error)}). Usa «Otras formas de enviar» → «Guardar el archivo en el celular» y adjúntalo como Documento.</div></div>` : "";
       if (r.modo === "cancelado") ui.toast("Envío cancelado.", "", 3000);
     };
-    const enviar = async modo => { try { aviso(await B.inter.exportarCapturas(modo, prep)); } catch (e) { ui.error(e); } };
-    c.querySelector("#mEnviar").onclick = () => enviar("");
-    const bd = c.querySelector("#mDescargar"); if (bd) bd.onclick = () => enviar("descargar");
-    const bt = c.querySelector("#mTexto"); if (bt) bt.onclick = () => enviar("texto");
+    const enviar = async (modo, b) => { if (b) b.disabled = true; try { aviso(await B.inter.exportarCapturas(modo, prep)); } catch (e) { ui.error(e); } if (b) b.disabled = false; };
+    const toque = (s, modo) => { const b = c.querySelector(s); if (b) b.onclick = () => enviar(modo, modo === "nube" ? b : null); };
+    toque("#mEnviar", ""); toque("#mDescargar", "descargar"); toque("#mTexto", "texto"); toque("#mNube", "nube");
     const cargar = async (texto, forzar) => {
       const caja = c.querySelector("#mRes");
       try {
@@ -9917,7 +10175,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "4.11.2", servidorViejo: false,
+  info: {}, VERSION: "4.12", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -10104,7 +10362,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "procedimientos" ? '<span class="contador oculto" id="cntProc"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.11.2")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.12")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
