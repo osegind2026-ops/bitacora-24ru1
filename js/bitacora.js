@@ -809,7 +809,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.13", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.14", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -979,7 +979,7 @@ B.local = {
       case "grafGuardar": {
         soloEd();
         const gk = String(b.clave || ""), gkb = gk.replace(/:(RE|ON)$/, "");
-        if (gk !== "cfg" && gk !== "diacfg" && !/^\d{4}-\d{2}$/.test(gkb) && !/^dia:\d{4}-\d{2}-\d{2}(_\d{4}-\d{2}-\d{2})?:(AE|SI|AS)$/.test(gkb) && !/^rango:\d{4}-\d{2}(-\d{2})?:\d{4}-\d{2}(-\d{2})?$/.test(gkb)) throw new Error("Clave no válida.");
+        if (gk !== "cfg" && gk !== "diacfg" && gk !== "verif" && !/^\d{4}-\d{2}$/.test(gkb) && !/^dia:\d{4}-\d{2}-\d{2}(_\d{4}-\d{2}-\d{2})?:(AE|SI|AS)$/.test(gkb) && !/^rango:\d{4}-\d{2}(-\d{2})?:\d{4}-\d{2}(-\d{2})?$/.test(gkb)) throw new Error("Clave no válida.");
         T.graf[gk] = Object.assign({}, b.datos, { por: s.ini, fh: ahora() });
         return fin();
       }
@@ -6429,7 +6429,12 @@ V.hoja = {
         return this.activarExcel(c);
       }
       if (!semanas.includes(this.sem)) this.sem = semanas[semanas.length - 1];
-      const sem = this.sem, L = await TJ.semana(sem), M = D.marcas, F = this.fil;
+      // verificacion: la semana de captura (de los dos periodos) y las observadas en esa semana que se capturaron en la siguiente
+      const sem = this.sem, lun = TJ.lunes(sem), dom = U.sumar(lun, 6), kV = "tend:" + sem + (TJ.periodo ? ":" + TJ.periodo : ""), SV = B.verif.leer(kV);
+      const VU0 = (await B.verif.universo([sem])).concat((await B.verif.universo([TJ.semSig(sem, 1)])).filter(x => { const f = String(x.fobs || "").slice(0, 10); return f >= lun && f <= dom; }));
+      const VU = VU0.filter((x, i) => VU0.findIndex(y => String(y.id) === String(x.id)) === i);
+      const motV = x => B.verif.porPeriodo(x) || (x._sem !== sem ? "Capturada en la semana " + B.verif.semN(x._sem) + " (observada el " + U.corta(String(x.fobs).slice(0, 10)) + ", dentro de esta semana)" : "");
+      const L = B.verif.aplica(VU, motV, SV), M = D.marcas, F = this.fil;
       const deb = L.filter(x => x.si === "Debilidad"), sug = new Map(L.map(x => [x.id, TJ.sugerir(x, L)]));
       const barras = (lista, resalta, tot) => { const mx = Math.max(1, ...lista.map(x => x[1])); return lista.map(([k, n], i) => `<div class="tj-b ${resalta(k)}" data-q="${esc(k)}"><span class="tj-bp">${i + 1}</span><span class="tj-bn">${esc(k)}</span><span class="tj-bb"><i style="width:${Math.round(n / mx * 100)}%"></i></span><b>${n}</b>${tot ? `<small>${Math.round(n / tot * 100)}%</small>` : ""}</div>`).join("") || `<p class="muted peque">Sin datos.</p>`; };
       const porArea = TJ.contar(L, x => x.area), porDep = TJ.contar(L, x => x.depto), lugarSI = porDep.findIndex(x => U.norm(x[0]).includes("SEGURIDAD INDUSTRIAL"));
@@ -6448,6 +6453,7 @@ V.hoja = {
         <div class="tarjeta">${cab("grafica", "g", "Semana de captura", `${L.length} tarjetas distintas · ${L.filter(x => String(x.fu || "").includes("SI")).length} en el archivo de Seguridad Industrial · ${L.filter(x => String(x.fu || "").includes("AE")).length} con peligros de alta energía${TJ.periodo ? " · " + TJ.nomPeriodo(TJ.periodo) : ""}`, this.selSemana(semanas) + this.botonExcel())}
           <div class="tj-kpis"><div><b>${nSI}</b><span>hechas por Seguridad Industrial</span></div><div><b>${lugarSI >= 0 ? (lugarSI + 1) + ".º" : "—"}</b><span>lugar de ${porDep.length} departamentos</span></div>
             <div><b>${deb.length}</b><span>con debilidad en S.I.</span></div><div><b>${L.filter(x => x.ae === "Si").length}</b><span>con alta energía</span></div><div><b style="color:var(--rojo)">${nA}</b><span>actos marcados</span></div><div><b style="color:var(--azul)">${nC}</b><span>condiciones marcadas</span></div></div></div>
+        <div id="tjVerif"></div>
         <div class="cuadricula">
           <div class="tarjeta c6">${cab("usuarios", "a", "Tarjetas por área", "Subgerencia o área de quien hizo la tarjeta. Resaltada: donde está Seguridad Industrial.")}<div class="tj-bars">${barras(porArea, k => U.norm(k).includes("SEGURIDAD NUCLEAR") ? "si2" : "", L.length)}</div></div>
           <div class="tarjeta c6">${cab("usuarios", "v", "Tarjetas por departamento", "Departamento de quien hizo la tarjeta. Resaltado: Seguridad Industrial.")}<div class="tj-bars">${barras(porDep, k => U.norm(k).includes("SEGURIDAD INDUSTRIAL") ? "si" : "", L.length)}</div></div>
@@ -6491,6 +6497,10 @@ V.hoja = {
       c.querySelectorAll(".tj-tops .tj-b").forEach(b => b.onclick = () => { F.q = b.dataset.q; F.ver = "todas"; F.n = 80; this.pinta().then(irLista); });
       c.querySelectorAll(".tj-tabla tr[data-id]").forEach(tr => tr.onclick = () => this.detalle(L.find(x => x.id === tr.dataset.id), sug.get(tr.dataset.id), repinta));
       c.querySelector("#tjMsg").onclick = () => modalMsg("Mensaje de seguridad de la semana", "Propuesta armada con las tendencias de la semana. Ajústala a tu estilo antes de compartirla.", TJ.mensajeSeguridad(sem, L));
+      B.verif.panel(c.querySelector("#tjVerif"), { clave: "tjtend", titulo: "Verificación de las tarjetas de la semana",
+        sub: "Todas las tarjetas capturadas en esta semana (Recarga y Operación Normal) y las observadas en esta semana que se capturaron en la siguiente.",
+        U: VU, motivo: motV, S: SV, alCambiar: async S => { try { await B.verif.guardar(kV, S); } catch (e) { B.ui.error(e); } this.pinta(); },
+        detalle: x => this.detalle(x, TJ.sugerir(x, L), repinta) });
     },
 
     // Ficha de una tarjeta: primero lo que sirve para decidir; lo demas, plegado al final
@@ -6583,6 +6593,90 @@ V.hoja = {
         if (!(await B.ui.confirmar(`Se borrarán las tarjetas cargadas de la <b>${TJ.semTxt(s)}</b> y sus marcas para la E+1.`, "Borrar semana", "Borrar", true))) return;
         try { await TJ.llamar("semBorrar", { sem: s }); delete TJ.cartas[s]; TJ.mias = null; await this.recarga(); } catch (e) { B.ui.error(e); }
       });
+    }
+  };
+})();
+;
+/* ---- verif.js ---- */
+/* =====================================================================
+   BITACORA 24RU1 - LIDERES EN CAMPO: VERIFICACION DE TARJETAS
+   Panel comun (como el de la E+1) para "Tarjetas y tendencias", "Tarjetas y
+   correos" y "Graficas y reportes" (reporte semanal y tendencia del dia):
+   muestra TODAS las tarjetas candidatas del periodo (de los dos periodos de
+   trabajo, sin repetir y buscando tambien en la semana de captura siguiente),
+   si entran o no y por que, y deja incluir o quitar cada una a mano.
+   ===================================================================== */
+(function () {
+  const esc = s => U.esc(s);
+  const VER = B.verif = {
+    abierto: {}, fV: {},
+    // tarjetas de varias semanas de captura (las de Recarga y las de Operacion Normal), sin repetir, con la semana en que se capturaron
+    async universo(sems) {
+      const TJ = B.tj, hay = new Set(Object.keys((TJ.datos && TJ.datos.semanas) || {})), m = new Map();
+      for (const s of [...new Set(sems)].filter(s => hay.has(s)).sort())
+        for (const x of await TJ.semana(s, true)) { const k = String(x.id); if (!m.has(k)) m.set(k, Object.assign({}, x, { _sem: s })); }
+      return [...m.values()];
+    },
+    // motivo final: lo marcado a mano manda sobre el motivo automatico ("" = entra)
+    motivo(x, motivo, S) {
+      const id = String(x.id); S = S || {};
+      if ((S.excl || []).map(String).includes(id)) return "Quitada a mano";
+      if ((S.incl || []).map(String).includes(id)) return "";
+      return motivo(x) || "";
+    },
+    aplica(L, motivo, S) { return L.filter(x => !this.motivo(x, motivo, S)); },
+    // motivo por periodo de trabajo (Recarga / Operacion Normal) segun lo elegido arriba en Lideres en Campo
+    porPeriodo(x) { const TJ = B.tj; return TJ.periodo && TJ.tipo(x) !== TJ.periodo ? "Es de " + TJ.nomPeriodo(TJ.tipo(x)) + " (arriba está elegido «" + TJ.nomPeriodo(TJ.periodo) + "»)" : ""; },
+    semN(s) { return s ? +String(s).slice(5) : ""; },
+
+    /* Panel. cfg: { clave, titulo, sub, U: universo, motivo(x), S: {excl, incl}, nota(x) (texto para las que entran),
+       alCambiar(S) (despues de un cambio a mano), cambiar(x, incluir) (opcional: reemplaza el manejo de excl/incl), detalle(x) } */
+    panel(caja, cfg) {
+      if (!caja) return;
+      const S = cfg.S = cfg.S || {}; S.excl = (S.excl || []).map(String); S.incl = (S.incl || []).map(String);
+      const fV = this.fV[cfg.clave] = this.fV[cfg.clave] || { q: "", ver: "todas" };
+      const por = new Map(cfg.U.map(x => [String(x.id), this.motivo(x, cfg.motivo, S)]));
+      const entran = cfg.U.filter(x => !por.get(String(x.id))), mano = S.excl.length + S.incl.length;
+      const q = U.norm(fV.q), filas = cfg.U.filter(x => (fV.ver === "todas" || (fV.ver === "si" ? !por.get(String(x.id)) : fV.ver === "no" ? !!por.get(String(x.id)) : S.excl.includes(String(x.id)) || S.incl.includes(String(x.id))))
+        && (!q || U.norm([x.id, x.rpe, x.nom, x.std, x.qp, x.doc].join(" ")).includes(q)))
+        .sort((a, b) => !!por.get(String(a.id)) - !!por.get(String(b.id)) || String(a.fobs || "").localeCompare(String(b.fobs || "")) || (+a.id || 0) - (+b.id || 0));
+      const abierto = this.abierto[cfg.clave];
+      caja.innerHTML = `<details class="tarjeta" ${abierto ? "open" : ""} style="padding-bottom:${abierto ? "" : "10px"}"><summary style="cursor:pointer;list-style:revert">
+          <style>.vf-ico svg{width:16px;height:16px;vertical-align:-3px}</style><b style="font-size:15px"><span class="vf-ico">${B.ico("buscar")}</span> ${esc(cfg.titulo || "Verificación de las tarjetas")}</b>
+          <span class="peque" style="margin-left:6px">Entran <b style="color:var(--verde,#1E6B4A)">${entran.length}</b> de ${cfg.U.length} tarjetas candidatas${cfg.U.length - entran.length ? ` · <b style="color:#b45309">${cfg.U.length - entran.length} no entran</b> (toca para ver por qué)` : ""}${mano ? ` · ${mano} cambiada(s) a mano` : ""}</span></summary>
+        <p class="muted peque" style="margin:8px 0 10px">${cfg.sub || ""} Marca o desmarca <b>Incluir</b> para corregir una por una; ${cfg.guardaCon ? "los cambios a mano se guardan con el botón <b>Guardar</b>." : "lo marcado a mano se guarda solo."}</p>
+        <div class="fila" style="align-items:flex-end">
+          <div class="campo" style="flex:0 1 210px"><label>Ver</label><select class="inp" data-v="ver"><option value="todas" ${fV.ver === "todas" ? "selected" : ""}>Todas (${cfg.U.length})</option><option value="si" ${fV.ver === "si" ? "selected" : ""}>Las que entran (${entran.length})</option><option value="no" ${fV.ver === "no" ? "selected" : ""}>Las que NO entran (${cfg.U.length - entran.length})</option><option value="mano" ${fV.ver === "mano" ? "selected" : ""}>Cambiadas a mano (${mano})</option></select></div>
+          <div class="campo" style="flex:1 1 220px"><label>Buscar</label><input class="inp" data-v="q" value="${esc(fV.q)}" placeholder="ID, nombre, RPE o texto…"></div>
+          ${mano && !cfg.cambiar ? `<button class="btn chico fantasma" data-v="limpia" style="margin-bottom:14px">Quitar los cambios a mano (${mano})</button>` : ""}</div>
+        <div class="tabla-cont" style="max-height:420px;overflow:auto"><table class="tabla"><thead><tr><th class="c">Incluir</th><th>ID</th><th>Obs.</th><th>Sem. captura</th><th>Originador</th><th>Estándar</th><th>Resultado</th><th>Archivo</th><th>Periodo</th><th>Por qué no entra / nota</th></tr></thead><tbody>
+          ${filas.map(x => { const id = String(x.id), r = por.get(id), fu = String(x.fu || "").split(","), n = !r && cfg.nota ? cfg.nota(x) : "";
+            return `<tr style="${r ? "opacity:.62" : ""}"><td class="c"><input type="checkbox" data-inc="${esc(id)}" ${r ? "" : "checked"} style="width:17px;height:17px"></td><td><a href="#" data-vc="${esc(id)}"><b>${esc(id)}</b></a>${S.excl.includes(id) || S.incl.includes(id) ? ' <span class="badge a" title="Cambiada a mano">a mano</span>' : ""}</td>
+              <td class="tnum">${esc(x.fobs ? U.corta(String(x.fobs).slice(0, 10)) : "sin fecha")}</td><td class="tnum">${this.semN(x._sem)}</td><td>${esc(x.nom || "")}<div class="peque muted">${esc(x.rpe || "")}</div></td><td class="peque">${esc(x.std || "")}</td>
+              <td>${/^DEBIL/i.test(x.si || "") ? '<span class="badge r">Debilidad</span>' : '<span class="badge v">Cumple</span>'}</td><td>${fu.includes("SI") ? '<span class="badge v">SEGIND</span> ' : ""}${fu.includes("AE") ? '<span class="badge r">AE</span>' : ""}</td>
+              <td class="peque">${B.tj.tipo(x) === "ON" ? "Op. Normal" : "Recarga"}</td><td class="peque" style="${r ? "color:#b45309" : "color:var(--texto-2,#555)"}">${esc(r || n || "")}</td></tr>`; }).join("") || `<tr><td colspan="10" class="muted">Sin tarjetas con ese filtro.</td></tr>`}</tbody></table></div></details>`;
+      const d = caja.querySelector("details");
+      d.ontoggle = () => { this.abierto[cfg.clave] = d.open; d.style.paddingBottom = d.open ? "" : "10px"; };
+      const re = () => this.panel(caja, cfg);
+      caja.querySelector('[data-v="ver"]').onchange = e => { fV.ver = e.target.value; re(); };
+      const qi = caja.querySelector('[data-v="q"]'); qi.onchange = () => { fV.q = qi.value.trim(); re(); };
+      const lp = caja.querySelector('[data-v="limpia"]'); if (lp) lp.onclick = async () => { S.excl = []; S.incl = []; await cfg.alCambiar(S); };
+      caja.querySelectorAll("[data-inc]").forEach(ch => ch.onchange = async () => {
+        const id = ch.dataset.inc, x = cfg.U.find(y => String(y.id) === id);
+        if (cfg.cambiar) { ch.disabled = true; try { await cfg.cambiar(x, ch.checked); } catch (e) { B.ui.error(e); ch.checked = !ch.checked; ch.disabled = false; } return; }
+        S.excl = S.excl.filter(y => y !== id); S.incl = S.incl.filter(y => y !== id);
+        const sinMano = cfg.motivo(x);
+        if (ch.checked && sinMano) S.incl.push(id); if (!ch.checked && !sinMano) S.excl.push(id);
+        await cfg.alCambiar(S);
+      });
+      caja.querySelectorAll("[data-vc]").forEach(a => a.onclick = e => { e.preventDefault(); if (cfg.detalle) cfg.detalle(cfg.U.find(y => String(y.id) === a.dataset.vc)); });
+    },
+    // cambios a mano que no van con un TOP o una imagen: se guardan en graf.verif (por pantalla y periodo)
+    leer(k) { const v = ((B.tj.datos.graf || {}).verif || {})[k] || {}; return { excl: (v.excl || []).map(String), incl: (v.incl || []).map(String) }; },
+    async guardar(k, S) {
+      const D = B.tj.datos; D.graf = D.graf || {}; const v = Object.assign({}, D.graf.verif || {}); delete v.por; delete v.fh;
+      if ((S.excl || []).length || (S.incl || []).length) v[k] = { excl: S.excl, incl: S.incl }; else delete v[k];
+      await B.tj.llamar("grafGuardar", { clave: "verif", datos: v }); D.graf.verif = v;
     }
   };
 })();
@@ -7332,21 +7426,44 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
     fila(c) { return { id: String(c.id), act: corto(frase(c.qp || c.doc), 120), riesgo: corto(frase(c.qpp), 90) }; },
     introDef() { return `A través de las observaciones de líderes en campo se han identificado desviaciones a los estándares de seguridad, los cuales debemos corregir para evitar eventos durante la ${B.t.periodo()}.`; },
 
-    // tarjetas del periodo, por semana. Por semanas: semanas de captura desde-hasta. Por fechas: fecha de observacion
-    // entre f1 y f2 (se buscan tambien en la semana de captura siguiente) agrupadas por la semana en que se observaron
-    async cubetas(F, crudas) {
-      const sems = Object.keys(TJ.datos.semanas).sort(), r = [];
+    /* Candidatas del periodo, de los dos periodos de trabajo y sin repetir. Por semanas: semanas de captura desde-hasta y las
+       capturadas en la semana siguiente que se observaron dentro del periodo. Por fechas: las semanas de captura alrededor de las
+       fechas (se capturan dias despues) observadas un dia antes o despues, o sin fecha. */
+    async universo(F) {
+      const sems = Object.keys(TJ.datos.semanas).sort();
       if (F.modo === "fechas" && F.f1 && F.f2) {
-        const a = TJ.semDe(F.f1), b = TJ.semDe(F.f2), m = new Map();
-        for (const s of sems.filter(s => s >= TJ.semSig(a, -1) && s <= TJ.semSig(b, 1))) for (const c of await TJ.semana(s)) { const f = String(c.fobs || "").slice(0, 10); if (f >= F.f1 && f <= F.f2) m.set(String(c.id), c); }
-        if (crudas) return [...m.values()];
-        for (let w = a, g = 0; w <= b && g < 120; w = TJ.semSig(w, 1), g++) r.push({ k: w, L: [] });
-        for (const c of m.values()) { if (!this.pasa(c, F)) continue; const x = r.find(y => y.k === TJ.semDe(String(c.fobs).slice(0, 10))); if (x) x.L.push(c); }
-        return r;
+        const a = TJ.semSig(TJ.semDe(F.f1), -1), b = TJ.semSig(TJ.semDe(F.f2), 2), a1 = U.sumar(F.f1, -1), a2 = U.sumar(F.f2, 1);
+        return (await B.verif.universo(sems.filter(s => s >= a && s <= b))).filter(c => { const f = String(c.fobs || "").slice(0, 10); return !/^\d{4}-\d{2}-\d{2}$/.test(f) || (f >= a1 && f <= a2); });
       }
-      const rango = sems.filter(s => s <= F.hasta && (!F.desde || s >= F.desde));
-      if (crudas) { const L = []; for (const s of rango) L.push(...await TJ.semana(s)); return L; }
-      for (const s of rango) r.push({ k: s, L: (await TJ.semana(s)).filter(c => this.pasa(c, F)) });
+      const sig = TJ.semSig(F.hasta, 1), dom = U.sumar(TJ.lunes(F.hasta), 6);
+      return (await B.verif.universo(sems.filter(s => s <= sig && (!F.desde || s >= F.desde)))).filter(c => c._sem <= F.hasta || String(c.fobs || "").slice(0, 10) <= dom);
+    },
+    // por que una tarjeta no entra al reporte ("" = entra); soloPeriodo = sin contar los filtros de archivo, area, etc.
+    motivo(c, F, soloPeriodo) {
+      const p = B.verif.porPeriodo(c); if (p) return p;
+      if (F.modo === "fechas" && F.f1 && F.f2) { const f = String(c.fobs || "").slice(0, 10); if (!/^\d{4}-\d{2}-\d{2}$/.test(f)) return "Sin fecha de observación"; if (f < F.f1 || f > F.f2) return "Observada el " + U.corta(f) + " (fuera de las fechas elegidas)"; }
+      else if ((F.desde && c._sem < F.desde) || c._sem > F.hasta) return "Capturada en la semana " + B.verif.semN(c._sem) + " (fuera de las semanas elegidas)";
+      if (soloPeriodo) return "";
+      if (F.fu && !String(c.fu || "").split(",").includes(F.fu)) return F.fu === "AE" ? "No viene en el archivo de Alta energía" : "No viene en el archivo SEGIND";
+      const nom = { subg: "Subgerencia observada", obsDepto: "Departamento observado", uni: "Unidad", turno: "Turno" };
+      for (const k of ["subg", "obsDepto", "uni", "turno"]) if (F[k] && U.norm(c[k] || "") !== U.norm(F[k])) return nom[k] + ": " + (c[k] || "sin dato") + " (filtro: " + F[k] + ")";
+      if (F.ae && !/^S/i.test(c.ae || "")) return "Sin peligros de alta energía (filtro «Solo con peligros de alta energía»)";
+      return "";
+    },
+    // semana del reporte de cada tarjeta: por semanas, la de captura; por fechas, la de observacion (las agregadas a mano de fuera, a la orilla)
+    cubeta(c, F, rango) {
+      const f = String(c.fobs || "").slice(0, 10), k = F.modo === "fechas" && F.f1 && F.f2 && /^\d{4}-\d{2}-\d{2}$/.test(f) ? TJ.semDe(f) : c._sem;
+      return k < rango[0] ? rango[0] : k > rango[rango.length - 1] ? rango[rango.length - 1] : k;
+    },
+    // tarjetas del periodo, por semana (G trae las incluidas o quitadas a mano); crudas = las del periodo sin filtros
+    async cubetas(F, crudas, G) {
+      const sems = Object.keys(TJ.datos.semanas).sort(), VU = await this.universo(F), r = [];
+      if (crudas) return VU.filter(c => !this.motivo(c, F, true));
+      if (F.modo === "fechas" && F.f1 && F.f2) { const b = TJ.semDe(F.f2); for (let w = TJ.semDe(F.f1), g = 0; w <= b && g < 120; w = TJ.semSig(w, 1), g++) r.push({ k: w, L: [] }); }
+      else for (const s of sems.filter(s => s <= F.hasta && (!F.desde || s >= F.desde))) r.push({ k: s, L: [] });
+      if (!r.length) return r;
+      const rango = r.map(x => x.k);
+      for (const c of B.verif.aplica(VU, x => this.motivo(x, F), G || {})) { const x = r.find(y => y.k === this.cubeta(c, F, rango)); if (x) x.L.push(c); }
       return r;
     },
     // nombre del periodo: "la semana 43" / "las semanas 40 a 43" / "el periodo del 05/10 al 18/10/2026"
@@ -7360,7 +7477,7 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
     claveG(F, W) { return (F.modo === "fechas" && F.f1 && F.f2 ? (F.acum ? "rango:" + F.f1 + ":" + F.f2 : W) : F.acum && F.desde && F.desde !== F.hasta ? "rango:" + F.desde + ":" + F.hasta : W) + (TJ.periodo === "ON" ? ":ON" : ""); },    // Operacion Normal guarda su propio TOP
 
     async modelo(F, G) {
-      const cub = await this.cubetas(F), rango = cub.map(x => x.k), porSem = Object.fromEntries(cub.map(x => [x.k, x.L])), W = rango[rango.length - 1] || F.hasta;
+      const cub = await this.cubetas(F, false, G), rango = cub.map(x => x.k), porSem = Object.fromEntries(cub.map(x => [x.k, x.L])), W = rango[rango.length - 1] || F.hasta;
       const L = F.acum ? cub.flatMap(x => x.L) : (porSem[W] || []), deb = L.filter(this.esDeb), cum = L.filter(this.esCum), nS = +W.slice(5), et = s => "SEM " + (+s.slice(5)), PER = this.periodo(F, rango);
       let g = this.contar(deb, F.dim); const mx = Math.max(2, Math.min(12, +F.max || 8));
       if (g.length > mx) g = g.slice(0, mx - 1).concat([["Otros", g.slice(mx - 1).reduce((a, x) => a + x[1], 0)]]);
@@ -7486,7 +7603,7 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
       if (!F.desde || !sems.includes(F.desde)) F.desde = sems.filter(s => s <= F.hasta).slice(-6)[0];
       // fechas por omision: del lunes de la primera semana al domingo de la ultima
       if (!F.f1) F.f1 = TJ.lunes(F.desde); if (!F.f2) F.f2 = U.sumar(TJ.lunes(F.hasta), 6); if (F.f1 > F.f2) [F.f1, F.f2] = [F.f2, F.f1];
-      const cruda = await this.cubetas(F, true);
+      const VU = await this.universo(F), cruda = VU.filter(x => !this.motivo(x, F, true));
       let M = await this.modelo(F, {}); const W = M.W, gk = this.claveG(F, W);
       if (!this.G[gk]) this.G[gk] = JSON.parse(JSON.stringify(D.graf[gk] || {}));
       const G = this.G[gk]; M = await this.modelo(F, G);
@@ -7518,6 +7635,7 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
           <div class="campo"><label>Láminas que se incluyen</label><div class="chips-ali">${LAMS.map(([k, t]) => `<label class="chip-ali"><input type="checkbox" data-lam="${k}" ${F.lams[k] !== false ? "checked" : ""}><span>${t}</span></label>`).join("")}</div></div>
           <div class="fila"><div class="campo" style="flex:0 0 240px"><label>Título</label><input class="inp" data-x="titulo" value="${esc(F.titulo)}" placeholder="Estado actual"></div>
             <div class="campo" style="flex:1"><label>Texto de introducción (vacío = el propuesto)</label><textarea class="inp" data-x="intro" rows="2" placeholder="${esc(this.introDef())}">${esc(F.intro)}</textarea></div></div></div>
+        <div id="tdVerif"></div>
         <div class="tarjeta"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start"><div><h2 style="margin:0;font-size:17px">TOP ${G.top.length} · hallazgos con mayor potencial de consecuencia</h2><p class="muted peque" style="margin:4px 0 0">Se proponen las debilidades que marcaste como acto o condición insegura y las de alta energía. Cambia cuáles van, su orden y resume los textos.</p></div>
             <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn chico sec" id="tdMas" ${G.top.length >= 5 || !M.debs.length ? "disabled" : ""}>${B.ico("mas")} Agregar</button><button class="btn chico sec" id="tdProp">${B.ico("reutilizar")} Proponer de nuevo</button></div></div>
           <div style="margin-top:12px">${G.top.length ? G.top.map(filaTop).join("") : `<p class="muted" style="margin:0">Sin hallazgos en el TOP: la lámina no se incluye.${M.debs.length ? "" : " No hay debilidades con este filtro."}</p>`}</div></div>
@@ -7560,7 +7678,7 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
           if (k === "id") x.onchange = () => { const t = M.debs.find(y => String(y.id) === x.value); if (t) { G.top[i] = this.fila(t); repinta(); } };
           else x.oninput = () => { r[k] = x.value.trim(); lento(); }; });
         f.querySelectorAll("[data-ta]").forEach(b => b.onclick = () => { const a = b.dataset.ta;
-          if (a === "ver") { const t = cruda.find(y => String(y.id) === r.id); if (t) Pv.detalle(t, null, () => { }); return; }
+          if (a === "ver") { const t = VU.find(y => String(y.id) === r.id); if (t) Pv.detalle(t, null, () => { }); return; }
           if (a === "quita") G.top.splice(i, 1); else { const j = a === "sube" ? i - 1 : i + 1; [G.top[i], G.top[j]] = [G.top[j], G.top[i]]; }
           repinta(); });
       });
@@ -7569,7 +7687,7 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
       const guardar = async callado => {
         try {
           const cfg = Object.assign({}, F); delete cfg.hasta; delete cfg.desde; delete cfg.f1; delete cfg.f2;
-          const dG = { top: G.top, enc: G.enc || "", txEvol: G.txEvol || "" };
+          const dG = { top: G.top, enc: G.enc || "", txEvol: G.txEvol || "", excl: G.excl || [], incl: G.incl || [] };
           await TJ.llamar("grafGuardar", { clave: "cfg", datos: cfg }); await TJ.llamar("grafGuardar", { clave: gk, datos: dG });
           D.graf.cfg = JSON.parse(JSON.stringify(cfg)); D.graf[gk] = JSON.parse(JSON.stringify(dG));
           if (!callado) B.ui.toast("Configuración y TOP de " + esc(M.etq) + " guardados.", "ok"); return true;
@@ -7593,6 +7711,12 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
       };
       c.querySelector("#tdPngH").onclick = () => imagen(false);
       c.querySelector("#tdPngV").onclick = () => imagen(true);
+      // verificacion: todas las candidatas del periodo, si entran y por que no
+      const ultW = !F.acum && M.rango.length > 1;
+      B.verif.panel(c.querySelector("#tdVerif"), { clave: "tend", titulo: "Verificación de las tarjetas del reporte", guardaCon: true,
+        sub: `Todas las tarjetas candidatas (${esc(M.rangoTxt.toLowerCase())}), también las que se capturaron en la semana siguiente. ${ultW ? "Sin «Acumulado», los totales, el pastel y el TOP son solo de la última semana; las demás entran en las tendencias." : ""}`,
+        U: VU, motivo: x => this.motivo(x, F), S: G, alCambiar: () => repinta(), detalle: x => Pv.detalle(x, null, () => { }),
+        nota: x => ultW && M.rango.length && this.cubeta(x, F, M.rango) !== M.W ? "Solo en las tendencias (semana " + B.verif.semN(this.cubeta(x, F, M.rango)) + ")" : "" });
       await prev();
     }
   };
@@ -7821,6 +7945,18 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
       return { id: String(c.id), tit: cab + (sub && sub !== cab ? " | " + sub : ""), desc: relato(c), pot: k ? k.pot : "lesiones al personal." };
     },
     vineta(c) { return resumen(c); },
+    // como sale cada debilidad en la imagen (con mas de 14 se resume: 4 frases por tema y hasta 10 IDs)
+    visibles(M, G) {
+      const r = new Map(), largo = !G.todas && M.grupos.reduce((s, g) => s + g.cs.length, 0) > 14;
+      for (const g of M.grupos) {
+        const m = new Map();
+        for (const x of g.cs) { if (!x.bul) { r.set(x.id, "Sin frase: solo sale su ID en «" + g.cat + "»"); continue; } const k = U.norm(x.bul); if (!m.has(k)) m.set(k, []); m.get(k).push(x.id); }
+        [...m.values()].sort((a, b) => b.length - a.length).forEach((ids, i) => ids.forEach(id => r.set(id, largo && i >= 4 ? "No sale su frase: hay más de 14 debilidades y solo caben 4 frases por tema (marca «Mostrar todas las frases e IDs»)"
+          : ids.length > 1 ? "En la imagen (tema «" + g.cat + "»), junto con otra(s) de la misma frase (×" + ids.length + ")" : "En la imagen, tema «" + g.cat + "»")));
+        if (largo && g.cs.length > 10) for (const x of g.cs.slice(10)) r.set(x.id, (r.get(x.id) || "") + " · su ID no aparece (más de 10 en el tema)");
+      }
+      return r;
+    },
     sugerirTop(L) { return L.filter(esDeb).sort((a, b) => this.peso(b) - this.peso(a) || (+b.id || 0) - (+a.id || 0)).slice(0, 3).map(c => this.fila(c)); },
     propuesta(L, base) { return { t1: base.t1 || "OBSERVACIONES DE", t2: base.t2 || "SEGURIDAD INDUSTRIAL", k3: base.k3 || "DEBILIDADES DE SEGURIDAD INDUSTRIAL", kpi: {}, top: this.sugerirTop(L), cards: {}, msg: "", msgEd: false }; },
     // tarjetas que aparecieron despues de guardar (otro Excel): entran con su tema y su vineta propuestos
@@ -7851,7 +7987,7 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
       const e = k => ed ? ` contenteditable="true" spellcheck="true" data-e="${esc(k)}"` : "";
       const top = M.top.map((t, i) => `<div class="ti-top"><div class="ti-tt"><div class="ti-num">${i + 1}</div><div class="ti-id">ID ${esc(t.id)}</div><div class="ti-ttl"${e("top." + i + ".tit")}>${esc(t.tit)}</div></div>
           ${t.desc || ed ? `<p${e("top." + i + ".desc")}>${esc(t.desc)}</p>` : ""}${t.pot || ed ? `<div class="ti-pot">${TRI}<div><b>Potencial:</b> <span${e("top." + i + ".pot")}>${esc(t.pot)}</span></div></div>` : ""}</div>`).join("");
-      const largo = M.grupos.reduce((s, g) => s + g.cs.length, 0) > 14;
+      const largo = !G.todas && M.grupos.reduce((s, g) => s + g.cs.length, 0) > 14;
       const unir = g => { const m = new Map(); for (const x of g.cs) { if (!x.bul && !ed) continue; const k = U.norm(x.bul) || "#" + x.id; if (!m.has(k)) m.set(k, { bul: x.bul, ids: [], n: 0 }); const f = m.get(k); f.ids.push(x.id); f.n++; } return [...m.values()].sort((a, b) => b.n - a.n); };
       const frases = g => largo ? unir(g).slice(0, 4) : unir(g), mas = g => largo ? unir(g).slice(4).reduce((s, f) => s + f.n, 0) : 0;
       const gr = M.grupos.map(g => `<div class="ti-g"><div class="ti-p"${e("cat." + g.cat)}>${esc(g.cat)}</div><br><div class="ti-p ids">ID${g.cs.length > 1 ? "s" : ""} ${esc(largo && g.cs.length > 10 ? g.cs.slice(0, 10).map(x => x.id).join(", ") + " y " + (g.cs.length - 10) + " más" : g.cs.map(x => x.id).join(", "))}</div>
@@ -7905,17 +8041,23 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
       D.graf = D.graf || {};
       const base = D.graf.diacfg || {}, F = this.F = this.F || { fu: ["AE", "SI", "AS"].includes(base.fu) ? base.fu : "AE", fecha: "" };
       // tarjetas de las ultimas semanas cargadas (una observacion puede capturarse en la semana siguiente)
-      const todas = new Map(); for (const s of sems.slice(-10)) for (const x of await TJ.semana(s)) todas.set(String(x.id), x);
-      const pasa = x => F.fu === "AS" || String(x.fu || "").split(",").includes(F.fu), fo = x => String(x.fobs || "").slice(0, 10);
+      const VU = await B.verif.universo(sems.slice(-10)), todas = new Map(VU.map(x => [String(x.id), x]));
+      const pasaA = x => F.fu === "AS" || String(x.fu || "").split(",").includes(F.fu), pasa = x => pasaA(x) && !B.verif.porPeriodo(x), fo = x => String(x.fobs || "").slice(0, 10);
       const cuenta = new Map(); for (const x of todas.values()) if (pasa(x) && /^\d{4}-\d{2}-\d{2}$/.test(fo(x))) cuenta.set(fo(x), (cuenta.get(fo(x)) || 0) + 1);
       const fechas = [...cuenta.keys()].sort().reverse();
       const selArch = `<div class="campo" style="flex:1 1 200px"><label>Archivo</label><select class="inp" id="tdFu">${[["AE", "Alta energía"], ["SI", "Seguridad Industrial (SEGIND)"], ["AS", "Ambos archivos"]].map(([k, t]) => `<option value="${k}" ${F.fu === k ? "selected" : ""}>${t}</option>`).join("")}</select></div>`;
       if (!fechas.length) { c.innerHTML = `<div class="tarjeta"><div class="fila">${selArch}</div>${B.ui.vacio("No hay tarjetas de ese archivo en las semanas cargadas.", "doc")}</div>`; c.querySelector("#tdFu").onchange = e => { F.fu = e.target.value; Pv.pinta(); }; return; }
       if (!fechas.includes(F.fecha)) { const ayer = U.sumar(U.iso(new Date()), -1); F.fecha = fechas.find(f => f <= ayer) || fechas[0]; }
       if (F.hasta && (F.hasta <= F.fecha || !fechas.includes(F.hasta))) F.hasta = "";
-      const hasta = this.hasta(F), L = [...todas.values()].filter(x => pasa(x) && fo(x) >= F.fecha && fo(x) <= hasta).sort((a, b) => (+a.id || 0) - (+b.id || 0));
-      const clave = this.clave(F);
-      if (!this.G[clave]) this.G[clave] = D.graf[clave] ? JSON.parse(JSON.stringify(D.graf[clave])) : this.propuesta(L, base);
+      const hasta = this.hasta(F), clave = this.clave(F);
+      if (!this.G[clave] && D.graf[clave]) this.G[clave] = JSON.parse(JSON.stringify(D.graf[clave]));
+      // candidatas: las del periodo, las de un dia antes o despues y las que no traen fecha (de las semanas de captura del periodo)
+      const motD = x => B.verif.porPeriodo(x) || (!pasaA(x) ? (F.fu === "AE" ? "No viene en el archivo de Alta energía" : "No viene en el archivo SEGIND") : "")
+        || (!/^\d{4}-\d{2}-\d{2}$/.test(fo(x)) ? "Sin fecha de observación" : fo(x) < F.fecha || fo(x) > hasta ? "Observada el " + U.corta(fo(x)) + " (fuera de " + (hasta === F.fecha ? "ese día" : "esos días") + ")" : "");
+      const w1 = TJ.semDe(F.fecha), w2 = TJ.semSig(TJ.semDe(hasta), 1), a1 = U.sumar(F.fecha, -1), a2 = U.sumar(hasta, 1);
+      const VP = VU.filter(x => { const f = fo(x); return /^\d{4}-\d{2}-\d{2}$/.test(f) ? f >= a1 && f <= a2 : x._sem >= w1 && x._sem <= w2; });
+      const L = B.verif.aplica(VP, motD, this.G[clave] || {}).sort((a, b) => (+a.id || 0) - (+b.id || 0));
+      if (!this.G[clave]) this.G[clave] = this.propuesta(L, base);
       const G = this.G[clave]; this.completar(G, L);
       let M = this.modelo(L, G);
       const debs = M.debs, cats = CATS.map(k => k.n).concat([...new Set(Object.values(G.cards).map(x => String(x.cat || "").toUpperCase()))]).filter((v, i, a) => v && a.indexOf(v) === i);
@@ -7937,12 +8079,13 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
             ${inp("t1", "Título, renglón 1", "OBSERVACIONES DE")}${inp("t2", "Título, renglón 2", "SEGURIDAD INDUSTRIAL")}</div>
           <div class="fila">${kp("n", "Observaciones realizadas", L.length)}${kp("cum", "Cumplieron la expectativa", L.filter(esCum).length)}${kp("deb", "Debilidades", debs.length)}${inp("k3", "Texto del recuadro de debilidades", "DEBILIDADES DE SEGURIDAD INDUSTRIAL", "flex:2 1 260px")}</div>
           <p class="muted peque" style="margin:0">Los números vacíos se cuentan de las tarjetas; escribe uno solo si necesitas corregirlo.</p></div>
+        <div id="tdVerif"></div>
         <div class="tarjeta"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start"><div><h2 style="margin:0;font-size:17px">TOP ${G.top.length} · observaciones con mayor potencial de consecuencia</h2><p class="muted peque" style="margin:4px 0 0">Se proponen las debilidades más graves (alturas, equipos sin asegurar, línea de fuego, energía eléctrica…). Cambia cuáles van, su orden y sus textos.</p></div>
             <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn chico sec" id="tdMas" ${G.top.length >= 5 || !debs.length ? "disabled" : ""}>${B.ico("mas")} Agregar</button><button class="btn chico sec" id="tdProp">${B.ico("reutilizar")} Proponer de nuevo</button></div></div>
           <div style="margin-top:12px">${G.top.length ? G.top.map(filaTop).join("") : `<p class="muted" style="margin:0">Sin observaciones en el TOP.${debs.length ? "" : " No hay debilidades en este día."}</p>`}</div></div>
         <div class="tarjeta"><h2 style="margin:0;font-size:17px">Otras observaciones (acciones repetitivas)</h2>
           <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start"><p class="muted peque" style="margin:4px 0 10px;flex:1 1 300px">Cada debilidad del día va en un tema; las del mismo tema se juntan en un recuadro. La frase corta se propone resumiendo lo que capturaron; corrígela aquí o directo en la imagen. Quita la marca para no incluirla.</p>
-            <button class="btn chico sec" id="tdFrases" ${debs.length ? "" : "disabled"}>${B.ico("reutilizar")} Resumir las frases de nuevo</button></div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><label class="chip-ali" style="margin:0" title="Con más de 14 debilidades la imagen muestra 4 frases por tema y hasta 10 IDs. Marcado, salen todas (la imagen se hace más larga)."><input type="checkbox" id="tdTodas" ${G.todas ? "checked" : ""}><span>Mostrar todas las frases e IDs</span></label><button class="btn chico sec" id="tdFrases" ${debs.length ? "" : "disabled"}>${B.ico("reutilizar")} Resumir las frases de nuevo</button></div></div>
           <datalist id="tdCats">${cats.map(n => `<option value="${esc(n)}">`).join("")}</datalist>
           ${debs.length ? `<div class="tabla-cont"><table class="tabla"><thead><tr><th style="width:34px"></th><th>ID</th><th style="width:28%">Tema</th><th>Frase en la imagen</th></tr></thead><tbody>
             ${debs.map(x => { const g = G.cards[x.id]; return `<tr data-cid="${esc(x.id)}"><td><input type="checkbox" data-c="inc" ${g.inc !== false ? "checked" : ""} style="width:18px;height:18px"></td>
@@ -8042,6 +8185,13 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
           await navigator.share({ files: [file], text: tm.value });
         } catch (e) { if (e.name !== "AbortError") { await this.copiarTexto(tm.value, "No se pudo compartir la imagen (" + esc(e.message) + "). El mensaje quedó copiado; descarga la imagen y adjúntala."); } }
       };
+      c.querySelector("#tdTodas").onchange = e => { G.todas = e.target.checked; Pv.pinta(); };
+      // verificacion: las candidatas del dia, si entran y como salen en la imagen
+      const vis = this.visibles(this.modelo(L, G), G);
+      B.verif.panel(c.querySelector("#tdVerif"), { clave: "tdia", titulo: "Verificación de las tarjetas de la imagen", guardaCon: true,
+        sub: "Las tarjetas observadas " + (hasta === F.fecha ? "ese día" : "en esos días") + ", las de un día antes o después y las que no traen fecha. La última columna dice cómo sale cada una en la imagen.",
+        U: VP, motivo: motD, S: G, alCambiar: () => Pv.pinta(), detalle: x => Pv.detalle(x, null, () => { }),
+        nota: x => !esDeb(x) ? "Cumple: cuenta en «Observaciones» y «Cumplieron»" : (G.cards[x.id] || {}).inc === false ? "Desmarcada en «Otras observaciones»: no sale en la imagen" : vis.get(String(x.id)) || "" });
       prev();
     }
   };
@@ -8940,8 +9090,12 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
       const F = this.F = this.F || this.base();
       if (!sems.includes(F.hasta)) F.hasta = sems[sems.length - 1];
       if (!sems.includes(F.desde) || F.desde > F.hasta) F.desde = F.hasta;
-      const rango = sems.filter(s => s >= F.desde && s <= F.hasta), todas = [];
-      for (const s of rango) for (const x of await TJ.semana(s)) todas.push(Object.assign({ sem: s }, x));
+      // candidatas: las semanas elegidas y la siguiente (de los dos periodos, sin repetir); en la tabla, las del periodo y semanas elegidas
+      const rango = sems.filter(s => s >= F.desde && s <= F.hasta), VU = await B.verif.universo(rango.concat([TJ.semSig(F.hasta, 1)]));
+      VU.forEach(x => { x.sem = x._sem; });
+      const todas = VU.filter(x => rango.includes(x._sem) && !B.verif.porPeriodo(x)), SV = B.verif.leer("correos");
+      const motC = x => B.verif.porPeriodo(x) || (!rango.includes(x._sem) ? "Capturada en la semana " + B.verif.semN(x._sem) + " (fuera de las semanas elegidas)" : "")
+        || (!esAE(x) ? "No viene en el archivo de Alta energía" + (/^S/i.test(x.ae || "") ? " (en SEGIND dice que tuvo peligros de alta energía)" : "") : "") || (!esDeb(x) ? "Cumple la expectativa (el correo es solo por debilidades)" : "");
       const envios = D.envios || {}, q = U.norm(F.q);
       this.aprenderAlias(todas);
       if (D.editor && !B.modoLocal) {
@@ -8959,7 +9113,7 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
       const grupos = new Map();
       // las que el supervisor marco "No aplica" no entran al correo (quedan aparte, con su motivo)
       const NA = D.noAplica || {};
-      for (const x of todas.filter(x => esAE(x) && esDeb(x))) { const k = U.ini(x.rpe) || U.norm(x.nom); if (!grupos.has(k)) grupos.set(k, { rpe: x.rpe, nom: x.nom, area: x.area, depto: x.depto, cards: [], desc: [] }); grupos.get(k)[NA[x.id] ? "desc" : "cards"].push(x); }
+      for (const x of B.verif.aplica(VU, motC, SV)) { const k = U.ini(x.rpe) || U.norm(x.nom); if (!grupos.has(k)) grupos.set(k, { rpe: x.rpe, nom: x.nom, area: x.area, depto: x.depto, cards: [], desc: [] }); grupos.get(k)[NA[x.id] ? "desc" : "cards"].push(x); }
       const O = [...grupos.values()].map(o => { o.cards.sort((a, b) => +a.id - +b.id); o.desc.sort((a, b) => +a.id - +b.id); o.ubic = this.ubicar(o); o.pend = o.cards.filter(c => !envios[c.id]); o.D = this.destinatarios(o); return o; })
         .sort((a, b) => (!a.pend.length - !b.pend.length) || String(a.nom).localeCompare(String(b.nom)));      // primero los pendientes
       const sel = this.sel = this.sel || new Set();
@@ -8984,6 +9138,7 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
               <td class="peque">${esc(x.std)}</td><td>${esDeb(x) ? '<span class="badge r">Debilidad</span>' : '<span class="badge v">Cumple</span>'}</td><td class="peque" style="min-width:220px">${esc(String(x.qp || x.doc || "").slice(0, 160))}</td>
               <td class="peque">${NA[x.id] && esAE(x) && esDeb(x) ? `<span class="muted" title="${esc((NA[x.id].motivo || "Sin motivo") + " · " + (NA[x.id].por || ""))}">No aplica</span>` : envios[x.id] ? "✓ " + esc(String(envios[x.id].fh || "").slice(0, 10)) : esAE(x) && esDeb(x) ? '<span style="color:#b45309">pendiente</span>' : "—"}</td></tr>`).join("") || `<tr><td colspan="10" class="muted">Sin tarjetas con ese filtro.</td></tr>`}</tbody></table></div>
           ${L.length > this.lim ? `<button class="btn chico sec" id="crMas" style="margin-top:8px">Ver ${Math.min(200, L.length - this.lim)} más</button>` : ""}</div>
+        <div id="crVerif"></div>
         <div class="tarjeta"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap"><div><h2 style="margin:0;font-size:17px">Correos de reconocimiento (alta energía · debilidad)</h2>
             <p class="muted peque" style="margin:4px 0 0">Un correo por originador con todas sus tarjetas de alta energía que fueron debilidad en las semanas elegidas. Se genera un <b>borrador de Outlook</b> con el ${adj ? "PDF <b>" + esc(adj.nombre) + "</b> adjunto" : "adjunto"}: ábrelo, revísalo y presiona <b>Enviar</b>.</p></div>
             <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-start"><button class="btn chico sec" id="crTpl">${B.ico("editar")} Texto del correo</button><button class="btn chico sec" id="crDir">${B.ico("usuarios")} Correos electrónicos</button><button class="btn chico sec" id="crRep" title="Fecha, a quién y a qué área o compañía se enviaron las solicitudes de los anexos del PAG-28">${B.ico("pdf")} Reporte de correos enviados</button>${B.dom.esSup() && !B.modoLocal ? `<label class="btn chico sec" style="cursor:pointer" title="PDF que se adjunta a todos los correos">${B.ico("subir")} Cambiar PDF adjunto<input type="file" id="crAdj" accept="application/pdf" hidden></label>` : ""}</div></div>
@@ -9002,6 +9157,22 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
                 ${!o.cards.length ? "" : o.pend.length ? `<button class="btn chico fantasma" data-env="${i}" title="Marcar como enviado sin generar el borrador">Marcar enviado</button>` : `<button class="btn chico fantasma" data-noenv="${i}">Quitar marca</button>`}</div></div>`).join("")}</div>`
             : `<p class="muted" style="margin:10px 0 0">No hay tarjetas de alta energía con debilidad en las semanas elegidas.</p>`}</div>`;
       const repinta = () => P.pinta();
+      // verificacion: que tarjetas van a los correos y por que no; quitar una = «No aplica»
+      B.verif.panel(c.querySelector("#crVerif"), { clave: "correos", titulo: "Verificación de las tarjetas para los correos",
+        sub: "Las debilidades del archivo de Alta energía, las debilidades del archivo SEGIND que dicen tener peligros de alta energía y las observadas en esas semanas pero capturadas en la siguiente. Quitar una la marca como «No aplica».",
+        U: VU.filter(x => (rango.includes(x._sem) || String(x.fobs || "").slice(0, 10) <= U.sumar(TJ.lunes(F.hasta), 6)) && ((esDeb(x) && (esAE(x) || /^S/i.test(x.ae || ""))) || NA[x.id] || SV.incl.includes(String(x.id)))), S: { excl: [], incl: SV.incl },
+        motivo: x => NA[x.id] ? "Marcada «No aplica»" + (NA[x.id].motivo ? ": " + NA[x.id].motivo : "") : motC(x), detalle: x => P.detalle(x, null, () => P.pinta()),
+        cambiar: async (x, inc) => {
+          const id = String(x.id);
+          if (inc) {
+            if (NA[id]) { await TJ.llamar("noAplica", { ids: [id], on: false }); delete D.noAplica[id]; }
+            if (motC(x) && !SV.incl.includes(id)) { SV.incl.push(id); await B.verif.guardar("correos", SV); }
+          } else {
+            if (SV.incl.includes(id)) { SV.incl = SV.incl.filter(y => y !== id); await B.verif.guardar("correos", SV); }
+            if (!motC(x) && !NA[id]) { await TJ.llamar("noAplica", { ids: [id], on: true, motivo: "Quitada en la verificación" }); (D.noAplica = D.noAplica || {})[id] = { fh: U.ahoraISO(), por: U.ini(B.usuario.ini), motivo: "Quitada en la verificación" }; }
+          }
+          repinta();
+        } });
       c.querySelectorAll("[data-f]").forEach(s => s.onchange = () => { F[s.dataset.f] = s.value; this.lim = 200; repinta(); });
       const qi = c.querySelector("#crQ"); qi.onchange = () => { F.q = qi.value.trim(); repinta(); };
       const mas = c.querySelector("#crMas"); if (mas) mas.onclick = () => { this.lim += 200; repinta(); };
@@ -10374,7 +10545,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "4.13", servidorViejo: false,
+  info: {}, VERSION: "4.14", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -10561,7 +10732,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "procedimientos" ? '<span class="contador oculto" id="cntProc"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.13")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.14")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
