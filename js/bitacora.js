@@ -809,7 +809,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.12.1", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.13", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -9558,13 +9558,13 @@ B.inter = {
     return { ...res, total: f.ops.length, repetidas: f.ops.length - ops.length, de: f.ini, nombre: f.nombre || "" };
   },
   /* ---------- PC (supervisor): paquete de datos para los celulares */
-  async generarPaquete(completo) {
+  async generarPaquete(completo, texto) {
     const db = await B.api.llamar("respaldo");
     delete db.imagenes; delete db.ok;
     const c = B.oficio.cfg();
     db.config = { ...db.config, ofVoboNombre: db.config.ofVoboNombre ?? c.voboNombre, ofAutNombre: db.config.ofAutNombre ?? c.autNombre };
     db.ecGrupos = B.EC_GRUPOS || [];
-    db.poe = B.POE || [];
+    db.poe = texto ? [] : B.POE || [];          // por internet no van los POE: el celular conserva los que ya tiene
     // tarjetas Lideres en Campo: marcador completo y las tarjetas de las ultimas semanas (para el resumen y el trabajo remoto)
     if (db.tarjetas && B.tj) {
       const ver = await B.tj.cargar(), sems = Object.keys(db.tarjetasSem || {}).sort().slice(completo ? 0 : -this.SEMANAS_CEL), ts = {};
@@ -9579,6 +9579,7 @@ B.inter = {
     db._paquete = { tipo: "b24-paquete", generado: U.ahoraISO(), version: B.app.VERSION, por: B.usuario.ini, periodo: B.t.periodo() };
     if (completo) db._paquete.completo = true;
     const nombre = "Bitacora24RU1 PAQUETE " + (completo ? "COMPLETO administrador " : "celulares ") + U.ahoraISO().replace("T", " ").replace(":", "") + ".json";
+    if (texto) return { nombre, texto: JSON.stringify(db) };
     U.descargar(nombre, JSON.stringify(db), "application/json");
     return nombre;
   },
@@ -9772,28 +9773,78 @@ B.nube = {
   /* Lectura de la hoja por docs.google.com (consulta de Google Visualization con respuesta JSONP), para cuando la red bloquea
      script.google.com. La hoja debe estar compartida como "Cualquier persona con el enlace: Lector" (solo tiene datos cifrados). */
   leerHoja(n) {
+    return this.gviz(n.hoja, "Capturas", 1, "Revisa que tenga la pestaña «Capturas» (se crea con el primer envío).").then(F => F.map(c => ({ id: String(c[0]), f: c[1], n: c[2], d: c.slice(5).map(x => String(x).replace(/^~/, "")).join("") }))
+      .filter(it => /^env-/.test(it.id) && /^B24X1:/.test(it.d)));
+  },
+  // lee una pestana de la hoja por docs.google.com: devuelve los renglones como listas de valores (fechas en ISO)
+  gviz(hoja, pestana, encabezados, ayuda) {
     return new Promise((ok, mal) => {
-      const cb = "b24Hoja" + Date.now(), s = document.createElement("script");
+      const cb = "b24Hoja" + Date.now() + Math.floor(Math.random() * 1e6), s = document.createElement("script");
       const fin = () => { clearTimeout(t); try { delete window[cb]; } catch (e) { window[cb] = undefined; } s.remove(); };
-      const noComp = () => Object.assign(new Error("No se pudo leer la hoja de Google desde esta PC. Revisa que esté compartida como «Cualquier persona con el enlace: Lector» y que la dirección de la hoja sea la correcta."), { hoja: true });
+      const noComp = () => Object.assign(new Error("No se pudo leer la hoja de Google desde este equipo. Revisa que esté compartida como «Cualquier persona con el enlace: Lector» y que la dirección de la hoja sea la correcta."), { hoja: true });
       const t = setTimeout(() => { fin(); mal(noComp()); }, 25000);
       window[cb] = r => {
         fin();
-        if (!r || r.status !== "ok") return mal(new Error("La hoja de Google respondió con error: " + ((r && r.errors && r.errors[0] && (r.errors[0].detailed_message || r.errors[0].message)) || "desconocido") + ". Revisa que tenga la pestaña «Capturas» (se crea con el primer envío)."));
+        if (!r || r.status !== "ok") return mal(new Error("La hoja de Google respondió con error: " + ((r && r.errors && r.errors[0] && (r.errors[0].detailed_message || r.errors[0].message)) || "desconocido") + ". " + (ayuda || "")));
         const fecha = v => { const m = /Date\((\d+),(\d+),(\d+)(?:,(\d+),(\d+),(\d+))?\)/.exec(String(v || "")); return m ? new Date(+m[1], +m[2], +m[3], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0)).toISOString() : String(v || ""); };
-        ok(((r.table && r.table.rows) || []).map(f => { const c = f.c || [], v = i => c[i] && c[i].v != null ? c[i].v : "";
-          return { id: String(v(0)), f: fecha(v(1)), n: v(2), d: c.slice(5).map(x => x && x.v != null ? String(x.v).replace(/^~/, "") : "").join("") }; })
-          .filter(it => /^env-/.test(it.id) && /^B24X1:/.test(it.d)));
+        ok(((r.table && r.table.rows) || []).map(f => (f.c || []).map(x => x && x.v != null ? (/^Date\(/.test(String(x.v)) ? fecha(x.v) : x.v) : "")));
       };
       s.onerror = () => { fin(); mal(noComp()); };
       // si Google contesta con su pagina de acceso (hoja no compartida) el script carga pero nunca llama a la funcion
       s.onload = () => setTimeout(() => { if (window[cb]) { fin(); mal(noComp()); } }, 300);
-      s.src = "https://docs.google.com/spreadsheets/d/" + encodeURIComponent(n.hoja) + "/gviz/tq?tqx=responseHandler:" + cb + "&sheet=Capturas&headers=1&tq=" + encodeURIComponent("select *") + "&_=" + Date.now();
+      s.src = "https://docs.google.com/spreadsheets/d/" + encodeURIComponent(hoja) + "/gviz/tq?tqx=responseHandler:" + cb + "&sheet=" + encodeURIComponent(pestana) + "&headers=" + (encabezados ? 1 : 0) + "&tq=" + encodeURIComponent("select *") + "&_=" + Date.now();
       document.head.appendChild(s);
     });
   },
+  /* ---------- PC -> celular: el paquete de datos viaja CIFRADO por un formulario de Google ligado a la misma hoja
+     (docs.google.com/forms, que la red de la oficina no bloquea). El formulario lo crea la funcion "instalar" del Apps Script
+     y deja su direccion en la pestana "Config". Los celulares leen la pestana "Paquetes" igual que la PC lee "Capturas". */
+  PARTE: 30000,
+  async formulario(n) {
+    const m = {}; for (const f of await this.gviz(n.hoja, "Config", 0)) m[String(f[0])] = String(f[1] || "");
+    if (!/^https:\/\/docs\.google\.com\/forms\//.test(m.formResponse || "") || !m.e_id || !m.e_parte || !m.e_datos)
+      throw new Error("La hoja todavía no tiene el formulario para mandar paquetes. En Apps Script elige la función «instalar» → Ejecutar (pasos en Celulares → Envío por internet).");
+    return m;
+  },
+  // paquetes en la hoja (del mas nuevo al mas viejo), con sus partes unidas cuando estan completos
+  async paquetes(n) {
+    const g = {};
+    for (const c of await this.gviz(n.hoja, "Paquetes", 1, "Revisa que la función «instalar» se haya ejecutado en Apps Script.")) {
+      const id = String(c[1] || ""), m = /^(\d+)\/(\d+)$/.exec(String(c[2] || "").trim()); if (!/^paq-/.test(id) || !m) continue;
+      const p = g[id] || (g[id] = { id, f: c[0], total: +m[2], partes: {} }); p.partes[+m[1]] = String(c[3] || "").replace(/^~/, ""); if (c[0] > p.f) p.f = c[0];
+    }
+    return Object.values(g).map(p => { const k = Object.keys(p.partes).length, completo = k >= p.total; return { id: p.id, f: p.f, total: p.total, llegaron: k, completo, d: completo ? Array.from({ length: p.total }, (_, i) => p.partes[i + 1] || "").join("") : "" }; })
+      .sort((a, b) => String(b.f).localeCompare(String(a.f)));
+  },
+  // PC: manda el paquete (sin los documentos POE, que el celular ya conserva) y comprueba que haya llegado completo
+  async enviarPaquete(prog) {
+    const n = this.cfg(); if (!n || !n.hoja) throw new Error("Falta la dirección de la hoja de cálculo (Celulares → Envío por internet).");
+    if (!this.segura()) throw new Error("Abre la bitácora en la PC donde está instalada (dirección localhost).");
+    const f = await this.formulario(n), { texto } = await B.inter.generarPaquete(false, true);
+    const d = await B.cod.cifrar(texto, n.clave), id = "paq-" + Date.now().toString(36), partes = [];
+    for (let i = 0; i < d.length; i += this.PARTE) partes.push(d.slice(i, i + this.PARTE));
+    for (let i = 0; i < partes.length; i++) {
+      if (prog) prog("Enviando parte " + (i + 1) + " de " + partes.length + "…");
+      const b = new URLSearchParams(); b.set(f.e_id, id); b.set(f.e_parte, (i + 1) + "/" + partes.length); b.set(f.e_datos, "~" + partes[i]);
+      try { await fetch(f.formResponse, { method: "POST", mode: "no-cors", body: b }); } catch (e) { throw new Error("No se pudo mandar al formulario de Google (parte " + (i + 1) + "). Revisa el internet de esta PC."); }
+    }
+    // la hoja tarda unos segundos en mostrar las respuestas del formulario
+    for (let k = 0; k < 8; k++) {
+      if (prog) prog("Comprobando que llegó completo…");
+      await new Promise(r => setTimeout(r, k ? 5000 : 3000));
+      const p = (await this.paquetes(n)).find(x => x.id === id);
+      if (p && p.completo) return { id, partes: partes.length, kb: Math.round(d.length / 1024) };
+    }
+    throw new Error("Se mandó, pero la hoja todavía no muestra el paquete completo. Espera un par de minutos y vuelve a intentar; si sigue igual, revisa en la hoja que el formulario esté aceptando respuestas.");
+  },
+  // celular: el paquete mas reciente que este completo (null si no hay)
+  async buscarPaquete() { const n = this.cfg(); if (!n || !n.hoja) return null; return (await this.paquetes(n)).find(p => p.completo) || null; },
+  paqueteVisto(id) { try { if (id) localStorage.setItem("b_paq_nube", id); return localStorage.getItem("b_paq_nube") || ""; } catch (e) { return ""; } },
+  minutos() { let m = 2; try { m = +localStorage.getItem("b_nube_min") || 2; } catch (e) { } return Math.min(60, Math.max(1, m)); },
+  // revision automatica de la PC: se reprograma al cambiar los minutos
+  programar() { clearTimeout(this.reloj); this.reloj = setTimeout(async () => { await this.auto(); this.programar(); }, this.minutos() * 60000); },
   autoOn() { try { return localStorage.getItem("b_nube_auto") === "1"; } catch (e) { return false; } },
-  // PC con la casilla marcada: revisa sola cada 10 minutos (solo supervisores)
+  // PC con la casilla marcada: revisa sola cada tantos minutos (solo supervisores)
   async auto() {
     if (B.modoMovil || !B.usuario || !B.dom.esSup() || !this.cfg() || !this.autoOn() || !this.segura() || this.ocupado) return;
     try {
@@ -9809,9 +9860,10 @@ B.nube = {
     return `// Bitacora 24RU1 - buzon de capturas de los celulares (Google Apps Script).
 // Pega TODO este codigo en Extensiones > Apps Script de una hoja de calculo nueva e implementalo como Aplicacion web.
 // Las capturas llegan cifradas: en la hoja solo se ve texto ilegible. Lo importado se borra a los 15 dias y todo a los 30.
-// Version 2 (bitacora 4.12.1).
+// Version 3 (bitacora 4.13). La PRIMERA vez elige la funcion "instalar" (lista de arriba) -> Ejecutar y autoriza:
+// crea el formulario por el que la PC manda el paquete de datos a los celulares.
 const TOKEN = "${token}";
-const HOJA = "Capturas", PARTE = 45000, DIAS = 15, DIAS_MAX = 30;
+const HOJA = "Capturas", PARTE = 45000, DIAS = 15, DIAS_MAX = 30, PAQUETES = "Paquetes", CONFIG = "Config", PAQ_GUARDAR = 3;
 function salida(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }
 function hoja() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -9842,7 +9894,7 @@ function doPost(e) {
 function doGet(e) {
   const p = (e && e.parameter) || {};
   if (p.t !== TOKEN) return salida({ ok: false, error: "clave" });
-  if (p.accion === "probar") return salida({ ok: true, version: 2 });
+  if (p.accion === "probar") return salida({ ok: true, version: 3 });
   const h = hoja(), F = filas(h);
   if (p.accion === "ver") return salida({ ok: true, existe: F.some(function (r) { return String(r[0]) === p.id; }) });
   if (p.accion === "marcar") {
@@ -9856,10 +9908,47 @@ function doGet(e) {
   });
   return salida({ ok: true, items: items });
 }
+function instalar() {
+  let ss = SpreadsheetApp.getActiveSpreadsheet();
+  const props = PropertiesService.getScriptProperties();
+  let form = null;
+  if (props.getProperty("FORM_ID")) try { form = FormApp.openById(props.getProperty("FORM_ID")); } catch (e) { form = null; }
+  if (!form) {
+    form = FormApp.create("Bitacora 24RU1 - paquetes (no contestar)");
+    form.setDescription("Lo usa la bitacora para mandar el paquete de datos cifrado a los celulares. No lo contestes a mano.");
+    form.addTextItem().setTitle("envio"); form.addTextItem().setTitle("parte"); form.addParagraphTextItem().setTitle("datos");
+    form.setDestination(FormApp.DestinationType.SPREADSHEET, ss.getId());
+    props.setProperty("FORM_ID", form.getId());
+  }
+  try { form.setCollectEmail(false); } catch (e) { }
+  try { form.setRequireLogin(false); } catch (e) { }
+  try { if (form.setPublished) form.setPublished(true); } catch (e) { }
+  form.setAcceptingResponses(true);
+  SpreadsheetApp.flush(); ss = SpreadsheetApp.openById(ss.getId());
+  ss.getSheets().forEach(function (sh) { const u = sh.getFormUrl(); if (u && u.indexOf(form.getId()) >= 0 && sh.getName() !== PAQUETES) sh.setName(PAQUETES); });
+  // nombres de los campos del formulario (entry.NNN), sacados de una respuesta prellenada
+  const it = form.getItems(), pre = form.createResponse()
+    .withItemResponse(it[0].asTextItem().createResponse("A1")).withItemResponse(it[1].asTextItem().createResponse("B2"))
+    .withItemResponse(it[2].asParagraphTextItem().createResponse("C3")).toPrefilledUrl();
+  const campo = function (v) { let k = ""; (pre.split("?")[1] || "").split("&").forEach(function (x) { const kv = x.split("="); if (kv[1] === v) k = decodeURIComponent(kv[0]); }); return k; };
+  let cfg = ss.getSheetByName(CONFIG); if (!cfg) cfg = ss.insertSheet(CONFIG);
+  cfg.clear(); cfg.getRange(1, 1, 5, 2).setValues([["formResponse", form.getPublishedUrl().split("/viewform")[0] + "/formResponse"], ["e_id", campo("A1")], ["e_parte", campo("B2")], ["e_datos", campo("C3")], ["version", "3"]]);
+  if (!ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === "alRecibirPaquete"; })) ScriptApp.newTrigger("alRecibirPaquete").forSpreadsheet(ss).onFormSubmit().create();
+  Logger.log("Listo. Formulario: " + form.getPublishedUrl());
+}
+// al llegar cada parte: conserva solo los ultimos PAQ_GUARDAR paquetes
+function alRecibirPaquete() {
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(PAQUETES); if (!sh || sh.getLastRow() < 2) return;
+  const v = sh.getRange(2, 2, sh.getLastRow() - 1, 1).getValues().map(function (r) { return String(r[0]); }), ids = [];
+  v.forEach(function (x) { if (ids.indexOf(x) < 0) ids.push(x); });
+  if (ids.length <= PAQ_GUARDAR) return;
+  const quitar = ids.slice(0, ids.length - PAQ_GUARDAR);
+  for (let i = v.length - 1; i >= 0; i--) if (quitar.indexOf(v[i]) >= 0) sh.deleteRow(i + 2);
+}
 `;
   }
 };
-setTimeout(() => B.nube.auto(), 30000); setInterval(() => B.nube.auto(), 10 * 60000);
+setTimeout(() => B.nube.auto(), 30000); B.nube.programar();
 
 /* ===================================================================== VISTA: Celulares / Enviar y recibir */
 V.celular = {
@@ -9878,13 +9967,15 @@ V.celular = {
     return `<div class="tarjeta" data-tour="cel-nube">${cab("subir", "a", "Envío por internet (hoja de Google)", n ? "Activo: los celulares mandan sus capturas cifradas a la hoja de Google y esta PC las recoge, sin WhatsApp." : "Opcional: que los celulares manden sus capturas por internet, sin WhatsApp. Lo configura el administrador una sola vez.")}
       ${!seg ? `<div class="aviso a">${B.ico("info")}<div>En este equipo la bitácora está abierta por la red. El envío por internet solo funciona en la PC donde está instalada (dirección <b>localhost</b>).</div></div>` : ""}
       ${n && sup && seg ? `<div class="fila" style="align-items:center;gap:10px"><button class="btn verde" id="nubeRec">${B.ico("descargar")} Recibir capturas por internet</button>
-          <label class="peque" style="display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" id="nubeAuto" ${B.nube.autoOn() ? "checked" : ""} style="width:18px;height:18px"> Revisar sola cada 10 minutos mientras la bitácora esté abierta en esta PC</label></div>
+          <label class="peque" style="display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" id="nubeAuto" ${B.nube.autoOn() ? "checked" : ""} style="width:18px;height:18px"> Revisar sola cada</label>
+          <select class="inp" id="nubeMin" style="width:auto;min-height:0;padding:4px 8px">${[1, 2, 3, 5, 10, 15, 30, 60].map(m => `<option value="${m}" ${B.nube.minutos() === m ? "selected" : ""}>${m}</option>`).join("")}</select><span class="peque">minuto(s) mientras la bitácora esté abierta en esta PC</span></div>
         <p class="muted peque" style="margin:8px 0 0">${ul ? "Última revisión: " + U.fh(ul.fh) + " (" + ul.n + " envío(s) recibidos" + (ul.porHoja ? ", leídos de la hoja" : "") + ")." : "Aún no se ha revisado en esta sesión."}${B.nube.error ? ` <span style="color:var(--rojo)">Última falla: ${U.esc(B.nube.error)}</span>` : ""}
           · <a href="#" id="nubeTodo">Volver a traer todo lo de los últimos 15 días</a> (lo ya recibido se ignora).</p>
         <p class="muted peque" style="margin:6px 0 0">Si nada de esto conecta: abre la hoja de Google, selecciona las filas de los envíos, cópialas (Ctrl+C) y usa <b>«Pegar del portapapeles»</b> arriba.</p><div id="nubeRes"></div>` : ""}
       ${adm ? `<details style="margin-top:10px" ${n ? "" : "open"}><summary class="peque" style="cursor:pointer;font-weight:600">${n ? "Configuración (administrador)" : "Cómo activarlo (administrador)"}</summary>
         <ol class="peque" style="margin:8px 0;padding-left:20px;line-height:1.7"><li>Toca <b>Copiar el código para Apps Script</b>.</li>
           <li>Con tu cuenta de Google abre <b>sheets.new</b> (hoja nueva) → <b>Extensiones → Apps Script</b>, borra lo que haya, pega el código y guarda.</li>
+          <li>En Apps Script elige la función <b>instalar</b> (lista junto a «Ejecutar») → <b>Ejecutar</b> y autoriza. Crea el formulario por el que esta PC manda el paquete de datos a los celulares.</li>
           <li><b>Implementar → Nueva implementación → Aplicación web</b>. Ejecutar como: <b>Yo</b>. Quién tiene acceso: <b>Cualquier usuario</b>. Autoriza los permisos.</li>
           <li>Copia la <b>URL de la aplicación web</b> (termina en /exec) y pégala abajo.</li>
           <li>Comparte la hoja: <b>Compartir → Acceso general → Cualquier persona con el enlace → Lector</b> (solo contiene datos cifrados). Copia la dirección de la hoja (la de la barra del navegador), pégala abajo y toca <b>Probar y guardar</b>. Así esta PC lee los envíos por docs.google.com aunque la red bloquee script.google.com.</li>
@@ -9904,6 +9995,7 @@ V.celular = {
     if ($("#nubeRec")) $("#nubeRec").onclick = e => recibir(false, e.currentTarget);
     if ($("#nubeTodo")) $("#nubeTodo").onclick = e => { e.preventDefault(); recibir(true, $("#nubeRec")); };
     if ($("#nubeAuto")) $("#nubeAuto").onchange = e => { try { localStorage.setItem("b_nube_auto", e.target.checked ? "1" : "0"); } catch (x) { } if (e.target.checked) B.nube.auto(); };
+    if ($("#nubeMin")) $("#nubeMin").onchange = e => { try { localStorage.setItem("b_nube_min", e.target.value); } catch (x) { } B.nube.programar(); ui.toast("Revisará cada " + B.nube.minutos() + " minuto(s).", "ok", 4000); };
     const guardar = async (d, msg) => { await B.api.llamar("op", { col: "intercambio", accion: "nube", datos: d }); await B.api.recargar(); if (msg) ui.toast(msg, "ok", 10000); re(); };
     if ($("#nubeCod")) $("#nubeCod").onclick = async () => {
       try {
@@ -9926,10 +10018,13 @@ V.celular = {
         // la PC prueba los dos caminos; los celulares usan siempre la aplicacion web
         let sc = "", hj = "";
         try { await B.nube.llamar({ url, clave }, { accion: "probar" }); sc = "ok"; } catch (er) { if (!er.red) throw er; sc = "bloqueado"; }
+        let fm = "";
         if (hoja) try { const l = await B.nube.leerHoja({ hoja }); hj = "ok (" + l.length + " envío(s) en la hoja)"; } catch (er) { hj = er.message; }
+        if (hoja) try { await B.nube.formulario({ hoja }); fm = "listo: esta PC puede mandar el paquete por internet."; } catch (er) { fm = er.message; }
         const lee = sc === "ok" || /^ok/.test(hj);
         const txt = `<b>Aplicación web (la usan los celulares):</b> ${sc === "ok" ? "conecta desde esta PC." : "esta PC no llega a script.google.com (la red lo bloquea). Los celulares con datos móviles sí podrán enviar."}<br>
-          <b>Lectura de la hoja desde esta PC:</b> ${!hoja ? "no se llenó la dirección de la hoja." : U.esc(hj)}<br><br>${lee ? "Esta PC <b>sí podrá recibir</b>." : "Esta PC <b>todavía no podrá recibir</b> automáticamente; quedará el pegado manual (copiar las filas de la hoja y «Pegar del portapapeles»)."}`;
+          <b>Lectura de la hoja desde esta PC:</b> ${!hoja ? "no se llenó la dirección de la hoja." : U.esc(hj)}<br>
+          ${hoja ? `<b>Formulario para paquetes:</b> ${U.esc(fm)}<br>` : ""}<br>${lee ? "Esta PC <b>sí podrá recibir</b>." : "Esta PC <b>todavía no podrá recibir</b> automáticamente; quedará el pegado manual (copiar las filas de la hoja y «Pegar del portapapeles»)."}`;
         if (!lee && !(await ui.confirmar(txt + "<br><br>¿Guardar de todos modos?", "Resultado de la prueba", "Guardar", false))) { b.disabled = false; return; }
         await guardar({ url, hoja, clave }, (lee ? txt : "Guardado.") + "<br>Ahora genera un <b>paquete de datos nuevo</b> y mándalo a los celulares.");
       } catch (er) { ui.error(er); b.disabled = false; }
@@ -9989,6 +10084,7 @@ V.celular = {
         <div id="celRes"></div>
       </div>
       <div class="tarjeta c6" data-tour="cel-paquete">${cab("subir", "d", "Paquete de datos para los celulares", "Lleva al celular el personal, las asignaciones, pendientes, espacios, vigilancias, la hoja de asignación y las tarjetas Líderes en Campo.")}
+        ${sup && B.nube.cfg() && B.nube.cfg().hoja && B.nube.segura() ? `<button class="btn verde bloque" id="celPaqNube" style="margin-bottom:8px">${B.ico("subir")} Enviar paquete a los celulares por internet</button><div id="celPaqNubeRes"></div>` : ""}
         ${sup ? `<button class="btn dorado bloque" id="celPaq">${B.ico("descargar")} Generar paquete para celulares</button>
           ${B.dom.esAdmin() ? `<button class="btn sec bloque" id="celPaqC" style="margin-top:8px" title="Todas las semanas de tarjetas, para consultar todo y hacer respaldos de emergencia desde el celular">${B.ico("descargar")} Paquete completo para el administrador</button>` : ""}
           <p class="muted peque" style="margin:10px 0 0">Se descarga un archivo «Bitacora24RU1 PAQUETE celulares …». Mándalo al grupo de WhatsApp (WhatsApp Web → adjuntar → Documento). Cada técnico lo abre en su celular: <b>Celulares → Recibir datos</b>.
@@ -10021,10 +10117,19 @@ V.celular = {
     const bp = c.querySelector("#celPaq");
     const bpc = c.querySelector("#celPaqC");
     if (bpc) bpc.onclick = async () => { bpc.disabled = true; try { const n = await B.inter.generarPaquete(true); ui.toast("Paquete completo generado: <b>" + U.esc(n) + "</b>. Mándalo solo a tu propio chat y cárgalo en tu celular (Celulares → Recibir datos).", "ok", 10000); } catch (e) { ui.error(e); } bpc.disabled = false; };
+    const bn = c.querySelector("#celPaqNube");
+    if (bn) bn.onclick = async () => {
+      const caja = c.querySelector("#celPaqNubeRes"), t0 = bn.innerHTML; bn.disabled = true;
+      try {
+        const r = await B.nube.enviarPaquete(m => { bn.innerHTML = U.esc(m); });
+        caja.innerHTML = `<div class="aviso v" style="margin:0 0 8px">${B.ico("ok")}<div><b>Paquete enviado por internet</b> (${r.kb} KB en ${r.partes} parte(s)). En cada celular: Enviar / recibir → <b>«Recibir datos por internet»</b>.</div></div>`;
+      } catch (e) { caja.innerHTML = this.errHtml("Enviar paquete por internet", e.message); }
+      bn.innerHTML = t0; bn.disabled = false;
+    };
     if (bp) bp.onclick = async () => { bp.disabled = true; try { const n = await B.inter.generarPaquete(); ui.toast("Paquete generado: <b>" + U.esc(n) + "</b>. Está en Descargas; mándalo al grupo de WhatsApp.", "ok", 9000); } catch (e) { ui.error(e); } bp.disabled = false; };
   },
   async movil(c) {
-    const pend = await B.inter.pendientes(), paq = await B.inter.infoPaquete(), ult = await B.local.leer("ultimoEnvio"), nube = !!(B.nube.cfg() && B.nube.segura());
+    const pend = await B.inter.pendientes(), paq = await B.inter.infoPaquete(), ult = await B.local.leer("ultimoEnvio"), nube = !!(B.nube.cfg() && B.nube.segura()), nubeH = nube && !!B.nube.cfg().hoja;
     const horas = paq && paq.generado ? Math.round((Date.now() - new Date(paq.generado + ":00").getTime()) / 36e5) : null;
     c.innerHTML = `
       <div class="cuadricula">
@@ -10041,7 +10146,8 @@ V.celular = {
         ${pend.length ? `<details style="margin-top:10px"><summary class="peque" style="cursor:pointer;color:var(--azul);font-weight:600">Ver lo pendiente de enviar</summary><div class="lista" style="margin-top:8px">${pend.slice(-60).reverse().map(o => `<div class="item"><div class="cuerpo"><div class="tit" style="font-weight:500">${U.esc(B.inter.describir(o))}</div><div class="meta"><span>${U.esc(o.ini)}</span><span>capturado ${U.fh(o.t)}</span></div></div></div>`).join("")}</div></details>` : ""}
       </div>
       <div class="tarjeta c6" data-tour="cel-recibir">${cab("descargar", "d", "Recibir datos de la PC", paq ? `Datos del paquete generado el <b>${U.fh(paq.generado)}</b> por ${U.esc(paq.por || "")}${horas != null && horas >= 12 ? ` · <span style="color:var(--rojo)">hace ${horas} h: pide uno nuevo</span>` : ""}` : "Aún no se ha cargado ningún paquete.")}
-        <label class="btn dorado bloque" style="cursor:pointer;min-height:52px;font-size:15px">${B.ico("descargar")} Cargar paquete de datos…<input type="file" id="mPaq" accept=".json,.txt,application/json,text/plain" hidden></label>
+        ${nubeH ? `<button class="btn verde bloque" id="mPaqNube" style="min-height:52px;font-size:15px;margin-bottom:8px">${B.ico("descargar")} Recibir datos por internet</button><div id="mPaqNubeEst" class="peque muted" style="margin:-2px 0 8px"></div>` : ""}
+        <label class="btn ${nubeH ? "sec" : "dorado"} bloque" style="cursor:pointer;${nubeH ? "" : "min-height:52px;font-size:15px"}">${B.ico("descargar")} Cargar paquete de datos (archivo)…<input type="file" id="mPaq" accept=".json,.txt,application/json,text/plain" hidden></label>
         <p class="muted peque" style="margin:10px 0 0">El supervisor manda al grupo de WhatsApp el archivo «Bitacora24RU1 PAQUETE celulares …». Descárgalo en WhatsApp (tócalo) y elígelo aquí.
           Tus capturas que aún no llegan a la PC <b>no se pierden</b>: se conservan encima de los datos nuevos.</p>
         <div id="mRes"></div>
@@ -10083,6 +10189,31 @@ V.celular = {
       }
     };
     c.querySelector("#mPaq").onchange = async e => { const f = e.target.files[0]; if (f) await cargar(await this.leerArchivo(f)); e.target.value = ""; };
+    // paquete por internet: al abrir la pantalla se revisa si hay uno nuevo
+    const bpn = c.querySelector("#mPaqNube"), est = c.querySelector("#mPaqNubeEst");
+    if (bpn) {
+      let hallado = null;
+      const revisar = async () => {
+        try {
+          hallado = await B.nube.buscarPaquete();
+          est.innerHTML = !hallado ? "La PC todavía no ha mandado ningún paquete por internet."
+            : hallado.id === B.nube.paqueteVisto() ? `Ya tienes el más reciente (enviado ${U.esc(U.fh(U.isoFH(new Date(hallado.f))))}).`
+            : `<b style="color:var(--verde)">Hay datos nuevos de la PC</b> (enviados ${U.esc(U.fh(U.isoFH(new Date(hallado.f))))}). Toca el botón para cargarlos.`;
+        } catch (e) { est.textContent = navigator.onLine === false ? "Sin conexión: conéctate para revisar si hay datos nuevos." : e.message; }
+      };
+      revisar();
+      bpn.onclick = async () => {
+        bpn.disabled = true; est.textContent = "Descargando…";
+        try {
+          if (!hallado) await revisar();
+          if (!hallado) { bpn.disabled = false; return; }
+          const txt = await B.cod.descifrar(hallado.d, B.nube.cfg().clave);
+          B.nube.paqueteVisto(hallado.id);
+          await cargar(txt);
+        } catch (e) { est.textContent = e.message; }
+        bpn.disabled = false;
+      };
+    }
     c.querySelector("#mBorrar").onclick = async () => {
       if (pend.length && !(await ui.confirmar(`Tienes <b>${pend.length} captura(s) sin confirmar</b> por la PC. Si borras los datos se pierden las que no hayas enviado.`, "Capturas pendientes", "Continuar", true))) return;
       if (!(await ui.confirmar("Se borrará de este celular toda la información de la bitácora (no afecta a la PC). Para volver a usarla tendrás que cargar un paquete de datos.", "Borrar datos del celular", "Borrar", true))) return;
@@ -10243,7 +10374,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "4.12.1", servidorViejo: false,
+  info: {}, VERSION: "4.13", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -10430,7 +10561,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "procedimientos" ? '<span class="contador oculto" id="cntProc"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.12.1")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.13")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
