@@ -809,7 +809,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.14", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.15", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -9731,7 +9731,7 @@ B.inter = {
   /* ---------- PC (supervisor): paquete de datos para los celulares */
   async generarPaquete(completo, texto) {
     const db = await B.api.llamar("respaldo");
-    delete db.imagenes; delete db.ok;
+    delete db.imagenes; delete db.ok; delete db.tickets;          // los tickets de la Mesa de Servicios son solo de la PC
     const c = B.oficio.cfg();
     db.config = { ...db.config, ofVoboNombre: db.config.ofVoboNombre ?? c.voboNombre, ofAutNombre: db.config.ofAutNombre ?? c.autNombre };
     db.ecGrupos = B.EC_GRUPOS || [];
@@ -10545,7 +10545,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "4.14", servidorViejo: false,
+  info: {}, VERSION: "4.15", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -10719,7 +10719,7 @@ B.app = {
       ["CONSULTA", [["concentrados", "Concentrados", "doc"], ["poe", "Estándares POE", "buscar"]].concat([["procedimientos", "Procedimientos", "doc"]]).concat(B.modoLocal && !B.modoMovil ? [] : [["tarjetas", "Líderes en Campo", "trofeo"]]).concat(!sup && B.modoMovil ? [["celular", "Enviar / recibir", "subir"]] : []).concat(sup ? [["registros", "Registros del personal", "usuarios"], ["celular", B.modoMovil ? "Enviar / recibir" : "Celulares", "subir"]] : [])]
     ];
     if (sup) {
-      enlaces.push(["SUPERVISIÓN", [["turno", "Datos del turno", "usuarios"], ["reporte", "Reporte del turno", "pdf"], ["hoja", "Hoja de asignación", "doc"], ["asistencia", "Asistencia y horas extra", "calendario"]]]);
+      enlaces.push(["SUPERVISIÓN", [["turno", "Datos del turno", "usuarios"], ["reporte", "Reporte del turno", "pdf"], ["hoja", "Hoja de asignación", "doc"], ["asistencia", "Asistencia y horas extra", "calendario"]].concat(!B.modoMovil && !B.modoLocal && V.tickets ? [["tickets", "Tickets Mesa de Servicios", "alerta"]] : [])]);
       if (B.modoMovil && B.dom.esAdmin()) enlaces.push(["ADMINISTRACIÓN", [["usuarios", "Usuarios", "llave"], ["roles", "Roles y permisos", "escudo"], ["config", "Respaldo de emergencia", "engrane"]]]);
       if (!B.modoMovil) enlaces.push(["ADMINISTRACIÓN", [["personal", B.dom.esAdmin() ? "Personal y turnos" : "Cambios de turno", "usuario"]].concat(B.dom.esAdmin() ? [["catalogos", "Catálogos", "lista"]] : []).concat([["usuarios", "Usuarios", "llave"]]).concat(B.dom.esAdmin() ? [["roles", "Roles y permisos", "escudo"], ["config", "Configuración y respaldos", "engrane"]] : [])]);
     }
@@ -10732,7 +10732,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "procedimientos" ? '<span class="contador oculto" id="cntProc"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.14")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.15")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
