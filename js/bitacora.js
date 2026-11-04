@@ -809,7 +809,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.15", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.16", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -863,6 +863,7 @@ B.local = {
       case "ver": {
         const r = { ok: true, editor: ed, esp: ed && !sup, editores: eds, cfg: T.cfg };
         if (ed) Object.assign(r, { decl: T.decl, marcas: T.marcas, sem: T.sem, hist: T.hist, semanas: T.semanas, graf: T.graf, correos: T.correos, envios: T.envios, ubic: T.ubic, correoTpl: T.correoTpl, noAplica: T.noAplica, semON: T.semON, histON: T.histON, fijas: T.fijas, msj: T.msj });
+        if (B.usuario && B.usuario.admin && T.diaria) r.diaria = T.diaria;
         else r.decl = T.decl.filter(x => U.ini(x.ini) === s.ini || x.est === "C").map(x => U.ini(x.ini) === s.ini ? x : { ini: x.ini, f: x.f, t: x.t, est: "C" });
         return r;
       }
@@ -9731,7 +9732,7 @@ B.inter = {
   /* ---------- PC (supervisor): paquete de datos para los celulares */
   async generarPaquete(completo, texto) {
     const db = await B.api.llamar("respaldo");
-    delete db.imagenes; delete db.ok; delete db.tickets;          // los tickets de la Mesa de Servicios son solo de la PC
+    delete db.imagenes; delete db.ok; delete db.tickets; if (db.tarjetas) delete db.tarjetas.diaria;      // la tarjeta diaria es solo del administrador          // los tickets de la Mesa de Servicios son solo de la PC
     const c = B.oficio.cfg();
     db.config = { ...db.config, ofVoboNombre: db.config.ofVoboNombre ?? c.voboNombre, ofAutNombre: db.config.ofAutNombre ?? c.autNombre };
     db.ecGrupos = B.EC_GRUPOS || [];
@@ -10545,7 +10546,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "4.15", servidorViejo: false,
+  info: {}, VERSION: "4.16", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -10721,7 +10722,7 @@ B.app = {
     if (sup) {
       enlaces.push(["SUPERVISIÓN", [["turno", "Datos del turno", "usuarios"], ["reporte", "Reporte del turno", "pdf"], ["hoja", "Hoja de asignación", "doc"], ["asistencia", "Asistencia y horas extra", "calendario"]].concat(!B.modoMovil && !B.modoLocal && V.tickets ? [["tickets", "Tickets Mesa de Servicios", "alerta"]] : [])]);
       if (B.modoMovil && B.dom.esAdmin()) enlaces.push(["ADMINISTRACIÓN", [["usuarios", "Usuarios", "llave"], ["roles", "Roles y permisos", "escudo"], ["config", "Respaldo de emergencia", "engrane"]]]);
-      if (!B.modoMovil) enlaces.push(["ADMINISTRACIÓN", [["personal", B.dom.esAdmin() ? "Personal y turnos" : "Cambios de turno", "usuario"]].concat(B.dom.esAdmin() ? [["catalogos", "Catálogos", "lista"]] : []).concat([["usuarios", "Usuarios", "llave"]]).concat(B.dom.esAdmin() ? [["roles", "Roles y permisos", "escudo"], ["config", "Configuración y respaldos", "engrane"]] : [])]);
+      if (!B.modoMovil) enlaces.push(["ADMINISTRACIÓN", [["personal", B.dom.esAdmin() ? "Personal y turnos" : "Cambios de turno", "usuario"]].concat(B.dom.esAdmin() ? [["catalogos", "Catálogos", "lista"]] : []).concat([["usuarios", "Usuarios", "llave"]]).concat(B.dom.esAdmin() ? [["roles", "Roles y permisos", "escudo"], ["config", "Configuración y respaldos", "engrane"]] : []).concat(B.dom.esAdmin() && !B.modoLocal && V.diaria ? [["diaria", "Tarjeta diaria Líderes", "trofeo"]] : [])]);
     }
     // cada quien ve solo las secciones que su rol (o su excepcion personal) tiene permitidas
     for (const g of enlaces) g[1] = g[1].filter(l => B.dom.puedeVer(l[0]));
@@ -10732,7 +10733,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "procedimientos" ? '<span class="contador oculto" id="cntProc"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.15")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.16")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
