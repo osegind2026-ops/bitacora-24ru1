@@ -809,7 +809,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.16", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.17", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -6867,9 +6867,73 @@ V.hoja = {
     // grafica de pastel (debilidades por estandar, etc.): rebanadas desde arriba en el sentido del reloj, con su porcentaje
     // estilos de las graficas (los elige el usuario): barras plana/degradado/3d/cilindro; pastel plano/dona/3d/destacado
     EST_BAR: [["plana", "Actual (barras planas)"], ["degradado", "Degradado con sombra"], ["3d", "3D"], ["cilindro", "Cilindros con brillo"]],
-    EST_PIE: [["plano", "Actual (pastel plano)"], ["dona", "Dona con total al centro"], ["3d", "Pastel 3D"], ["destacado", "Rebanada mayor destacada"]],
+    EST_PIE: [["plano", "Actual (pastel plano)"], ["dona", "Dona con total al centro"], ["3d", "Pastel 3D"], ["destacado", "Rebanada mayor destacada"], ["infografia", "Infografía (dona con íconos y nombres)"]],
     mezcla(hex, f) { const n = parseInt(hex || "888888", 16), c = [n >> 16, (n >> 8) & 255, n & 255].map(x => Math.round(f > 0 ? x + (255 - x) * f : x * (1 + f))); return "#" + c.map(x => x.toString(16).padStart(2, "0")).join(""); },
+    /* dona tipo infografia: cada rebanada lleva icono, nombre y porcentaje; al centro el titulo y el total.
+       Las rebanadas muy chicas se dibujan con un tamano minimo para que se lean (el porcentaje que se muestra es el real). */
+    ICO_STD: [[/EPP/, "M4 15a8 8 0 0 1 16 0M2.5 15h19M10 7.5V6h4v1.5M7 18.5h10M8 18.5v1.5M16 18.5v1.5"], [/IZAJE/, "M12 2v5M8 7h8M10 7l-1 4h6l-1-4M12 11v4a3.5 3.5 0 1 1-3.5 3.5"],
+      [/ELECTRIC/, "M13 2 5 13.5h6L10 22l9-12h-6.5z"], [/ALTURA/, "M12 3.2a1.6 1.6 0 1 0 0.01 0M12 7v6.5M8 9.5h8M12 13.5l-3 6.5M12 13.5l3 6.5M18.5 2v20"],
+      [/MAQUINA|HERRAMIENTA/, "M12 8.5a3.5 3.5 0 1 0 0.01 0M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"],
+      [/CILINDRO/, "M9 7h6v13a1.5 1.5 0 0 1-1.5 1.5h-3A1.5 1.5 0 0 1 9 20zM10.5 7V4.5h3V7M11 2.5h2"], [/ORDEN|LIMPIEZA/, "M15 2 11 11.5M6.5 12h9l2 9.5h-13zM9 15v6.5M13 15v6.5"],
+      [/MOVIL|CELULAR|DISPOSITIVO/, "M8 2h8a1.5 1.5 0 0 1 1.5 1.5v17A1.5 1.5 0 0 1 16 22H8a1.5 1.5 0 0 1-1.5-1.5v-17A1.5 1.5 0 0 1 8 2zM11 18.5h2"],
+      [/PUERTA/, "M6 21.5V3h12v18.5M3 21.5h18M14.5 12.5h1"], [/COMBUSTIBLE|INFLAMABLE|ALMACEN/, "M12 22a6 6 0 0 0 6-6c0-4-3-6.5-4-10.5-2 3-1 5.5-3 7-1-1-2-2.2-2-4.2C7 10.3 6 12.6 6 16a6 6 0 0 0 6 6z"],
+      [/BUCEO/, "M2 12c3-3 5 3 8 0s5 3 8 0 4 1 4 1M2 17c3-3 5 3 8 0s5 3 8 0"]],
+    svgInfo(g) {
+      const W = g.w, H = g.h, cx = W / 2, cy = H / 2, r = Math.min(W, H) / 2 - 3, ri = r * 0.5, v = g.series[0].v, cols = g.series[0].cols || [], tot = v.reduce((a, b) => a + b, 0) || 1, id = "p" + (E1._gid = (E1._gid || 0) + 1);
+      const claro = c => { const x = parseInt(c || "888888", 16); return ((x >> 16) * 299 + ((x >> 8) & 255) * 587 + (x & 255) * 114) / 1000 > 175; };
+      // angulos: proporcionales, con un minimo para las rebanadas chicas
+      const idx = v.map((n, i) => i).filter(i => v[i] > 0), minA = 2 * Math.PI * (idx.length <= 8 ? 0.088 : idx.length <= 10 ? 0.072 : 0.05);
+      let ang = idx.map(i => v[i] / tot * 2 * Math.PI);
+      if (idx.length * minA < 2 * Math.PI) for (let k = 0; k < 6; k++) {
+        const chicas = ang.map(a => a <= minA + 1e-9), resto = 2 * Math.PI - minA * chicas.filter(Boolean).length, grandes = ang.reduce((s, a, j) => s + (chicas[j] ? 0 : a), 0);
+        ang = ang.map((a, j) => chicas[j] ? minA : a / grandes * resto);
+      }
+      let s = `<svg style="left:${g.x}pt;top:${g.y}pt;width:${W}pt;height:${H}pt" viewBox="0 0 ${W} ${H}" font-family="'Montserrat','Noto Sans','Segoe UI',Arial,sans-serif"><defs><filter id="${id}s" x="-30%" y="-30%" width="160%" height="160%"><feDropShadow dx="0" dy="2.5" stdDeviation="3.5" flood-color="#000" flood-opacity=".28"/></filter></defs>`;
+      const pt = (a, rr) => [cx + rr * Math.cos(a), cy + rr * Math.sin(a)], f = n => n.toFixed(2);
+      let a0 = -Math.PI / 2, txt = "";
+      idx.forEach((i, j) => {
+        const a1 = a0 + ang[j], big = a1 - a0 > Math.PI ? 1 : 0, col = cols[i] || "888888", [x0, y0] = pt(a0, r), [x1, y1] = pt(a1, r), [u0, w0] = pt(a0, ri), [u1, w1] = pt(a1, ri);
+        s += idx.length === 1 ? `<circle cx="${cx}" cy="${cy}" r="${f((r + ri) / 2)}" fill="none" stroke="#${col}" stroke-width="${f(r - ri)}"/>`
+          : `<path d="M${f(x0)},${f(y0)} A${r},${r} 0 ${big} 1 ${f(x1)},${f(y1)} L${f(u1)},${f(w1)} A${ri},${ri} 0 ${big} 0 ${f(u0)},${f(w0)} Z" fill="#${col}" stroke="#fff" stroke-width="${f(r * 0.022)}"/>`;
+        // contenido de la rebanada: icono, nombre y porcentaje, centrados en la banda
+        const m = (a0 + a1) / 2, banda = r - ri, rm = ri + banda * 0.53, [x, y] = pt(m, rm), arco = (a1 - a0) * (ri + banda * 0.3) * 0.88, sn = Math.abs(Math.sin(m)), cs = Math.abs(Math.cos(m)), tc = claro(col) ? "#1b1b1b" : "#fff";
+        // espacio disponible: arriba y abajo el arco es el ancho; en los lados el arco es el alto
+        const anchoH = Math.min(sn * arco + cs * banda * 0.8, banda * 1.5), altoV = Math.min(cs * arco + sn * banda * 0.8, banda * 1.3);
+        const pal = String(g.cats[i] || "").split(/\s+/), larga = Math.max(...pal.map(p => p.length), 4);
+        let fzN = Math.min(banda * 0.125, anchoH / (larga * 0.62)), fzP = Math.min(banda * 0.22, anchoH / 3.3), tamI = Math.min(banda * 0.32, anchoH * 0.4);
+        const ico = (this.ICO_STD.find(([re]) => re.test(U.norm(g.cats[i] || ""))) || [])[1], lin = [], max = Math.max(larga, Math.floor(anchoH / (fzN * 0.6)));
+        for (const p of pal) { if (lin.length && (lin[lin.length - 1] + " " + p).length <= max) lin[lin.length - 1] += " " + p; else if (p) lin.push(p); }
+        let lineas = lin.slice(0, 3);
+        const k = Math.min(1, altoV / ((ico ? tamI + 3 : 0) + lineas.length * fzN * 1.05 + fzP * 1.05));
+        fzN *= k; fzP *= k; tamI *= k;
+        // si no cabe, se quita primero el icono y luego el nombre (el nombre siempre esta en la lista de al lado)
+        const conIco = ico && tamI >= 8; if (fzN < 6) { lineas = []; fzP = Math.min(banda * 0.22, anchoH / 3.3, altoV * 0.8); }
+        const alto = (conIco ? tamI + 3 : 0) + lineas.length * fzN * 1.05 + fzP * 1.05;
+        let yy = y - alto / 2;
+        if (conIco) { txt += `<g transform="translate(${f(x - tamI / 2)},${f(yy)}) scale(${f(tamI / 24)})" fill="none" stroke="${tc}" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="${ico}"/></g>`; yy += tamI + 3; }
+        lineas.forEach(t => { yy += fzN * 1.05; txt += `<text x="${f(x)}" y="${f(yy - fzN * 0.18)}" text-anchor="middle" font-size="${f(fzN)}" font-weight="700" fill="${tc}">${esc(t)}</text>`; });
+        yy += fzP * 1.05; txt += `<text x="${f(x)}" y="${f(yy - fzP * 0.16)}" text-anchor="middle" font-size="${f(fzP)}" font-weight="800" fill="${tc}">${(v[i] / tot * 100).toFixed(1)}%</text>`;
+        a0 = a1;
+      });
+      s += txt;
+      // centro: circulo blanco con sombra, icono de lista, titulo, periodo, total
+      const rc = ri * 0.96, V = "#155B4E", tit = String(g.centroTit || "Total").split(/\s+/), lt = [];
+      for (const p of tit) { if (lt.length && (lt[lt.length - 1] + " " + p).length <= 15) lt[lt.length - 1] += " " + p; else if (p) lt.push(p); }
+      const fzT = rc * 0.15, tamC = rc * 0.36, total = v.reduce((a, b) => a + b, 0);
+      let y = cy - rc * 0.8;
+      s += `<circle cx="${cx}" cy="${cy}" r="${f(rc)}" fill="#fff" filter="url(#${id}s)"/>`;
+      s += `<g transform="translate(${f(cx - tamC / 2)},${f(y)}) scale(${f(tamC / 24)})" fill="none" stroke="${V}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 3.5h7v3h-7zM6.5 5H5a1 1 0 0 0-1 1v15a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-1.5M7.5 11.5l1.5 1.5 2.5-2.5M7.5 17l1.5 1.5L11.5 16M13.5 12h3.5M13.5 17.5h2"/><circle cx="17" cy="16" r="3" fill="#fff"/><path d="m19.2 18.2 2.3 2.3"/></g>`;
+      y += tamC + fzT * 1.05;
+      lt.slice(0, 3).forEach(t => { s += `<text x="${cx}" y="${f(y)}" text-anchor="middle" font-size="${f(fzT)}" font-weight="800" fill="#1b1b1b">${esc(t)}</text>`; y += fzT * 1.08; });
+      if (g.centroSub) { s += `<text x="${cx}" y="${f(y)}" text-anchor="middle" font-size="${f(fzT)}" font-weight="800" fill="#1b1b1b">${esc(g.centroSub)}</text>`; y += fzT * 0.55; }
+      s += `<path d="M${f(cx - rc * 0.5)},${f(y + rc * 0.06)} Q${f(cx)},${f(y - rc * 0.08)} ${f(cx + rc * 0.5)},${f(y + rc * 0.03)}" fill="none" stroke="${V}" stroke-width="${f(rc * 0.035)}" stroke-linecap="round"/>`;
+      y += rc * 0.3;
+      s += `<text x="${cx}" y="${f(y)}" text-anchor="middle" font-size="${f(rc * 0.27)}" font-weight="800" fill="#1b1b1b">${total}</text>`;
+      s += `<text x="${cx}" y="${f(y + fzT * 1.15)}" text-anchor="middle" font-size="${f(fzT)}" font-weight="600" fill="#1b1b1b">${esc(g.centro || "total")}</text>`;
+      return s + "</svg>";
+    },
     svgPie(g) {
+      if (g.est === "infografia") return this.svgInfo(g);
       const est = g.est || "plano", d3 = est === "3d", dona = est === "dona", dest = est === "destacado", id = "p" + (E1._gid = (E1._gid || 0) + 1);
       const W = g.w, H = g.h, r = Math.min(W, H) / 2 - 24, ry = d3 ? r * 0.55 : r, dep = d3 ? r * 0.2 : 0, cx = W / 2, cy = H / 2 - dep / 2, v = g.series[0].v, cols = g.series[0].cols || [], tot = v.reduce((a, b) => a + b, 0) || 1;
       const pt = (a, rr) => [(cx + rr * Math.cos(a)).toFixed(2), (cy + rr * (ry / r) * Math.sin(a)).toFixed(2)], et = [];
@@ -6916,7 +6980,7 @@ V.hoja = {
     },
     pieXml(g) {
       const est = g.est || "plano", n = g.cats.length, se = g.series[0], cols = se.cols || [], mayor = se.v.indexOf(Math.max(...se.v));
-      const tag = est === "dona" ? "doughnutChart" : est === "3d" ? "pie3DChart" : "pieChart";
+      const tag = est === "dona" || est === "infografia" ? "doughnutChart" : est === "3d" ? "pie3DChart" : "pieChart";
       return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><c:date1904 val="0"/><c:roundedCorners val="0"/>
 <c:chart><c:autoTitleDeleted val="1"/>${est === "3d" ? `<c:view3D><c:rotX val="30"/><c:rotY val="0"/><c:rAngAx val="0"/></c:view3D>` : ""}<c:plotArea><c:layout/><c:${tag}><c:varyColors val="1"/><c:ser><c:idx val="0"/><c:order val="0"/><c:tx><c:strRef><c:f>Hoja1!$B$1</c:f><c:strCache><c:ptCount val="1"/><c:pt idx="0"><c:v>${esc(se.n)}</c:v></c:pt></c:strCache></c:strRef></c:tx>
@@ -7514,7 +7578,7 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
         c(y + hs[0] + gap, hs[1], "EAF6EC", "8CCB9B", VERDE, M.cum, ["Cumplieron", "la expectativa", "(" + pct(M.cum, M.n) + ")"]),
         c(y + hs[0] + hs[1] + 2 * gap, hs[2], "FDECEC", "F2A9A9", ROJO, M.deb, ["Debilidades", "(" + pct(M.deb, M.n) + ")"]));
     },
-    pastel(M, x, y, w, nombres) { return { k: "g", tipo: "pie", est: M.estPie, centro: "debilidades", x, y, w, h: w, nombres, titulo: "", cats: M.grupos.map(g => g.n), series: [{ n: "Debilidades", v: M.grupos.map(g => g.v), cols: M.grupos.map(g => g.col) }] }; },
+    pastel(M, x, y, w, nombres) { return { k: "g", tipo: "pie", est: M.estPie, centro: "debilidades", centroTit: M.dim === "std" ? "Comportamientos más peligrosos" : DIMS[M.dim], centroSub: M.corto, x, y, w, h: w, nombres, titulo: "", cats: M.grupos.map(g => g.n), series: [{ n: "Debilidades", v: M.grupos.map(g => g.v), cols: M.grupos.map(g => g.col) }] }; },
     lista(M, x, y, w, alto, sz) {
       const n = M.grupos.length || 1, paso = Math.min(30, alto / n), els = [];
       M.grupos.forEach((g, i) => {
@@ -9739,7 +9803,7 @@ B.inter = {
     db.poe = texto ? [] : B.POE || [];          // por internet no van los POE: el celular conserva los que ya tiene
     // tarjetas Lideres en Campo: marcador completo y las tarjetas de las ultimas semanas (para el resumen y el trabajo remoto)
     if (db.tarjetas && B.tj) {
-      const ver = await B.tj.cargar(), sems = Object.keys(db.tarjetasSem || {}).sort().slice(completo ? 0 : -this.SEMANAS_CEL), ts = {};
+      const ver = await B.tj.cargar(), sems = Object.keys(db.tarjetasSem || {}).sort().slice(completo || texto ? 0 : -this.SEMANAS_CEL), ts = {};      // por internet van todas las semanas
       for (const k of sems) ts[k] = db.tarjetasSem[k];
       db.tarjetasSem = ts;
       db.tarjetas.cfg = Object.assign({}, db.tarjetas.cfg, { editores: ver.editores, inicio: B.tj.inicio() });
@@ -9989,10 +10053,10 @@ B.nube = {
       .sort((a, b) => String(b.f).localeCompare(String(a.f)));
   },
   // PC: manda el paquete (sin los documentos POE, que el celular ya conserva) y comprueba que haya llegado completo
-  async enviarPaquete(prog) {
+  async enviarPaquete(prog, pre) {
     const n = this.cfg(); if (!n || !n.hoja) throw new Error("Falta la dirección de la hoja de cálculo (Celulares → Envío por internet).");
     if (!this.segura()) throw new Error("Abre la bitácora en la PC donde está instalada (dirección localhost).");
-    const f = await this.formulario(n), { texto } = await B.inter.generarPaquete(false, true);
+    const f = await this.formulario(n), texto = pre || (await B.inter.generarPaquete(false, true)).texto, huella = await this.huella(texto);
     const d = await B.cod.cifrar(texto, n.clave), id = "paq-" + Date.now().toString(36), partes = [];
     for (let i = 0; i < d.length; i += this.PARTE) partes.push(d.slice(i, i + this.PARTE));
     for (let i = 0; i < partes.length; i++) {
@@ -10005,7 +10069,7 @@ B.nube = {
       if (prog) prog("Comprobando que llegó completo…");
       await new Promise(r => setTimeout(r, k ? 5000 : 3000));
       const p = (await this.paquetes(n)).find(x => x.id === id);
-      if (p && p.completo) return { id, partes: partes.length, kb: Math.round(d.length / 1024) };
+      if (p && p.completo) { try { localStorage.setItem("b_paq_huella", huella); localStorage.setItem("b_paq_ult", U.ahoraISO()); } catch (e) { } return { id, partes: partes.length, kb: Math.round(d.length / 1024) }; }
     }
     throw new Error("Se mandó, pero la hoja todavía no muestra el paquete completo. Espera un par de minutos y vuelve a intentar; si sigue igual, revisa en la hoja que el formulario esté aceptando respuestas.");
   },
@@ -10026,6 +10090,44 @@ B.nube = {
         if (/^#\/celular/.test(location.hash)) B.app.render();
       }
     } catch (e) { }
+  },
+  /* ---------- PC: envio automatico del paquete a los celulares. Cada tantos minutos arma el paquete y lo manda SOLO si
+     algo cambio desde el ultimo envio (huella SHA-256 del contenido, sin las fechas de generacion). */
+  async huella(texto) { const o = JSON.parse(texto); delete o._generado; if (o._paquete) delete o._paquete.generado; return Array.from(await B.cod.hash(JSON.stringify(o))).map(b => b.toString(16).padStart(2, "0")).join(""); },
+  paqMin() { let m = 30; try { m = +localStorage.getItem("b_paq_min") || 30; } catch (e) { } return Math.min(240, Math.max(10, m)); },
+  paqAutoOn() { try { return localStorage.getItem("b_paq_auto") === "1"; } catch (e) { return false; } },
+  paqUlt() { try { return localStorage.getItem("b_paq_ult") || ""; } catch (e) { return ""; } },
+  programarPaq() { clearTimeout(this.relojPaq); this.relojPaq = setTimeout(async () => { await this.autoPaq(); this.programarPaq(); }, this.paqMin() * 60000); },
+  async autoPaq() {
+    if (B.modoMovil || B.modoLocal || !B.usuario || !B.dom.esSup() || !this.paqAutoOn() || !this.segura() || this.ocupadoPaq) return;
+    const n = this.cfg(); if (!n || !n.hoja) return;
+    this.ocupadoPaq = true;
+    try {
+      const { texto } = await B.inter.generarPaquete(false, true);
+      let antes = ""; try { antes = localStorage.getItem("b_paq_huella") || ""; } catch (e) { }
+      if (await this.huella(texto) === antes) { this.paqEstado = "Sin cambios desde el último envío (revisado " + U.fh(U.ahoraISO()) + ")."; return; }
+      const r = await this.enviarPaquete(null, texto);
+      this.paqEstado = "Enviado solo el " + U.fh(U.ahoraISO()) + " (" + r.kb + " KB).";
+      B.ui.toast("Se mandaron solos los datos nuevos a los celulares (" + r.kb + " KB).", "ok", 6000);
+    } catch (e) { this.paqEstado = "No se pudo mandar solo: " + e.message; }
+    finally { this.ocupadoPaq = false; const es = document.querySelector("#paqAutoEst"); if (es) es.textContent = this.paqEstado || ""; }
+  },
+  /* ---------- celular: descarga automatica de los datos nuevos que mando la PC (al abrir la app, al volver a ella y cada 10 min) */
+  celAutoOn() { try { return localStorage.getItem("b_cel_auto") !== "0"; } catch (e) { return true; } },
+  async celAuto() {
+    if (!B.modoMovil || !B.usuario || !this.celAutoOn() || this.ocupadoCel || navigator.onLine === false || !this.segura()) return;
+    const n = this.cfg(); if (!n || !n.hoja) return;
+    this.ocupadoCel = true; this.celUlt = Date.now();
+    try {
+      const p = await this.buscarPaquete(); if (!p || p.id === this.paqueteVisto()) return;
+      const txt = await B.cod.descifrar(p.d, n.clave);
+      try { await B.inter.cargarPaquete(txt); } catch (e) { if (e.antiguo) { this.paqueteVisto(p.id); return; } throw e; }
+      this.paqueteVisto(p.id);
+      await B.api.recargar();
+      const a = document.activeElement, quieto = !document.querySelector(".modal") && !(a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName));
+      if (quieto) await B.app.render();
+      B.ui.toast("Llegaron datos nuevos de la PC (enviados " + U.fh(U.isoFH(new Date(p.f))) + ")" + (quieto ? "." : ": se verán al cambiar de pantalla."), "ok", 7000);
+    } catch (e) { } finally { this.ocupadoCel = false; }
   },
   // codigo de Apps Script para pegar en la hoja de Google (lleva el token, no la clave: Google no puede descifrar)
   script(token) {
@@ -10121,6 +10223,9 @@ function alRecibirPaquete() {
   }
 };
 setTimeout(() => B.nube.auto(), 30000); B.nube.programar();
+setTimeout(() => B.nube.autoPaq(), 90000); B.nube.programarPaq();
+setTimeout(() => B.nube.celAuto(), 15000); setInterval(() => B.nube.celAuto(), 10 * 60000);
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && Date.now() - (B.nube.celUlt || 0) > 120000) B.nube.celAuto(); });
 
 /* ===================================================================== VISTA: Celulares / Enviar y recibir */
 V.celular = {
@@ -10256,7 +10361,11 @@ V.celular = {
         <div id="celRes"></div>
       </div>
       <div class="tarjeta c6" data-tour="cel-paquete">${cab("subir", "d", "Paquete de datos para los celulares", "Lleva al celular el personal, las asignaciones, pendientes, espacios, vigilancias, la hoja de asignación y las tarjetas Líderes en Campo.")}
-        ${sup && B.nube.cfg() && B.nube.cfg().hoja && B.nube.segura() ? `<button class="btn verde bloque" id="celPaqNube" style="margin-bottom:8px">${B.ico("subir")} Enviar paquete a los celulares por internet</button><div id="celPaqNubeRes"></div>` : ""}
+        ${sup && B.nube.cfg() && B.nube.cfg().hoja && B.nube.segura() ? `<button class="btn verde bloque" id="celPaqNube" style="margin-bottom:8px">${B.ico("subir")} Enviar paquete a los celulares por internet</button><div id="celPaqNubeRes"></div>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:0 0 4px"><label class="peque" style="display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" id="paqAuto" ${B.nube.paqAutoOn() ? "checked" : ""} style="width:18px;height:18px"> Mandarlo solo cada</label>
+            <select class="inp" id="paqMin" style="width:auto;min-height:0;padding:4px 8px">${[10, 15, 30, 60, 120, 240].map(m => `<option value="${m}" ${B.nube.paqMin() === m ? "selected" : ""}>${m}</option>`).join("")}</select><span class="peque">minutos, solo si algo cambió (mientras la bitácora esté abierta en esta PC)</span></div>
+          <p class="peque muted" style="margin:0 0 10px" id="paqAutoEst">${U.esc(B.nube.paqEstado || (B.nube.paqUlt() ? "Último envío por internet: " + U.fh(B.nube.paqUlt()) + "." : ""))}</p>
+          <p class="peque muted" style="margin:0 0 10px">Por internet van <b>todas las semanas</b> de Líderes en Campo (E+1, tendencias y verificaciones incluidas). Actívalo en <b>una sola PC</b>.</p>` : ""}
         ${sup ? `<button class="btn dorado bloque" id="celPaq">${B.ico("descargar")} Generar paquete para celulares</button>
           ${B.dom.esAdmin() ? `<button class="btn sec bloque" id="celPaqC" style="margin-top:8px" title="Todas las semanas de tarjetas, para consultar todo y hacer respaldos de emergencia desde el celular">${B.ico("descargar")} Paquete completo para el administrador</button>` : ""}
           <p class="muted peque" style="margin:10px 0 0">Se descarga un archivo «Bitacora24RU1 PAQUETE celulares …». Mándalo al grupo de WhatsApp (WhatsApp Web → adjuntar → Documento). Cada técnico lo abre en su celular: <b>Celulares → Recibir datos</b>.
@@ -10289,6 +10398,9 @@ V.celular = {
     const bp = c.querySelector("#celPaq");
     const bpc = c.querySelector("#celPaqC");
     if (bpc) bpc.onclick = async () => { bpc.disabled = true; try { const n = await B.inter.generarPaquete(true); ui.toast("Paquete completo generado: <b>" + U.esc(n) + "</b>. Mándalo solo a tu propio chat y cárgalo en tu celular (Celulares → Recibir datos).", "ok", 10000); } catch (e) { ui.error(e); } bpc.disabled = false; };
+    const pa = c.querySelector("#paqAuto"), pm = c.querySelector("#paqMin");
+    if (pa) pa.onchange = () => { try { localStorage.setItem("b_paq_auto", pa.checked ? "1" : "0"); } catch (x) { } B.nube.programarPaq(); if (pa.checked) { ui.toast("Revisará cada " + B.nube.paqMin() + " minutos y mandará el paquete solo si algo cambió.", "ok", 5000); B.nube.autoPaq(); } };
+    if (pm) pm.onchange = () => { try { localStorage.setItem("b_paq_min", pm.value); } catch (x) { } B.nube.programarPaq(); };
     const bn = c.querySelector("#celPaqNube");
     if (bn) bn.onclick = async () => {
       const caja = c.querySelector("#celPaqNubeRes"), t0 = bn.innerHTML; bn.disabled = true;
@@ -10318,7 +10430,8 @@ V.celular = {
         ${pend.length ? `<details style="margin-top:10px"><summary class="peque" style="cursor:pointer;color:var(--azul);font-weight:600">Ver lo pendiente de enviar</summary><div class="lista" style="margin-top:8px">${pend.slice(-60).reverse().map(o => `<div class="item"><div class="cuerpo"><div class="tit" style="font-weight:500">${U.esc(B.inter.describir(o))}</div><div class="meta"><span>${U.esc(o.ini)}</span><span>capturado ${U.fh(o.t)}</span></div></div></div>`).join("")}</div></details>` : ""}
       </div>
       <div class="tarjeta c6" data-tour="cel-recibir">${cab("descargar", "d", "Recibir datos de la PC", paq ? `Datos del paquete generado el <b>${U.fh(paq.generado)}</b> por ${U.esc(paq.por || "")}${horas != null && horas >= 12 ? ` · <span style="color:var(--rojo)">hace ${horas} h: pide uno nuevo</span>` : ""}` : "Aún no se ha cargado ningún paquete.")}
-        ${nubeH ? `<button class="btn verde bloque" id="mPaqNube" style="min-height:52px;font-size:15px;margin-bottom:8px">${B.ico("descargar")} Recibir datos por internet</button><div id="mPaqNubeEst" class="peque muted" style="margin:-2px 0 8px"></div>` : ""}
+        ${nubeH ? `<button class="btn verde bloque" id="mPaqNube" style="min-height:52px;font-size:15px;margin-bottom:8px">${B.ico("descargar")} Recibir datos por internet</button><div id="mPaqNubeEst" class="peque muted" style="margin:-2px 0 8px"></div>
+          <label class="peque" style="display:flex;gap:8px;align-items:center;cursor:pointer;margin:0 0 10px"><input type="checkbox" id="mPaqAuto" ${B.nube.celAutoOn() ? "checked" : ""} style="width:18px;height:18px"> Descargar solos los datos nuevos (al abrir la app y cada 10 minutos)</label>` : ""}
         <label class="btn ${nubeH ? "sec" : "dorado"} bloque" style="cursor:pointer;${nubeH ? "" : "min-height:52px;font-size:15px"}">${B.ico("descargar")} Cargar paquete de datos (archivo)…<input type="file" id="mPaq" accept=".json,.txt,application/json,text/plain" hidden></label>
         <p class="muted peque" style="margin:10px 0 0">El supervisor manda al grupo de WhatsApp el archivo «Bitacora24RU1 PAQUETE celulares …». Descárgalo en WhatsApp (tócalo) y elígelo aquí.
           Tus capturas que aún no llegan a la PC <b>no se pierden</b>: se conservan encima de los datos nuevos.</p>
@@ -10362,7 +10475,8 @@ V.celular = {
     };
     c.querySelector("#mPaq").onchange = async e => { const f = e.target.files[0]; if (f) await cargar(await this.leerArchivo(f)); e.target.value = ""; };
     // paquete por internet: al abrir la pantalla se revisa si hay uno nuevo
-    const bpn = c.querySelector("#mPaqNube"), est = c.querySelector("#mPaqNubeEst");
+    const bpn = c.querySelector("#mPaqNube"), est = c.querySelector("#mPaqNubeEst"), mpa = c.querySelector("#mPaqAuto");
+    if (mpa) mpa.onchange = () => { try { localStorage.setItem("b_cel_auto", mpa.checked ? "1" : "0"); } catch (x) { } if (mpa.checked) B.nube.celAuto(); };
     if (bpn) {
       let hallado = null;
       const revisar = async () => {
@@ -10546,7 +10660,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "4.16", servidorViejo: false,
+  info: {}, VERSION: "4.17", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -10733,7 +10847,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "procedimientos" ? '<span class="contador oculto" id="cntProc"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.16")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.17")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
