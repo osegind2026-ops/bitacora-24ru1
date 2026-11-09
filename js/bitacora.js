@@ -809,7 +809,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.17", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.17.1", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -980,7 +980,7 @@ B.local = {
       case "grafGuardar": {
         soloEd();
         const gk = String(b.clave || ""), gkb = gk.replace(/:(RE|ON)$/, "");
-        if (gk !== "cfg" && gk !== "diacfg" && gk !== "verif" && !/^\d{4}-\d{2}$/.test(gkb) && !/^dia:\d{4}-\d{2}-\d{2}(_\d{4}-\d{2}-\d{2})?:(AE|SI|AS)$/.test(gkb) && !/^rango:\d{4}-\d{2}(-\d{2})?:\d{4}-\d{2}(-\d{2})?$/.test(gkb)) throw new Error("Clave no válida.");
+        if (gk !== "cfg" && gk !== "diacfg" && gk !== "verif" && gk !== "iconos" && !/^\d{4}-\d{2}$/.test(gkb) && !/^dia:\d{4}-\d{2}-\d{2}(_\d{4}-\d{2}-\d{2})?:(AE|SI|AS)$/.test(gkb) && !/^rango:\d{4}-\d{2}(-\d{2})?:\d{4}-\d{2}(-\d{2})?$/.test(gkb)) throw new Error("Clave no válida.");
         T.graf[gk] = Object.assign({}, b.datos, { por: s.ini, fh: ahora() });
         return fin();
       }
@@ -6682,6 +6682,203 @@ V.hoja = {
   };
 })();
 ;
+/* ---- iconos.js ---- */
+/* =========================================================================
+   BITACORA 24RU1 - Iconos de la grafica "Infografia" (Reporte semanal)
+   Cada icono tiene clave, nombre, dimension (std = estandar, energia, turno, * = todas),
+   una regla para reconocer la rebanada y su dibujo (cuadricula de 24 x 24, relleno solido).
+   El editor puede reemplazar cualquiera por una imagen propia (PNG, JPG, WEBP o SVG):
+   se limpia el fondo, se recorta, se guarda a 128 x 128 en graf.iconos y viaja a los
+   celulares con el paquete de datos.
+   ========================================================================= */
+"use strict";
+(function () {
+  const esc = s => U.esc(s), f = n => +n.toFixed(2);
+  const P = (d, x) => `<path d="${d}"${x ? " " + x : ""}/>`, EO = d => P(d, 'fill-rule="evenodd"');
+  const L = (d, w) => P(d, `fill="none" stroke="currentColor" stroke-width="${w || 2}" stroke-linecap="round" stroke-linejoin="round"`);
+  const pol = (a, r) => f(12 + r * Math.cos(a)) + "," + f(12 + r * Math.sin(a)), rad = g => g * Math.PI / 180;
+  const circ = (cx, cy, r) => `M${f(cx + r)} ${cy}a${r} ${r} 0 1 0 ${f(-2 * r)} 0a${r} ${r} 0 1 0 ${f(2 * r)} 0z`;
+  // figuras que se arman con calculos (engrane, sol, virus, trebol de radiacion)
+  const engrane = () => {
+    let d = "";
+    for (let i = 0; i < 8; i++) {
+      const a = i * Math.PI / 4;
+      d += (i ? "L" : "M") + pol(a - 0.3, 8) + "L" + pol(a - 0.17, 10.8) + "L" + pol(a + 0.17, 10.8) + "L" + pol(a + 0.3, 8) + "A8 8 0 0 1 " + pol(a + Math.PI / 4 - 0.3, 8);
+    }
+    return EO(d + "z" + circ(12, 12, 3.4));
+  };
+  const sol = () => P(circ(12, 12, 4.6)) + L([0, 1, 2, 3, 4, 5, 6, 7].map(i => "M" + pol(i * Math.PI / 4, 7.3) + "L" + pol(i * Math.PI / 4, 10.2)).join(""), 2.2);
+  const virus = () => EO(circ(12, 12, 5.6) + circ(10.3, 10.6, 1.2) + circ(13.9, 13.4, 0.9) + circ(13.6, 9.6, 0.7)) + L([0, 1, 2, 3, 4, 5, 6, 7].map(i => "M" + pol(i * Math.PI / 4 + 0.39, 5.4) + "L" + pol(i * Math.PI / 4 + 0.39, 8.4)).join(""), 1.7)
+    + P([0, 1, 2, 3, 4, 5, 6, 7].map(i => { const a = i * Math.PI / 4 + 0.39; return circ(f(12 + 9.3 * Math.cos(a)), f(12 + 9.3 * Math.sin(a)), 1.5); }).join(""));
+  const trebol = () => P(circ(12, 12, 2) + [90, 210, 330].map(c => { const a0 = rad(c - 30), a1 = rad(c + 30); return "M" + pol(a0, 3.6) + "L" + pol(a0, 10.4) + "A10.4 10.4 0 0 1 " + pol(a1, 10.4) + "L" + pol(a1, 3.6) + "A3.6 3.6 0 0 0 " + pol(a0, 3.6) + "z"; }).join(""));
+  const manometro = () => L("M12 2.7a9.3 9.3 0 1 1 0 18.6 9.3 9.3 0 0 1 0-18.6z", 2) + L([135, 202.5, 270, 337.5, 405].map(g => "M" + pol(rad(g), 6.1) + "L" + pol(rad(g), 7.5)).join(""), 1.6)
+    + P("M" + pol(rad(-40), 7.4) + "L" + pol(rad(50), 1.5) + "L" + pol(rad(230), 1.5) + "z") + P(circ(12, 12, 1.9)) + P("M8.5 17.2h7v1.8h-7z");
+  // ---------------------------------------------------------------- catalogo
+  // d: descripcion para quien dibuje el icono en otra herramienta
+  const CAT = [
+    { k: "EPP", n: "Uso de EPP", dim: "std", re: /EPP/, d: "casco de seguridad industrial visto de frente", s: P("M2.6 16.8h18.8a1.1 1.1 0 0 1 1.1 1.1v.9a1.2 1.2 0 0 1-1.2 1.2H2.7a1.2 1.2 0 0 1-1.2-1.2v-.9a1.1 1.1 0 0 1 1.1-1.1z") + P("M3.8 15.6C3.8 11.7 6.1 8.5 9.3 7.3V12h1.3V5.8a1.4 1.4 0 0 1 1.4-1.4 1.4 1.4 0 0 1 1.4 1.4V12h1.3V7.3c3.2 1.2 5.5 4.4 5.5 8.3z") },
+    { k: "IZAJE", n: "Maniobras de Izaje y Traslado", dim: "std", re: /IZAJE/, d: "gancho de grúa colgando de su polea", s: EO("M8 1.5h8a1.2 1.2 0 0 1 1.2 1.2v4.4A1.2 1.2 0 0 1 16 8.3H8a1.2 1.2 0 0 1-1.2-1.2V2.7A1.2 1.2 0 0 1 8 1.5z" + circ(12, 4.9, 1.7)) + P("M10.8 8.3h2.4v3.9h-2.4z") + L("M12 12.2v4.3a3.7 3.7 0 1 1-7-1.7", 2.5) + P("M3.4 15.9 5 12.6l2.6 2.6z") },
+    { k: "ELECTRICO", n: "Manejo de Equipo Eléctrico", dim: "std", re: /ELECTRIC/, d: "triángulo de advertencia con un rayo dentro", s: EO("M10.3 3.3a2 2 0 0 1 3.4 0l8.7 15.1a2 2 0 0 1-1.7 3H3.3a2 2 0 0 1-1.7-3zM13.3 7.9l-5 6.9h3.2l-1 4.6 5-6.9h-3.2z") },
+    { k: "ALTURAS", n: "Trabajos en Alturas", dim: "std", re: /ALTURA/, d: "persona subiendo una escalera", s: L("M15 1.8v20.4M21 1.8v20.4M15 6.2h6M15 11h6M15 15.8h6M15 20.6h6", 1.7) + P(circ(8.6, 4.1, 2.2)) + L("M9.3 7.6 10.6 13M9.6 8.6l5 1.6M10.6 13l4 2.8M10.6 13l-1.8 6.5M8.8 19.5H6.6", 2.4) },
+    { k: "HERRAMIENTAS", n: "Uso de Máquinas y Herramientas", dim: "std", re: /MAQUINA|HERRAMIENTA/, d: "llave mecánica (llave inglesa)", s: P("M22.7 19l-9.1-9.1c.9-2.3.4-5-1.5-6.9-2-2-5-2.4-7.4-1.3L9 6 6 9 1.6 4.7C.4 7.1.9 10.1 2.9 12.1c1.9 1.9 4.6 2.4 6.9 1.5l9.1 9.1c.4.4 1 .4 1.4 0l2.3-2.3c.5-.4.5-1.1.1-1.4z") },
+    { k: "CILINDROS", n: "Manejo de Cilindros", dim: "std", re: /CILINDRO/, d: "cilindro de gas comprimido con su válvula", s: EO("M12 5.6a4.2 4.2 0 0 1 4.2 4.2v11.3a1.4 1.4 0 0 1-1.4 1.4H9.2a1.4 1.4 0 0 1-1.4-1.4V9.8A4.2 4.2 0 0 1 12 5.6zM7.8 12.6h8.4v1.7H7.8z") + P("M10.6 3.2h2.8v2.9h-2.8zM8.6 1.5h6.8a.8.8 0 0 1 0 1.7H8.6a.8.8 0 0 1 0-1.7z") },
+    { k: "ORDEN", n: "Orden y Limpieza", dim: "std", re: /ORDEN|LIMPIEZA/, d: "escoba", s: L("M18.8 1.8 13.4 10", 2.2) + P("M9.6 9.8h6.6l.9 1.9H8.7z") + EO("M8.4 12.4h9.1l3 9.2a.6.6 0 0 1-.6.8H6a.6.6 0 0 1-.6-.8zM10.5 15.2h1.1v5.6h-1.1zM13.4 15.2h1.1v5.6h-1.1zM16.3 15.2h1.1v5.6h-1.1z") },
+    { k: "MOVILES", n: "Uso de Dispositivos móviles", dim: "std", re: /MOVIL|CELULAR|DISPOSITIVO/, d: "teléfono celular", s: EO("M7.5 1h9A2.5 2.5 0 0 1 19 3.5v17a2.5 2.5 0 0 1-2.5 2.5h-9A2.5 2.5 0 0 1 5 20.5v-17A2.5 2.5 0 0 1 7.5 1zM7 4.5v13.5h10V4.5zM12 19.2a1.1 1.1 0 1 0 0 2.2 1.1 1.1 0 0 0 0-2.2z") },
+    { k: "PUERTAS", n: "Apertura y cierre de puertas", dim: "std", re: /PUERTA/, d: "puerta entreabierta en su marco", s: L("M5 22V2.4h14V22M2.5 22h19", 1.8) + EO("M6.4 3.6 14.6 5.3v15.4l-8.2 1z" + circ(12.6, 13.2, 1)) },
+    { k: "INFLAMABLES", n: "Almacenamiento Temporal de combustibles, inflamables y corrosivos", dim: "std", re: /COMBUSTIBLE|INFLAMABLE|CORROSIV/, d: "flama sobre una base (pictograma de inflamable)", s: EO("M13.4 1.4s.7 2.5.7 4.5c0 1.9-1.3 3.5-3.2 3.5-1.9 0-3.4-1.6-3.4-3.5v-.3C5.6 7.6 4.4 10.5 4.4 13.6c0 4.1 3.4 7.4 7.6 7.4s7.6-3.3 7.6-7.4c0-5-2.4-9.5-6.2-12.2zM11.8 18.6c-1.7 0-3-1.3-3-2.9 0-1.5 1-2.6 2.6-2.9 1.6-.3 3.3-1.1 4.3-2.4.4 1.2.6 2.5.6 3.8 0 2.4-2 4.4-4.5 4.4z") + P("M3 21.6h18v1.6H3z") },
+    { k: "BUCEO", n: "Buceo", dim: "std", re: /BUCEO/, d: "visor de buceo con esnórquel sobre olas", s: EO("M4.4 5.5h11.2a2.9 2.9 0 0 1 2.9 2.9v4a2.9 2.9 0 0 1-2.9 2.9h-2.8l-1.4-1.8H8.6l-1.4 1.8H4.4a2.9 2.9 0 0 1-2.9-2.9v-4a2.9 2.9 0 0 1 2.9-2.9zM4.2 8.2v3.9a.8.8 0 0 0 .8.8h3.6V8.2zM11.4 8.2v4.7H15a.8.8 0 0 0 .8-.8V8.2z") + L("M21.4 2.5v9.7a4.6 4.6 0 0 1-4.6 4.6h-1.4M1.8 21c1.7-1.3 3.4-1.3 5.1 0s3.4 1.3 5.1 0 3.4-1.3 5.1 0 3.4 1.3 5.1 0", 1.8) },
+    // tipos de energia (pregunta de alta energia)
+    { k: "E_MOVIMIENTO", n: "Movimiento", dim: "energia", re: /MOVIMIENTO/, d: "vehículo en movimiento (automóvil de frente)", s: EO("M18.9 6c-.2-.6-.8-1-1.4-1h-11c-.7 0-1.2.4-1.4 1L3 12v8c0 .6.4 1 1 1h1c.6 0 1-.4 1-1v-1h12v1c0 .6.4 1 1 1h1c.6 0 1-.4 1-1v-8zM6.5 16a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm11 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zM5 11l1.5-4.5h11L19 11z") },
+    { k: "E_GRAVEDAD", n: "Gravedad", dim: "energia", re: /GRAVEDAD/, d: "caja cayendo hacia el piso con flecha hacia abajo", s: P("M8.2 1.5h7.6a.9.9 0 0 1 .9.9v6a.9.9 0 0 1-.9.9H8.2a.9.9 0 0 1-.9-.9v-6a.9.9 0 0 1 .9-.9z") + L("M12 11v7M8.6 15l3.4 3.6 3.4-3.6M3 21.8h18M5 11.5v3M19 11.5v3", 2.1) },
+    { k: "E_MECANICO", n: "Mecánico", dim: "energia", re: /MECANIC/, d: "engrane", s: engrane() },
+    { k: "E_ELECTRICO", n: "Eléctrico", dim: "energia", re: /ELECTRIC/, d: "rayo", s: P("M13.6 1.5 4.6 13.4h6.2L9.2 22.5l10.2-12.6H13z") },
+    { k: "E_PRESION", n: "Presión", dim: "energia", re: /PRESION/, d: "manómetro (reloj de presión) con aguja", s: manometro() },
+    { k: "E_TEMPERATURA", n: "Temperatura", dim: "energia", re: /TEMPERATURA|TERMIC/, d: "termómetro", s: L("M10 13.3V4a2 2 0 0 1 4 0v9.3a4.6 4.6 0 1 1-4 0z", 1.8) + P(circ(12, 17.2, 2.4) + "M11.1 8h1.8v8h-1.8z") + L("M16.6 5.5h2.4M16.6 8.5h2.4M16.6 11.5h2.4", 1.6) },
+    { k: "E_QUIMICO", n: "Químico", dim: "energia", re: /QUIMIC/, d: "matraz de laboratorio con líquido", s: L("M9 2h6M10.2 2v7L4.6 18.8A1.6 1.6 0 0 0 6 21.2h12a1.6 1.6 0 0 0 1.4-2.4L13.8 9V2", 1.8) + P("M7.2 14.6h9.6l2.3 4.1a1.1 1.1 0 0 1-1 1.6H5.9a1.1 1.1 0 0 1-1-1.6z") + P(circ(13.6, 11.6, 0.9) + circ(11.2, 12.6, 0.6)) },
+    { k: "E_BIOLOGICO", n: "Biológico", dim: "energia", re: /BIOLOGIC/, d: "virus o bacteria (esfera con picos)", s: virus() },
+    { k: "E_RADIACION", n: "Radiación", dim: "energia", re: /RADIACI/, d: "símbolo de radiación (trébol)", s: trebol() },
+    { k: "E_RUIDO", n: "Ruido", dim: "energia", re: /RUIDO/, d: "bocina con ondas de sonido", s: P("M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.8-1-3.3-2.5-4v8c1.5-.7 2.5-2.2 2.5-4zM14 3.2v2.1c2.9.9 5 3.5 5 6.7s-2.1 5.9-5 6.7v2.1c4-.9 7-4.5 7-8.8s-3-7.9-7-8.8z") },
+    // turnos
+    { k: "T_DIA", n: "Turno de día", dim: "turno", re: /^DIA/, d: "sol", s: sol() },
+    { k: "T_NOCHE", n: "Turno de noche", dim: "turno", re: /NOCHE/, d: "luna creciente con estrellas", s: P("M20.6 14.6A8.6 8.6 0 1 1 9.4 3.4a7 7 0 0 0 11.2 11.2z") + P("M17.2 2.4l.6 1.5 1.5.6-1.5.6-.6 1.5-.6-1.5-1.5-.6 1.5-.6zM21 7.4l.4 1 1 .4-1 .4-.4 1-.4-1-1-.4 1-.4z") },
+    // cualquier grafica
+    { k: "OTROS", n: "Otros (rebanada que junta el resto)", dim: "*", re: /^OTROS?$/, d: "cuatro cuadros (categorías varias)", s: P("M3.5 3h6.5a.5.5 0 0 1 .5.5V10a.5.5 0 0 1-.5.5H3.5A.5.5 0 0 1 3 10V3.5a.5.5 0 0 1 .5-.5zM14 3h6.5a.5.5 0 0 1 .5.5V10a.5.5 0 0 1-.5.5H14a.5.5 0 0 1-.5-.5V3.5A.5.5 0 0 1 14 3zM3.5 13.5h6.5a.5.5 0 0 1 .5.5v6.5a.5.5 0 0 1-.5.5H3.5a.5.5 0 0 1-.5-.5V14a.5.5 0 0 1 .5-.5z") + P(circ(17.25, 17.25, 3.75)) },
+    { k: "CENTRO", n: "Centro de la dona (arriba del título)", dim: "centro", re: /^$/, d: "tabla con hoja de verificación y lupa", s: L("M8.5 3.5h7v3h-7zM6.5 5H5a1 1 0 0 0-1 1v15a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-1.5M7.5 11.5l1.5 1.5 2.5-2.5M7.5 17l1.5 1.5L11.5 16M13.5 12h3.5M13.5 17.5h2", 1.7) + `<circle cx="17" cy="16" r="3" fill="#fff" stroke="currentColor" stroke-width="1.7"/>` + L("m19.2 18.2 2.3 2.3", 1.7) }
+  ];
+  const DIMS = { std: "Estándares de seguridad", energia: "Tipos de energía", turno: "Turnos", "*": "Cualquier gráfica", centro: "Centro de la dona" };
+  const MODOS = [["silueta", "Silueta (toma el color del texto)"], ["color", "Colores originales (en círculo blanco)"]];
+
+  B.iconos = {
+    CAT, DIMS,
+    // icono que le toca a una rebanada (primero los de su dimension, luego los de cualquier grafica)
+    buscar(cat, dim) {
+      const n = U.norm(String(cat || "")).trim(); if (!n) return null;
+      return CAT.find(c => c.dim === (dim || "std") && c.re.test(n)) || CAT.find(c => c.dim === "*" && c.re.test(n)) || null;
+    },
+    porClave(k) { return CAT.find(c => c.k === k) || null; },
+    // filtros que pintan una imagen propia (modo silueta) del color indicado
+    defs(fid, colores) {
+      return colores.map(h => { const x = parseInt(h.replace("#", "").replace(/^(.)(.)(.)$/, "$1$1$2$2$3$3"), 16), c = [x >> 16, (x >> 8) & 255, x & 255].map(v => f(v / 255));
+        return `<filter id="${fid}${h.replace("#", "")}" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="0 0 0 0 ${c[0]} 0 0 0 0 ${c[1]} 0 0 0 0 ${c[2]} 0 0 0 1 0"/></filter>`; }).join("");
+    },
+    // dibujo del icono en un cuadro de t x t con esquina en (x, y); usr = {src, modo} si el editor subio uno propio
+    dibujo(c, usr, x, y, t, color, fid) {
+      if (usr && usr.src) {
+        if (usr.modo === "color") return `<circle cx="${f(x + t / 2)}" cy="${f(y + t / 2)}" r="${f(t * 0.6)}" fill="#fff"/><image href="${usr.src}" x="${f(x + t * 0.08)}" y="${f(y + t * 0.08)}" width="${f(t * 0.84)}" height="${f(t * 0.84)}" preserveAspectRatio="xMidYMid meet"/>`;
+        return `<image href="${usr.src}" x="${f(x)}" y="${f(y)}" width="${f(t)}" height="${f(t)}" preserveAspectRatio="xMidYMid meet" filter="url(#${fid}${color.replace("#", "")})"/>`;
+      }
+      return c ? `<g transform="translate(${f(x)},${f(y)}) scale(${f(t / 24)})" fill="currentColor" color="${color}" style="color:${color}">${c.s}</g>` : "";
+    },
+    lista(g) { return (g && g.lista) || {}; },
+
+    /* ---------------------------------------------- imagen propia: fondo fuera, recorte y 128 x 128 */
+    async procesar(file) {
+      const url = URL.createObjectURL(file);
+      try {
+        const img = await new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => no(new Error("No se pudo leer «" + esc(file.name) + "». Usa PNG, JPG, WEBP o SVG.")); i.src = url; });
+        const S = 512, w0 = img.naturalWidth || S, h0 = img.naturalHeight || S, k = S / Math.max(w0, h0), dw = Math.round(w0 * k), dh = Math.round(h0 * k), ox = (S - dw) >> 1, oy = (S - dh) >> 1;
+        const cv = document.createElement("canvas"); cv.width = cv.height = S; const cx = cv.getContext("2d", { willReadFrequently: true });
+        cx.drawImage(img, ox, oy, dw, dh);
+        const d = cx.getImageData(0, 0, S, S), p = d.data, at = (x, y) => (y * S + x) * 4;
+        // si la imagen no trae transparencia, se quita el color del fondo (el de las esquinas)
+        let tr = 0, tot = 0;
+        for (let y = oy; y < oy + dh; y += 2) for (let x = ox; x < ox + dw; x += 2) { tot++; if (p[at(x, y) + 3] < 200) tr++; }
+        if (tr < tot * 0.01) {
+          const es = [[ox + 2, oy + 2], [ox + dw - 3, oy + 2], [ox + 2, oy + dh - 3], [ox + dw - 3, oy + dh - 3]].map(([x, y]) => [p[at(x, y)], p[at(x, y) + 1], p[at(x, y) + 2]]);
+          const fondo = [0, 1, 2].map(j => Math.round(es.reduce((a, c) => a + c[j], 0) / 4));
+          for (let i = 0; i < p.length; i += 4) {
+            const dist = Math.max(Math.abs(p[i] - fondo[0]), Math.abs(p[i + 1] - fondo[1]), Math.abs(p[i + 2] - fondo[2]));
+            p[i + 3] = Math.min(p[i + 3], dist <= 22 ? 0 : dist >= 70 ? 255 : Math.round((dist - 22) / 48 * 255));
+          }
+          cx.putImageData(d, 0, 0);
+        }
+        // recorte a lo que se ve
+        let x0 = S, y0 = S, x1 = -1, y1 = -1;
+        for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) if (p[at(x, y) + 3] > 24) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+        if (x1 < 0) throw new Error("«" + esc(file.name) + "» quedó vacía al quitarle el fondo. Usa un icono oscuro sobre fondo blanco o con fondo transparente.");
+        const bw = x1 - x0 + 1, bh = y1 - y0 + 1, T = 128, m = 4, e = (T - 2 * m) / Math.max(bw, bh);
+        const o = document.createElement("canvas"); o.width = o.height = T; const ox2 = o.getContext("2d");
+        ox2.imageSmoothingQuality = "high"; ox2.drawImage(cv, x0, y0, bw, bh, (T - bw * e) / 2, (T - bh * e) / 2, bw * e, bh * e);
+        return o.toDataURL("image/png");
+      } finally { URL.revokeObjectURL(url); }
+    },
+
+    // listado para pedir los iconos a otra herramienta (texto plano)
+    listado() {
+      const r = ["ICONOS DE LA GRAFICA TIPO INFOGRAFIA - BITACORA 24RU1", "",
+        "Especificaciones para todos:",
+        "- Formato: PNG con fondo transparente (o SVG). Si no hay transparencia, fondo blanco liso: la bitacora lo quita sola.",
+        "- Tamano: 512 x 512 px, cuadrado. La bitacora lo reduce a 128 x 128.",
+        "- Estilo: icono plano (flat), de un solo color, silueta solida y gruesa; trazos de al menos 6 % del ancho (unos 32 px).",
+        "- Color: negro o gris muy oscuro sobre transparente. La bitacora lo pinta de blanco u oscuro segun la rebanada.",
+        "- Margen: el dibujo ocupa casi todo el cuadro (unos 16 px de margen); centrado.",
+        "- Sin texto, sin sombras, sin degradados, sin marco ni circulo de fondo, detalle sencillo (se ve a 40-60 px).",
+        "- Mismo estilo y grosor en todos para que combinen.",
+        "- Nombre de archivo = la clave + .png (por ejemplo EPP.png); asi se pueden subir todos juntos.", "",
+        "Si prefieres iconos a color: PNG transparente, colores planos y elige en la bitacora «Colores originales» (se dibujan en un circulo blanco).", ""];
+      for (const [dk, dt] of Object.entries(DIMS)) {
+        r.push("== " + dt.toUpperCase() + " ==");
+        CAT.filter(c => c.dim === dk).forEach(c => r.push(`${(c.k + ".png").padEnd(18)} ${c.n}  ->  dibujo sugerido: ${c.d}`));
+        r.push("");
+      }
+      r.push("Instruccion de ejemplo para la otra IA:", "«Genera un icono plano de un solo color negro sobre fondo transparente, 512 x 512 px, silueta solida y gruesa, sin texto ni sombras, estilo pictograma de seguridad industrial, que represente: <dibujo sugerido>.»");
+      return r.join("\r\n");
+    },
+
+    /* ---------------------------------------------- ventana para cambiar los iconos (editores, en la PC) */
+    async editar(D, alGuardar) {
+      D.graf = D.graf || {};
+      const cur = JSON.parse(JSON.stringify(this.lista(D.graf.iconos))), yo = this;
+      const muestra = (c, fondo, color, i) => { const u = cur[c.k], fid = "icm" + i + "_"; return `<svg viewBox="0 0 44 44" width="44" height="44" style="background:${fondo};border-radius:8px;flex:0 0 auto"><defs>${yo.defs(fid, [color])}</defs>${yo.dibujo(c, u, 8, 8, 28, color, fid)}</svg>`; };
+      const fila = (c, i) => { const u = cur[c.k];
+        return `<div data-k="${c.k}" style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--borde,#e5e7eb);flex-wrap:wrap">
+          ${muestra(c, "#155B4E", c.dim === "centro" ? "#fff" : "#fff", i)}${muestra(c, c.dim === "centro" ? "#fff" : "#F2C14E", c.dim === "centro" ? "#155B4E" : "#1b1b1b", i + "b")}
+          <div style="flex:1 1 180px;min-width:0"><b style="font-size:13px">${esc(c.n)}</b><div class="muted peque">Archivo <code>${c.k}.png</code> · ${u ? "<b>propio</b>" : "el de la bitácora"}</div></div>
+          <select class="inp" data-modo style="width:auto;flex:0 1 230px" ${u ? "" : "disabled"}>${MODOS.map(([k, t]) => `<option value="${k}" ${(u && u.modo) === k ? "selected" : ""}>${t}</option>`).join("")}</select>
+          <label class="btn chico sec" style="cursor:pointer">${B.ico("subir")} Cambiar<input type="file" data-un accept="image/png,image/jpeg,image/webp,image/svg+xml" hidden></label>
+          <button class="btn chico fantasma btn-icono" data-quita title="Volver al icono de la bitácora" ${u ? "" : "disabled"}>${B.ico("basura")}</button></div>`; };
+      const cuerpo = () => Object.keys(DIMS).map(dk => `<h3 style="font-size:13px;margin:14px 0 2px;color:var(--texto-2)">${DIMS[dk]}</h3>` + CAT.map((c, i) => c.dim === dk ? fila(c, i) : "").join("")).join("");
+      const ponerArch = async (k, file, v) => {
+        try { const src = await yo.procesar(file); cur[k] = { src, modo: (cur[k] && cur[k].modo) || "silueta", arch: String(file.name).slice(0, 80) }; }
+        catch (e) { B.ui.error(e); }
+        pinta(v);
+      };
+      const pinta = v => {
+        const L = v.querySelector("#icoLista"); L.innerHTML = cuerpo();
+        L.querySelectorAll("[data-k]").forEach(r => { const k = r.dataset.k;
+          r.querySelector("[data-un]").onchange = e => { const fl = e.target.files[0]; if (fl) ponerArch(k, fl, v); };
+          r.querySelector("[data-modo]").onchange = e => { if (cur[k]) { cur[k].modo = e.target.value; pinta(v); } };
+          r.querySelector("[data-quita]").onclick = () => { delete cur[k]; pinta(v); }; });
+        const n = Object.keys(cur).length; v.querySelector("#icoCuenta").textContent = n ? n + " icono(s) propio(s)" : "Todos son los de la bitácora";
+      };
+      const r = await B.ui.modal({
+        titulo: "Íconos de la gráfica tipo infografía", icono: "editar", ancho: true,
+        html: `<div class="aviso d" style="margin-bottom:10px"><div>Cada rebanada lleva el ícono de su estándar, energía o turno. Puedes dejar los de la bitácora o <b>subir los tuyos</b> (PNG con fondo transparente, o fondo blanco liso que la bitácora quita sola).
+            Para subir varios a la vez, nombra cada archivo con su clave (por ejemplo <code>EPP.png</code>). Los cambios se ven en la vista previa al guardar y llegan a los celulares con el siguiente paquete de datos.</div></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:6px"><label class="btn chico" style="cursor:pointer">${B.ico("subir")} Subir varios<input type="file" id="icoVarios" multiple accept="image/png,image/jpeg,image/webp,image/svg+xml" hidden></label>
+            <button class="btn chico sec" id="icoListado">${B.ico("descargar")} Listado para generarlos con otra IA</button><button class="btn chico fantasma" id="icoTodos">${B.ico("reutilizar")} Volver todos a los de la bitácora</button><span class="muted peque" id="icoCuenta"></span></div>
+          <div id="icoLista" style="max-height:58vh;overflow:auto;padding-right:4px"></div>`,
+        alAbrir: v => {
+          pinta(v);
+          v.querySelector("#icoListado").onclick = () => { U.descargar("Iconos_infografia_listado.txt", "﻿" + yo.listado(), "text/plain;charset=utf-8"); B.ui.toast("Listado descargado: búscalo en <b>Descargas</b>.", "ok"); };
+          v.querySelector("#icoTodos").onclick = async () => { const n = Object.keys(cur).length; if (!n) return; for (const k of Object.keys(cur)) delete cur[k]; pinta(v); B.ui.toast(n + " ícono(s) propio(s) quitado(s). Se aplica al guardar.", "ok"); };
+          v.querySelector("#icoVarios").onchange = async e => {
+            const fs = [...e.target.files], sin = [];
+            for (const fl of fs) { const base = U.norm(String(fl.name).replace(/\.[^.]+$/, "")).replace(/[\s-]+/g, "_"); const c = CAT.find(x => x.k === base) || CAT.find(x => U.norm(x.n) === U.norm(String(fl.name).replace(/\.[^.]+$/, "")));
+              if (c) { try { cur[c.k] = { src: await yo.procesar(fl), modo: (cur[c.k] && cur[c.k].modo) || "silueta", arch: String(fl.name).slice(0, 80) }; } catch (er) { sin.push(esc(fl.name) + " (" + er.message + ")"); } } else sin.push(esc(fl.name)); }
+            e.target.value = ""; pinta(v);
+            if (sin.length) B.ui.toast("No se usaron: " + sin.join(", ") + ". El nombre del archivo debe ser la clave (por ejemplo EPP.png).", "error", 9000); else B.ui.toast(fs.length + " ícono(s) cargado(s). Revisa y guarda.", "ok");
+          };
+        },
+        botones: [{ t: "Cancelar", c: "sec", v: null }, { t: "Guardar", antes: async () => {
+          try { await B.tj.llamar("grafGuardar", { clave: "iconos", datos: { lista: cur } }); } catch (e) { B.ui.error(e); return false; }
+        }, v: true }]
+      });
+      if (r) { D.graf.iconos = { lista: cur }; B.ui.toast("Íconos guardados.", "ok"); if (alGuardar) alGuardar(); }
+    }
+  };
+})();
+;
 /* ---- e1.js ---- */
 /* =========================================================================
    BITACORA 24RU1 - Presentacion semanal "E+1" de Seguridad Industrial
@@ -6870,16 +7067,10 @@ V.hoja = {
     EST_PIE: [["plano", "Actual (pastel plano)"], ["dona", "Dona con total al centro"], ["3d", "Pastel 3D"], ["destacado", "Rebanada mayor destacada"], ["infografia", "Infografía (dona con íconos y nombres)"]],
     mezcla(hex, f) { const n = parseInt(hex || "888888", 16), c = [n >> 16, (n >> 8) & 255, n & 255].map(x => Math.round(f > 0 ? x + (255 - x) * f : x * (1 + f))); return "#" + c.map(x => x.toString(16).padStart(2, "0")).join(""); },
     /* dona tipo infografia: cada rebanada lleva icono, nombre y porcentaje; al centro el titulo y el total.
-       Las rebanadas muy chicas se dibujan con un tamano minimo para que se lean (el porcentaje que se muestra es el real). */
-    ICO_STD: [[/EPP/, "M4 15a8 8 0 0 1 16 0M2.5 15h19M10 7.5V6h4v1.5M7 18.5h10M8 18.5v1.5M16 18.5v1.5"], [/IZAJE/, "M12 2v5M8 7h8M10 7l-1 4h6l-1-4M12 11v4a3.5 3.5 0 1 1-3.5 3.5"],
-      [/ELECTRIC/, "M13 2 5 13.5h6L10 22l9-12h-6.5z"], [/ALTURA/, "M12 3.2a1.6 1.6 0 1 0 0.01 0M12 7v6.5M8 9.5h8M12 13.5l-3 6.5M12 13.5l3 6.5M18.5 2v20"],
-      [/MAQUINA|HERRAMIENTA/, "M12 8.5a3.5 3.5 0 1 0 0.01 0M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"],
-      [/CILINDRO/, "M9 7h6v13a1.5 1.5 0 0 1-1.5 1.5h-3A1.5 1.5 0 0 1 9 20zM10.5 7V4.5h3V7M11 2.5h2"], [/ORDEN|LIMPIEZA/, "M15 2 11 11.5M6.5 12h9l2 9.5h-13zM9 15v6.5M13 15v6.5"],
-      [/MOVIL|CELULAR|DISPOSITIVO/, "M8 2h8a1.5 1.5 0 0 1 1.5 1.5v17A1.5 1.5 0 0 1 16 22H8a1.5 1.5 0 0 1-1.5-1.5v-17A1.5 1.5 0 0 1 8 2zM11 18.5h2"],
-      [/PUERTA/, "M6 21.5V3h12v18.5M3 21.5h18M14.5 12.5h1"], [/COMBUSTIBLE|INFLAMABLE|ALMACEN/, "M12 22a6 6 0 0 0 6-6c0-4-3-6.5-4-10.5-2 3-1 5.5-3 7-1-1-2-2.2-2-4.2C7 10.3 6 12.6 6 16a6 6 0 0 0 6 6z"],
-      [/BUCEO/, "M2 12c3-3 5 3 8 0s5 3 8 0 4 1 4 1M2 17c3-3 5 3 8 0s5 3 8 0"]],
+       Las rebanadas muy chicas se dibujan con un tamano minimo para que se lean (el porcentaje que se muestra es el real).
+       Los iconos salen de B.iconos (iconos.js); g.icos = los propios que subio el editor (graf.iconos). */
     svgInfo(g) {
-      const W = g.w, H = g.h, cx = W / 2, cy = H / 2, r = Math.min(W, H) / 2 - 3, ri = r * 0.5, v = g.series[0].v, cols = g.series[0].cols || [], tot = v.reduce((a, b) => a + b, 0) || 1, id = "p" + (E1._gid = (E1._gid || 0) + 1);
+      const W = g.w, H = g.h, cx = W / 2, cy = H / 2, r = Math.min(W, H) / 2 - 3, ri = r * 0.5, BI = B.iconos, IC = BI ? BI.lista(g.icos) : {}, v = g.series[0].v, cols = g.series[0].cols || [], tot = v.reduce((a, b) => a + b, 0) || 1, id = "p" + (E1._gid = (E1._gid || 0) + 1);
       const claro = c => { const x = parseInt(c || "888888", 16); return ((x >> 16) * 299 + ((x >> 8) & 255) * 587 + (x & 255) * 114) / 1000 > 175; };
       // angulos: proporcionales, con un minimo para las rebanadas chicas
       const idx = v.map((n, i) => i).filter(i => v[i] > 0), minA = 2 * Math.PI * (idx.length <= 8 ? 0.088 : idx.length <= 10 ? 0.072 : 0.05);
@@ -6888,7 +7079,7 @@ V.hoja = {
         const chicas = ang.map(a => a <= minA + 1e-9), resto = 2 * Math.PI - minA * chicas.filter(Boolean).length, grandes = ang.reduce((s, a, j) => s + (chicas[j] ? 0 : a), 0);
         ang = ang.map((a, j) => chicas[j] ? minA : a / grandes * resto);
       }
-      let s = `<svg style="left:${g.x}pt;top:${g.y}pt;width:${W}pt;height:${H}pt" viewBox="0 0 ${W} ${H}" font-family="'Montserrat','Noto Sans','Segoe UI',Arial,sans-serif"><defs><filter id="${id}s" x="-30%" y="-30%" width="160%" height="160%"><feDropShadow dx="0" dy="2.5" stdDeviation="3.5" flood-color="#000" flood-opacity=".28"/></filter></defs>`;
+      let s = `<svg style="left:${g.x}pt;top:${g.y}pt;width:${W}pt;height:${H}pt" viewBox="0 0 ${W} ${H}" font-family="'Montserrat','Noto Sans','Segoe UI',Arial,sans-serif"><defs><filter id="${id}s" x="-30%" y="-30%" width="160%" height="160%"><feDropShadow dx="0" dy="2.5" stdDeviation="3.5" flood-color="#000" flood-opacity=".28"/></filter>${BI ? BI.defs(id + "f", ["#fff", "#1b1b1b", "#155B4E"]) : ""}</defs>`;
       const pt = (a, rr) => [cx + rr * Math.cos(a), cy + rr * Math.sin(a)], f = n => n.toFixed(2);
       let a0 = -Math.PI / 2, txt = "";
       idx.forEach((i, j) => {
@@ -6898,21 +7089,22 @@ V.hoja = {
         // contenido de la rebanada: icono, nombre y porcentaje, centrados en la banda
         const m = (a0 + a1) / 2, banda = r - ri, rm = ri + banda * 0.53, [x, y] = pt(m, rm), arco = (a1 - a0) * (ri + banda * 0.3) * 0.88, sn = Math.abs(Math.sin(m)), cs = Math.abs(Math.cos(m)), tc = claro(col) ? "#1b1b1b" : "#fff";
         // espacio disponible: arriba y abajo el arco es el ancho; en los lados el arco es el alto
-        const anchoH = Math.min(sn * arco + cs * banda * 0.8, banda * 1.5), altoV = Math.min(cs * arco + sn * banda * 0.8, banda * 1.3);
+        // en diagonal (arriba-izquierda, abajo-derecha...) el bloque se sale antes de la rebanada: se reduce el espacio
+        const dg = 1 - 0.32 * Math.abs(Math.sin(2 * m)), anchoH = Math.min(sn * arco + cs * banda * 0.8, banda * 1.5) * dg, altoV = Math.min(cs * arco + sn * banda * 0.8, banda * 1.3) * dg;
         const pal = String(g.cats[i] || "").split(/\s+/), larga = Math.max(...pal.map(p => p.length), 4);
         let fzN = Math.min(banda * 0.125, anchoH / (larga * 0.62)), fzP = Math.min(banda * 0.22, anchoH / 3.3), tamI = Math.min(banda * 0.32, anchoH * 0.4);
-        const ico = (this.ICO_STD.find(([re]) => re.test(U.norm(g.cats[i] || ""))) || [])[1], lin = [], max = Math.max(larga, Math.floor(anchoH / (fzN * 0.6)));
+        const ic = BI ? BI.buscar(g.cats[i], g.dim) : null, ico = ic && (ic.s || IC[ic.k]), lin = [], max = Math.max(larga, Math.floor(anchoH / (fzN * 0.6)));
         for (const p of pal) { if (lin.length && (lin[lin.length - 1] + " " + p).length <= max) lin[lin.length - 1] += " " + p; else if (p) lin.push(p); }
         let lineas = lin.slice(0, 3);
-        const k = Math.min(1, altoV / ((ico ? tamI + 3 : 0) + lineas.length * fzN * 1.05 + fzP * 1.05));
+        const k = Math.min(1, altoV / ((ico ? tamI + 3 : 0) + lineas.length * fzN * 1.05 + fzP * 1.2));
         fzN *= k; fzP *= k; tamI *= k;
         // si no cabe, se quita primero el icono y luego el nombre (el nombre siempre esta en la lista de al lado)
         const conIco = ico && tamI >= 8; if (fzN < 6) { lineas = []; fzP = Math.min(banda * 0.22, anchoH / 3.3, altoV * 0.8); }
-        const alto = (conIco ? tamI + 3 : 0) + lineas.length * fzN * 1.05 + fzP * 1.05;
+        const alto = (conIco ? tamI + 3 : 0) + lineas.length * fzN * 1.05 + fzP * (lineas.length ? 1.2 : 1.05);
         let yy = y - alto / 2;
-        if (conIco) { txt += `<g transform="translate(${f(x - tamI / 2)},${f(yy)}) scale(${f(tamI / 24)})" fill="none" stroke="${tc}" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="${ico}"/></g>`; yy += tamI + 3; }
+        if (conIco) { txt += BI.dibujo(ic, IC[ic.k], x - tamI / 2, yy, tamI, tc, id + "f"); yy += tamI + 3; }
         lineas.forEach(t => { yy += fzN * 1.05; txt += `<text x="${f(x)}" y="${f(yy - fzN * 0.18)}" text-anchor="middle" font-size="${f(fzN)}" font-weight="700" fill="${tc}">${esc(t)}</text>`; });
-        yy += fzP * 1.05; txt += `<text x="${f(x)}" y="${f(yy - fzP * 0.16)}" text-anchor="middle" font-size="${f(fzP)}" font-weight="800" fill="${tc}">${(v[i] / tot * 100).toFixed(1)}%</text>`;
+        yy += fzP * (lineas.length ? 1.2 : 1.05); txt += `<text x="${f(x)}" y="${f(yy - fzP * 0.16)}" text-anchor="middle" font-size="${f(fzP)}" font-weight="800" fill="${tc}">${(v[i] / tot * 100).toFixed(1)}%</text>`;
         a0 = a1;
       });
       s += txt;
@@ -6922,7 +7114,7 @@ V.hoja = {
       const fzT = rc * 0.15, tamC = rc * 0.36, total = v.reduce((a, b) => a + b, 0);
       let y = cy - rc * 0.8;
       s += `<circle cx="${cx}" cy="${cy}" r="${f(rc)}" fill="#fff" filter="url(#${id}s)"/>`;
-      s += `<g transform="translate(${f(cx - tamC / 2)},${f(y)}) scale(${f(tamC / 24)})" fill="none" stroke="${V}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 3.5h7v3h-7zM6.5 5H5a1 1 0 0 0-1 1v15a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-1.5M7.5 11.5l1.5 1.5 2.5-2.5M7.5 17l1.5 1.5L11.5 16M13.5 12h3.5M13.5 17.5h2"/><circle cx="17" cy="16" r="3" fill="#fff"/><path d="m19.2 18.2 2.3 2.3"/></g>`;
+      if (BI) s += BI.dibujo(BI.porClave("CENTRO"), IC.CENTRO, cx - tamC / 2, y, tamC, V, id + "f");
       y += tamC + fzT * 1.05;
       lt.slice(0, 3).forEach(t => { s += `<text x="${cx}" y="${f(y)}" text-anchor="middle" font-size="${f(fzT)}" font-weight="800" fill="#1b1b1b">${esc(t)}</text>`; y += fzT * 1.08; });
       if (g.centroSub) { s += `<text x="${cx}" y="${f(y)}" text-anchor="middle" font-size="${f(fzT)}" font-weight="800" fill="#1b1b1b">${esc(g.centroSub)}</text>`; y += fzT * 0.55; }
@@ -7578,7 +7770,7 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
         c(y + hs[0] + gap, hs[1], "EAF6EC", "8CCB9B", VERDE, M.cum, ["Cumplieron", "la expectativa", "(" + pct(M.cum, M.n) + ")"]),
         c(y + hs[0] + hs[1] + 2 * gap, hs[2], "FDECEC", "F2A9A9", ROJO, M.deb, ["Debilidades", "(" + pct(M.deb, M.n) + ")"]));
     },
-    pastel(M, x, y, w, nombres) { return { k: "g", tipo: "pie", est: M.estPie, centro: "debilidades", centroTit: M.dim === "std" ? "Comportamientos más peligrosos" : DIMS[M.dim], centroSub: M.corto, x, y, w, h: w, nombres, titulo: "", cats: M.grupos.map(g => g.n), series: [{ n: "Debilidades", v: M.grupos.map(g => g.v), cols: M.grupos.map(g => g.col) }] }; },
+    pastel(M, x, y, w, nombres) { return { k: "g", tipo: "pie", est: M.estPie, centro: "debilidades", centroTit: M.dim === "std" ? "Comportamientos más peligrosos" : DIMS[M.dim], centroSub: M.corto, dim: M.dim, icos: (TJ.datos.graf || {}).iconos, x, y, w, h: w, nombres, titulo: "", cats: M.grupos.map(g => g.n), series: [{ n: "Debilidades", v: M.grupos.map(g => g.v), cols: M.grupos.map(g => g.col) }] }; },
     lista(M, x, y, w, alto, sz) {
       const n = M.grupos.length || 1, paso = Math.min(30, alto / n), els = [];
       M.grupos.forEach((g, i) => {
@@ -7693,7 +7885,7 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
             <div class="campo" style="flex:1 1 200px"><label>Graficar las debilidades por</label><select class="inp" data-f="dim">${Object.entries(DIMS).map(([k, t]) => `<option value="${k}" ${F.dim === k ? "selected" : ""}>${t}</option>`).join("")}</select></div>
             <div class="campo" style="flex:0 0 130px"><label>Rebanadas (máx.)</label><input class="inp" type="number" min="3" max="12" data-f="max" value="${esc(F.max)}"></div>
             <div class="campo" style="flex:1 1 190px"><label>Estilo de las barras</label><select class="inp" data-f="estBar">${E1.EST_BAR.map(([k, t]) => `<option value="${k}" ${(F.estBar || "plana") === k ? "selected" : ""}>${t}</option>`).join("")}</select></div>
-            <div class="campo" style="flex:1 1 190px"><label>Estilo del pastel</label><select class="inp" data-f="estPie">${E1.EST_PIE.map(([k, t]) => `<option value="${k}" ${(F.estPie || "plano") === k ? "selected" : ""}>${t}</option>`).join("")}</select></div></div>
+            <div class="campo" style="flex:1 1 190px"><label>Estilo del pastel</label><select class="inp" data-f="estPie">${E1.EST_PIE.map(([k, t]) => `<option value="${k}" ${(F.estPie || "plano") === k ? "selected" : ""}>${t}</option>`).join("")}</select></div>${F.estPie === "infografia" && B.iconos && !B.modoLocal ? `<div class="campo" style="flex:0 0 auto"><label>&nbsp;</label><button class="btn sec" id="tdIconos" title="Cambiar los íconos de la infografía por los tuyos">${B.ico("editar")} Íconos…</button></div>` : ""}</div>
           <div class="fila">${sel("subg", "Subgerencia observada", ops("subg"), "Todas")}${sel("obsDepto", "Departamento observado", ops("obsDepto"), "Todos")}${sel("uni", "Unidad", ops("uni"), "Todas")}${sel("turno", "Turno", ops("turno"), "Todos")}
             <label class="chip-ali" style="margin:0 0 14px"><input type="checkbox" data-f="ae" ${F.ae ? "checked" : ""}><span>Solo con peligros de alta energía</span></label></div>
           <div class="tj-kpis" style="margin:2px 0 12px"><div><b>${M.n}</b><span>observaciones en ${esc(M.etq)}${F.acum && M.n !== cruda.length ? " (de " + cruda.length + " del periodo)" : ""}</span></div><div><b style="color:var(--verde,#1E6B4A)">${M.cum}</b><span>cumplieron la expectativa (${pct(M.cum, M.n)})</span></div><div><b style="color:var(--rojo)">${M.deb}</b><span>debilidades (${pct(M.deb, M.n)})</span></div><div><b>${M.rango.length}</b><span>semana(s) en las tendencias${F.acum ? "" : " · totales y TOP de " + esc(M.etq)}</span></div></div>
@@ -7760,6 +7952,7 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
       };
       const listo = async () => { M = await this.modelo(F, G); if (!this.laminas(M).length) { B.ui.toast("Marca al menos una lámina.", "error"); return false; } return true; };
       c.querySelector("#tdGuardar").onclick = () => guardar();
+      const bIco = c.querySelector("#tdIconos"); if (bIco) bIco.onclick = () => B.iconos.editar(D, () => prev());
       c.querySelector("#tdPdf").onclick = async e => { const b = e.currentTarget; if (await listo() && await guardar(true)) B.rep.pdf(this.doc(M), b); };
       c.querySelector("#tdPptx").onclick = async () => {
         if (!(await listo()) || !(await guardar(true))) return;
@@ -10660,7 +10853,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "4.17", servidorViejo: false,
+  info: {}, VERSION: "4.17.1", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -10847,7 +11040,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "procedimientos" ? '<span class="contador oculto" id="cntProc"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.17")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.17.1")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
