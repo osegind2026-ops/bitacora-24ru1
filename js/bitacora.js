@@ -344,7 +344,21 @@ B.dom = {
     return B.estado.vig.filter(v => v.inicio && v.inicio <= fin && (!v.retiro || v.retiro >= ini)).sort((a, b) => a.num - b.num);
   },
   // # de espacio confinado como se muestra: los de pre-recarga llevan su marca (PR 121)
-  ecNum(e) { return e.noLib ? "S/N" : (e.pre ? e.pre + " " : "") + e.num; },      // los NO liberados van sin numero hasta que se liberan
+  // folio por UNIDAD y AÑO (U1-160-2026): cada unidad lleva su consecutivo y reinicia cada año. "num" es solo el identificador interno.
+  // Los registros anteriores a la 4.18 se toman como U1 con su mismo numero. Los NO liberados van sin numero hasta que se liberan.
+  ecUni(e) { return e && (e.uni === "U1" || e.uni === "U2") ? e.uni : "U1"; },
+  ecAnio(e) { return +e.anio || +String(e.lib || e.fecha || "").slice(0, 4) || new Date().getFullYear(); },
+  ecFol(e) { const viejo = !e.uni; return e.noLib ? (+e.folLib || (viejo ? +e.numLib || 0 : 0)) : (+e.fol || (viejo ? +e.num || 0 : 0)); },
+  ecNum(e) { return e.noLib ? "S/N" : (e.pre ? e.pre + " " : "") + B.dom.ecUni(e) + "-" + B.dom.ecFol(e) + "-" + B.dom.ecAnio(e); },
+  ecOrden(a, b) { const D = B.dom; return D.ecUni(a).localeCompare(D.ecUni(b)) || D.ecAnio(a) - D.ecAnio(b) || (!!a.noLib - !!b.noLib) || D.ecFol(a) - D.ecFol(b) || a.num - b.num; },
+  // unidad que se propone al capturar: por el nombre (1-... / 2-... / U1 / U2), por la lista oficial o por la ultima vez que se registro ese espacio
+  ecUniProp(esp) {
+    const k = U.norm(esp); if (!k) return "";
+    const m = k.match(/^\s*([12])\s*-/) || k.match(/\bU\s*-?\s*([12])\b/); if (m) return "U" + m[1];
+    const o = B.ecLista && B.ecLista.buscar(esp); if (o && (o.uni === "U1" || o.uni === "U2")) return o.uni;
+    const u = B.estado.ec.filter(e => U.norm(e.esp) === k && e.uni).sort((a, b) => String(a.lib || "").localeCompare(String(b.lib || ""))).pop();
+    return u ? B.dom.ecUni(u) : "";
+  },
   // NO LIBERADOS (prueba no satisfactoria): se guardan con su monitoreo, pero no cuentan ni salen como espacios liberados
   /* Espacios que siguen ABIERTOS (liberados sin cierre, o no liberados) cuyo nombre es igual o muy parecido al que se escribe.
      igual: mismo nombre (aunque cambien guiones o espacios). Parecido: uno contiene al otro, difieren en 1 o 2 letras, o comparten casi todas sus palabras. */
@@ -370,7 +384,7 @@ B.dom = {
      la fecha de salida). Asi los liberados en el T1 no se mezclan con los del T2 aunque se hayan capturado en otro turno. */
   ecFT(e) { return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(e.lib || "") ? B.t.de(e.lib) : { f: e.fecha, t: e.turno }; },
   ecClave(e) { const x = this.ecFT(e); return B.t.clave(x.f, x.t); },
-  ecDelTurno(f, t) { return B.estado.ec.filter(e => { if (e.noLib) return false; const x = this.ecFT(e); return x.f === f && x.t === t; }).sort((a, b) => a.num - b.num); },
+  ecDelTurno(f, t) { return B.estado.ec.filter(e => { if (e.noLib) return false; const x = this.ecFT(e); return x.f === f && x.t === t; }).sort(B.dom.ecOrden); },
   /* ---- Monitoreo de espacios confinados mientras siguen liberados (al menos uno por turno).
      El primer "monitoreo" de un espacio es su liberacion; los siguientes estan en e.mon con su fecha y hora real. */
   LECT: [["o2", "O2"], ["hr", "HR"], ["temp", "TEMP"], ["lel", "LEL"], ["co", "CO"], ["h2s", "H2S"]],
@@ -397,7 +411,7 @@ B.dom = {
   ecPlazoTxt(t) { const n = this.ecDias(); return n > 1 ? "en " + n + " días" : t === "T1" ? "entre ayer y hoy" : "en el día"; },
   ecMonEnTurno(e, f, t) { const a = this.ecDesde(f, t), b = B.t.fin(f, t); return this.ecMons(e).some(m => m.fh >= a && m.fh <= b); },
   ecAbiertoEn(e, fh) { return !e.cierre || e.cierre > fh; },
-  ecAbiertos() { return B.estado.ec.filter(e => !e.cierre && !e.noLib).sort((a, b) => a.num - b.num); },
+  ecAbiertos() { return B.estado.ec.filter(e => !e.cierre && !e.noLib).sort(B.dom.ecOrden); },
   // espacios que siguen liberados al cierre del turno (f, t), liberados en ese turno o antes, con su ultimo monitoreo hasta entonces
   ecSeguimiento(f, t, soloAnteriores) {
     const K = B.t.clave(f, t), fin = B.t.fin(f, t);
@@ -809,7 +823,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.17.1", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.18", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -1050,14 +1064,14 @@ B.local = {
             for (const k of ["esp", "o2", "hr", "temp", "lel", "co", "h2s", "lib", "pers", "fecha", "turno"]) e[k] = String(it[k] ?? "");
             L.push(e);
           } else if (+e.num !== +it.num) e.numAnt = e.num;
-          e.num = +it.num; e.pre = it.pre || "";
+          e.num = +it.num; e.pre = it.pre || ""; if (e.uni) e.fol = e.num;
           tocados.push(e); this.agregarCatalogo(cat, "espacios", it.esp);
         }
         const ocupados = new Set(tocados.map(x => +x.num));
-        const mover = L.filter(x => !tocados.includes(x) && (ocupados.has(+x.num) || (!x.pre && +x.num < inicio)))
+        const mover = L.filter(x => !tocados.includes(x) && !x.noLib && (ocupados.has(+x.num) || (!x.pre && +x.num < inicio)))
           .sort((a, b) => String(a.lib || a.fecha).localeCompare(String(b.lib || b.fecha)) || a.num - b.num);
-        let sig = Math.max(inicio, Math.max(0, ...L.filter(x => !mover.includes(x)).map(x => +x.num)) + 1);
-        for (const x of mover) { x.numAnt = x.num; x.num = sig++; }
+        let sig = Math.max(inicio, Math.max(0, ...L.filter(x => !mover.includes(x) && !x.noLib && +x.num <= 900000).map(x => +x.num)) + 1);
+        for (const x of mover) { x.numAnt = x.num; x.num = sig++; if (x.uni) x.fol = x.num; }
         if (inicio > 0) cfg.ecInicio = inicio;
         hechas.push(c.id); cfg.cargas = hechas; db.config = cfg;
         await this.escribir("ec", L); await this.escribir("catalogos", cat); await this.escribir("config", cfg);
@@ -1137,10 +1151,31 @@ B.local = {
   async operacion(s, sup, col, acc, d) {
     const ahora = () => U.ahoraISO() + ":00", sig = (l, c) => l.reduce((m, x) => Math.max(m, +x[c] || 0), 0) + 1;
     const puede = ini => sup || U.ini(ini) === s.ini, soloSup = () => { if (!sup) throw new Error("Solo supervisores."); };
+    // folio por UNIDAD y AÑO (U1-160-2026): misma logica que el servidor (EcFijar, SiguienteFol, EcAsignarFol, EcAFolLib, EcUniProp)
+    const D = B.dom, anioTxt = e => +String(String(e.lib || "").length >= 4 ? e.lib : e.fecha || "").slice(0, 4) || new Date().getFullYear();
+    const fijar = e => { if (e.uni) return; e.uni = "U1"; e.anio = anioTxt(e); if (e.noLib) { if (+e.numLib) e.folLib = +e.numLib; } else e.fol = +e.num; };
+    const sigFol = (L, uni, anio, excl, cfg) => {
+      const m = L.filter(x => x !== excl && D.ecUni(x) === uni && D.ecAnio(x) === anio).reduce((a, x) => Math.max(a, D.ecFol(x)), 0) + 1;
+      const ia = +cfg.ecIniAnio || new Date().getFullYear(); let ini = ia === anio ? +cfg["ecInicio" + uni] || 0 : 0;
+      if (!ini && uni === "U1" && ia === anio && !("ecInicioU1" in cfg)) ini = +cfg.ecInicio || 0;
+      return Math.max(m, ini);
+    };
+    const asignarFol = (L, e, cfg) => {
+      const uni = D.ecUni(e), anio = anioTxt(e), res = +e.folLib || 0;
+      const libre = res > 0 && +e.anio === anio && !L.some(x => x !== e && !x.noLib && D.ecUni(x) === uni && D.ecAnio(x) === anio && D.ecFol(x) === res);
+      e.uni = uni; e.anio = anio; e.fol = libre ? res : sigFol(L, uni, anio, e, cfg || {}); delete e.folLib;
+    };
+    const aFolLib = e => { const f = D.ecFol(e); e.uni = D.ecUni(e); e.anio = D.ecAnio(e); if (f > 0) e.folLib = f; delete e.fol; };
+    const uniProp = (L, esp) => {
+      const k = U.norm(esp), m = k.match(/^\s*([12])\s*-/) || k.match(/\bU\s*-?\s*([12])\b/); if (m) return "U" + m[1];
+      const u = L.filter(x => U.norm(x.esp) === k && x.uni).sort((a, b) => String(a.lib || "").localeCompare(String(b.lib || ""))).pop();
+      return u ? D.ecUni(u) : "U1";
+    };
     // pasa un espacio NO LIBERADO a liberado con las lecturas de "src" (misma logica que LiberarNucleo del servidor)
-    const liberarNuc = (L, e, fh, src, pers, auto, inicio) => {
+    const liberarNuc = (L, e, fh, src, pers, auto, inicio, cfg) => {
+      fijar(e); cfg = cfg || {}; inicio = inicio || +cfg.ecInicio || 0;
       const tt = B.t.de(fh), ke = U.norm(e.esp), otro = L.find(x => x !== e && x.fecha === tt.f && U.norm(x.esp) === ke);
-      if (otro) return "Ese espacio ya tiene otro registro el " + tt.f + " (EC #" + otro.num + ").";
+      if (otro) return "Ese espacio ya tiene otro registro el " + tt.f + " (EC #" + D.ecNum(otro) + ").";
       const mon = Array.isArray(e.mon) ? e.mon : [], lib0 = String(e.lib || "").slice(0, 16);
       for (const x of mon) if (x.fh < fh) x.nl = true;
       const m0 = { id: mon.reduce((m, x) => Math.max(m, +x.id || 0), 0) + 1, fh: lib0.length === 16 ? lib0 : e.fecha + "T00:00", nl: true };
@@ -1152,6 +1187,7 @@ B.local = {
       e.pers = U.ini(pers) || s.ini; e.lib = fh; e.fecha = tt.f; e.turno = tt.t;
       const antes = +e.numLib || 0, disp = antes > 0 && antes <= 900000 && !L.some(x => x !== e && +x.num === antes);
       e.nlNum = e.num; delete e.noLib; e.num = disp ? antes : sigEc(L.filter(x => x !== e), false, inicio); delete e.numLib;
+      asignarFol(L, e, cfg);
       e.liberoPor = auto ? "AUTO" : s.ini; e.mod = ahora() + " " + s.ini;
       return null;
     };
@@ -1447,39 +1483,40 @@ B.local = {
         if (!sup) throw new Error("Solo un supervisor puede cambiar el estatus de un espacio confinado.");
         const L = await this.leer("ec") || [], e = L.find(x => +x.num === +d.num);
         if (!e) throw new Error("Registro no encontrado.");
-        const nl = d.noLib === true, inicio = +((await this.leer("config")) || {}).ecInicio || 0;
+        const nl = d.noLib === true, cfgE = (await this.leer("config")) || {}, inicio = +cfgE.ecInicio || 0;
         if (nl !== !!e.noLib) {
-          if (nl) { const folio = sigEc(L, true, inicio); e.numLib = e.num; e.noLib = true; e.num = folio; }
+          fijar(e);
+          if (nl) { aFolLib(e); const folio = sigEc(L, true, inicio); e.numLib = e.num; e.noLib = true; e.num = folio; }
           else { const prev = +e.numLib || 0, libre = prev > 0 && prev <= 900000 && !L.some(x => x !== e && +x.num === prev);
-            e.nlNum = e.num; delete e.noLib; e.num = libre ? prev : sigEc(L.filter(x => x !== e), false, inicio); delete e.numLib; }
+            e.nlNum = e.num; delete e.noLib; e.num = libre ? prev : sigEc(L.filter(x => x !== e), false, inicio); delete e.numLib; asignarFol(L, e, cfgE); }
           e.mod = ahora() + " " + s.ini; await this.escribir("ec", L);
         }
-        return { ok: true, num: e.num };
+        return { ok: true, num: e.num, folio: D.ecNum(e) };
       }
       case "ec.liberar": {
         if (!sup) throw new Error("Solo un supervisor puede liberar manualmente. El espacio se libera solo al capturar una prueba con todos sus parámetros satisfactorios.");
         const L = await this.leer("ec") || [], e = L.find(x => +x.num === +d.num);
         if (!e) throw new Error("Registro no encontrado.");
-        if (!e.noLib) throw new Error("Ese espacio ya está liberado (EC #" + e.num + ").");
+        if (!e.noLib) throw new Error("Ese espacio ya está liberado (EC #" + D.ecNum(e) + ").");
         const fh = String(d.lib || "");
         if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(fh)) throw new Error("Fecha u hora de liberación no válida.");
         if (fh > U.isoFH(new Date(Date.now() + 15 * 60000))) throw new Error("La fecha y hora de liberación no puede ser futura.");
         const mon = Array.isArray(e.mon) ? e.mon : [], lib0 = String(e.lib || "").slice(0, 16);
         const ult = [...mon.map(x => x.fh), lib0].sort().pop();
         if (ult && fh <= ult) throw new Error("La liberación debe ser posterior a la última prueba registrada (" + ult.replace("T", " ") + ").");
-        const mal = liberarNuc(L, e, fh, d, d.pers, false, +((await this.leer("config")) || {}).ecInicio || 0);
+        const mal = liberarNuc(L, e, fh, d, d.pers, false, 0, (await this.leer("config")) || {});
         if (mal) throw new Error(mal);
-        await this.escribir("ec", L); return { ok: true, num: e.num };
+        await this.escribir("ec", L); return { ok: true, num: e.num, folio: D.ecNum(e) };
       }
       case "ec.crear": {
-        const capt = sup && d.capt ? U.ini(d.capt) : s.ini, L = await this.leer("ec") || [], cat = await this.leer("catalogos") || {}, nums = [];
+        const capt = sup && d.capt ? U.ini(d.capt) : s.ini, L = await this.leer("ec") || [], cat = await this.leer("catalogos") || {}, nums = [], folios = [], cfgC = (await this.leer("config")) || {};
         if (capt !== s.ini && !(await this.leer("personal") || []).some(p => U.ini(p.ini) === capt)) throw new Error("Iniciales no encontradas en el personal: " + capt);
         const vistosEc = [];
         for (const it of d.items || []) {
           if (!it.esp) continue;
           const ke = U.norm(it.esp), ya = L.find(x => x.fecha === d.fecha && U.norm(x.esp) === ke);
           if (ya && ya.noLib) throw new Error(`El espacio "${it.esp}" ya está registrado ese día como NO LIBERADO. Entra a Monitoreo de E.C. para capturar la nueva prueba o liberarlo.`);
-          if (ya) throw new Error(`El espacio "${it.esp}" ya está registrado ese día (EC #${ya.num}, capturado por ${ya.capt}). No se guardó nada para evitar duplicados.`);
+          if (ya) throw new Error(`El espacio "${it.esp}" ya está registrado ese día (EC #${D.ecNum(ya)}, capturado por ${ya.capt}). No se guardó nada para evitar duplicados.`);
           if (vistosEc.includes(ke)) throw new Error(`El espacio "${it.esp}" está repetido en la captura.`);
           vistosEc.push(ke);
         }
@@ -1494,12 +1531,14 @@ B.local = {
           const ftLib = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(it.lib || "") ? B.t.de(it.lib) : null;
           Object.assign(e, { fecha: ftLib ? ftLib.f : d.fecha, turno: ftLib ? ftLib.t : d.turno, capt, reg: ahora() });
           if (capt !== s.ini) e.regPor = s.ini;
-          L.push(e); nums.push(e.num);
+          const un = String(it.uni || "").toUpperCase(); e.uni = un === "U1" || un === "U2" ? un : uniProp(L, it.esp);
+          if (e.noLib) e.anio = anioTxt(e); else asignarFol(L, e, cfgC);
+          L.push(e); nums.push(e.num); folios.push(D.ecNum(e));
           catCambio = this.agregarCatalogo(cat, "espacios", it.esp) || catCambio;
         }
         if (!nums.length) throw new Error("No hay espacios confinados para registrar.");
         await this.escribir("ec", L); if (catCambio) await this.escribir("catalogos", cat);
-        return { ok: true, nums };
+        return { ok: true, nums, folios };
       }
       case "ec.actualizar": case "vig.actualizar": {
         soloSup();
@@ -1508,6 +1547,19 @@ B.local = {
         const campos = n === "ec" ? ["esp", "o2", "hr", "temp", "lel", "co", "h2s", "lib", "pers", "obs", "fecha", "turno", "cierre", "edif", "elev", "equipo", "cuarto", "ilum", "ruido", "otros", "epp", "tLig", "tMod", "tPes", "tDesc"] : ["desc", "inicio", "inop", "ubic", "comp", "retiro", "obs", "fecha", "turno", "unidad", "edif", "nivel", "zona", "tipoVig"];
         for (const k of campos) if (k in d) x[k] = d[k];
         if (n === "ec" && "pre" in d) x.pre = String(d.pre || "").toUpperCase();
+        if (n === "ec") {
+          // unidad y folio (U1-160-2026): al cambiar de unidad toma el siguiente folio de esa unidad en su año
+          fijar(x); const cfgA = (await this.leer("config")) || {}, nu = String(d.uni || "").toUpperCase();
+          if ((nu === "U1" || nu === "U2") && nu !== D.ecUni(x)) { x.uni = nu; if (x.noLib) delete x.folLib; else { if (!("folAnt" in x)) x.folAnt = D.ecFol(x); x.fol = sigFol(L, nu, D.ecAnio(x), x, cfgA); } }
+          if (d.folNuevo && !x.noLib && +d.folNuevo !== D.ecFol(x)) {
+            const nf = +d.folNuevo;
+            if (!Number.isInteger(nf) || nf < 1 || nf > 999999) throw new Error("El folio del espacio confinado debe ser un número entero mayor que cero.");
+            const otroF = L.find(y => y !== x && D.ecUni(y) === D.ecUni(x) && D.ecAnio(y) === D.ecAnio(x) && D.ecFol(y) === nf);
+            if (otroF) throw new Error("El folio " + D.ecUni(x) + "-" + nf + "-" + D.ecAnio(x) + " ya lo tiene otro espacio (" + otroF.esp + "). Cambia primero ese registro o elige otro número.");
+            if (!("folAnt" in x)) x.folAnt = D.ecFol(x);
+            x.fol = nf;
+          }
+        }
         if (n === "ec" && d.numNuevo && String(d.numNuevo) !== String(x.num)) {
           const nn = +d.numNuevo;
           if (!Number.isInteger(nn) || nn < 1 || nn > 999999) throw new Error("El # de espacio confinado debe ser un número entero mayor que cero.");
@@ -1596,7 +1648,7 @@ B.local = {
             r.pers = U.ini(it.pers) || s.ini; r.capt = s.ini; r.reg = ahora(); mon.push(r); nuevos.push(r); n++;
           }
           if (!n && !repetidos.length) throw new Error("Captura al menos un monitoreo.");
-          let liberado = 0, aviso = "";
+          let liberado = 0, aviso = "", folioLib = "";
           if (n) {
             e.mon = mon.sort((a, b) => a.fh.localeCompare(b.fh));
             if (e.noLib) {       // la primera prueba nueva con todos sus parametros satisfactorios libera el espacio
@@ -1605,13 +1657,13 @@ B.local = {
               const buena = nuevos.sort((a, b) => a.fh.localeCompare(b.fh)).find(m => req.every(k => String(m[k] ?? "").trim() !== "") && !["o2", "lel", "co", "h2s"].some(k => fuera(k, m[k])));
               if (buena) {
                 e.mon = e.mon.filter(x => x !== buena);
-                const mal = liberarNuc(L, e, buena.fh, buena, buena.pers, true, +cfg.ecInicio || 0);
-                if (mal) { e.mon.push(buena); e.mon.sort((a, b) => a.fh.localeCompare(b.fh)); aviso = mal; } else liberado = e.num;
+                const mal = liberarNuc(L, e, buena.fh, buena, buena.pers, true, +cfg.ecInicio || 0, cfg);
+                if (mal) { e.mon.push(buena); e.mon.sort((a, b) => a.fh.localeCompare(b.fh)); aviso = mal; } else { liberado = e.num; folioLib = D.ecNum(e); }
               }
             }
             await this.escribir("ec", L);
           }
-          return { ok: true, n, repetidos, liberado, aviso };
+          return { ok: true, n, repetidos, liberado, aviso, folio: folioLib };
         }
         const m = mon.find(x => +x.id === +d.id && (!d.fhOrig || x.fh === d.fhOrig)) || (d.fhOrig ? mon.find(x => x.fh === d.fhOrig) : null);
         if (!m) throw new Error("Ese monitoreo ya no existe. Actualiza la página.");
@@ -2268,15 +2320,15 @@ B.rep.historial = function (ini, d1, d2) {
 };
 
 /* ---------------------------------------------------------------- concentrados */
-B.rep.concEC = function (lista, d1, d2) {
+B.rep.concEC = function (lista, d1, d2, uni) {
   const c = B.estado.config;
   lista = lista.filter(e => !e.noLib);
-  let h = `<h2 class="doc">LISTADO DE ESPACIO CONFINADOS</h2><div class="doc-sub">${U.esc(B.t.periodo().toUpperCase())}${d1 ? " &nbsp;|&nbsp; del " + U.corta(d1) + " al " + U.corta(d2) : ""}</div>
-  <table class="dat"><thead><tr><th style="width:6.5%">#</th><th style="width:29%">ESPACIO CONFINADO</th><th>O2<br>(%)</th><th>HR<br>(%)</th><th>TEMP<br>(°C)</th><th>LEL<br>(%)</th><th>CO<br>(ppm)</th><th>H2S<br>(ppm)</th>
+  let h = `<h2 class="doc">LISTADO DE ESPACIO CONFINADOS</h2><div class="doc-sub">${uni ? "UNIDAD " + uni.slice(1) + " &nbsp;|&nbsp; " : ""}${U.esc(B.t.periodo().toUpperCase())}${d1 ? " &nbsp;|&nbsp; del " + U.corta(d1) + " al " + U.corta(d2) : ""}</div>
+  <table class="dat"><thead><tr><th style="width:9%">#</th><th style="width:29%">ESPACIO CONFINADO</th><th>O2<br>(%)</th><th>HR<br>(%)</th><th>TEMP<br>(°C)</th><th>LEL<br>(%)</th><th>CO<br>(ppm)</th><th>H2S<br>(ppm)</th>
   <th style="width:17%">DÍA QUE SE LIBERO</th><th style="width:14%">PERSONAL TSI</th></tr></thead><tbody>` +
     lista.map(e => `<tr><td class="b">${U.esc(B.dom.ecNum(e))}</td><td>${U.esc(e.esp)}${e.obs ? `<div class="gris" style="font-size:6.5pt">${U.esc(e.obs)}</div>` : ""}</td>` + ["o2", "hr", "temp", "lel", "co", "h2s"].map(k => `<td class="${B.dom.rango(k, e[k]) ? "fuera" : ""}">${U.esc(e[k])}</td>`).join("") +
       `<td>${U.fh(e.lib)}</td><td>${U.esc(e.pers)}</td></tr>`).join("") + `</tbody></table>`;
-  return { html: B.rep.documento("Concentrado EC", h), nombre: `CONCENTRADO ESPACIOS CONFINADOS ${c.proyecto}${d1 ? " del " + U.corta(d1).replace(/\//g, ".") + " al " + U.corta(d2).replace(/\//g, ".") : ""}`, carpeta: "", tipo: "concentrado" };
+  return { html: B.rep.documento("Concentrado EC", h), nombre: `CONCENTRADO ESPACIOS CONFINADOS ${c.proyecto}${uni ? " " + uni : ""}${d1 ? " del " + U.corta(d1).replace(/\//g, ".") + " al " + U.corta(d2).replace(/\//g, ".") : ""}`, carpeta: "", tipo: "concentrado" };
 };
 B.rep.concVig = function (lista, d1, d2) {
   const c = B.estado.config;
@@ -2938,6 +2990,7 @@ V.espacios = {
       const tr = document.createElement("div");
       tr.className = "ec-fila";
       tr.innerHTML = `<div class="campo"><label>Espacio confinado</label><input class="inp" data-k="esp" placeholder="Busca o escribe el espacio"></div>
+        <div class="campo ec-uni"><label title="Cada unidad lleva su propio folio: U1-#-año y U2-#-año">Unidad</label><select class="inp" data-k="uni"><option value="">Elige…</option><option value="U1">U1</option><option value="U2">U2</option></select></div>
         <div class="campo"><label>Hora en que se liberó · <a href="#" data-ahora title="Poner la hora actual">ahora</a></label><input class="inp tnum h24" type="text" inputmode="numeric" maxlength="5" placeholder="HH:MM (24 h)" autocomplete="off" data-k="hora"></div>
         <div class="campo"><label>Personal TSI</label><input class="inp" data-k="pers" value="${U.esc(capt())}" style="text-transform:uppercase" placeholder="JESC/MAOH"></div>
         <button class="btn fantasma btn-icono quitar" title="Quitar">${B.ico("basura")}</button>
@@ -2997,6 +3050,9 @@ V.espacios = {
       };
       const alEsp = () => {
         alUlt();
+        // unidad propuesta por el nombre del espacio, la lista oficial o la ultima vez que se registro (si no la eligieron a mano)
+        const sU = tr.querySelector('[data-k="uni"]'), pu = B.dom.ecUniProp(iEsp.value);
+        if (!sU.value || sU.value === tr._uniAuto) { sU.value = pu; tr._uniAuto = pu; }
         const o = B.ecLista.buscar(iEsp.value);
         tr.querySelectorAll(".lecturas label").forEach(l => l.style.fontWeight = "");
         if (!o) { req.innerHTML = ""; return; }
@@ -3024,7 +3080,8 @@ V.espacios = {
         const g = k => tr.querySelector(`[data-k="${k}"]`).value.trim();
         if (!g("esp")) return;
         if (!g("hora")) faltan.push("Renglón " + (i + 1) + ": falta la hora " + (tr.dataset.nl ? "de la prueba" : "de liberación"));
-        const it = { ...(tr.dataset.nl ? { noLib: true } : {}), esp: g("esp"), o2: g("o2"), hr: g("hr"), temp: g("temp"), lel: g("lel"), co: g("co"), h2s: g("h2s"), pers: g("pers").toUpperCase(), obs: g("obs") };
+        if (!g("uni")) faltan.push("Renglón " + (i + 1) + ": elige la unidad (U1 o U2)");
+        const it = { ...(tr.dataset.nl ? { noLib: true } : {}), esp: g("esp"), uni: g("uni"), o2: g("o2"), hr: g("hr"), temp: g("temp"), lel: g("lel"), co: g("co"), h2s: g("h2s"), pers: g("pers").toUpperCase(), obs: g("obs") };
         if (g("hora")) it.lib = B.t.fechaHora(f, t, g("hora"));
         for (const k of ["edif", "elev", "equipo", "cuarto", "ilum", "ruido", "otros", "tLig", "tMod", "tPes", "tDesc"]) if (g(k)) it[k] = g(k);
         const epp = [...tr.querySelectorAll("[data-epp]:checked")].map(x => x.dataset.epp); if (epp.length) it.epp = epp.join(", ");
@@ -3050,7 +3107,7 @@ V.espacios = {
         return;
       }
       await ejecutar(() => B.api.op("ec", "crear", { fecha: f, turno: t, items, capt: capt() === yo() ? "" : capt() }),
-        r => "Registrado: " + r.nums.map(n => n > 900000 ? "NO LIBERADO (sin número hasta que se libere)" : "EC #" + n).join(", ") + (capt() !== yo() ? " · asignado a " + capt() : "") + (r.nums.some(n => n > 900000) ? "<br>Los no liberados quedan en Monitoreo de E.C. hasta que la prueba sea satisfactoria." : "")
+        r => "Registrado: " + r.nums.map((n, i) => n > 900000 ? "NO LIBERADO (sin número hasta que se libere)" : "EC #" + ((r.folios && r.folios[i]) || n)).join(", ") + (capt() !== yo() ? " · asignado a " + capt() : "") + (r.nums.some(n => n > 900000) ? "<br>Los no liberados quedan en Monitoreo de E.C. hasta que la prueba sea satisfactoria." : "")
           + (() => { const o = [...new Set(items.filter(i => /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(i.lib || "")).map(i => B.t.de(i.lib)).filter(x => x.f !== f || x.t !== t).map(x => B.t.corto(x.f, x.t)))]; return o.length ? "<br>Por su hora de liberación queda en el reporte de <b>" + o.join(", ") + "</b>." : ""; })());
     };
   }
@@ -3313,33 +3370,36 @@ V.historial = {
 /* ===================================================================== CONCENTRADOS */
 V.concentrados = {
   titulo: "Concentrados generales",
-  tab: "ec", d1: "", d2: "", q: "",
+  tab: "ec", d1: "", d2: "", q: "", uni: "",
   render(c) {
     const sup = B.dom.esSup(), esEC = this.tab === "ec";
     const tks = U.norm(this.q).split(" ").filter(Boolean);
     const enRango = f => (!this.d1 || f >= this.d1) && (!this.d2 || f <= this.d2);
-    const base = (esEC ? B.estado.ec : B.estado.vig).filter(x => enRango(x.fecha)).filter(x => !tks.length || tks.every(k => U.norm(Object.values(x).join(" ")).includes(k))).sort((a, b) => a.num - b.num);
+    const base = (esEC ? B.estado.ec : B.estado.vig).filter(x => enRango(x.fecha)).filter(x => !tks.length || tks.every(k => U.norm(Object.values(x).join(" ")).includes(k)))
+      .filter(x => !esEC || !this.uni || B.dom.ecUni(x) === this.uni).sort(esEC ? B.dom.ecOrden : (a, b) => a.num - b.num);
     c.innerHTML = `<div class="tarjeta">
       <div class="pestanas"><button data-tab="ec" class="${esEC ? "on" : ""}">Espacios confinados (${B.estado.ec.length})</button><button data-tab="vig" class="${!esEC ? "on" : ""}">Vigilancias C.I. (${B.estado.vig.length})</button></div>
       <div class="filtros" data-tour="conc-filtros">
         <div class="campo"><label>Desde (fecha reporte)</label><input class="inp" type="date" id="cD1" value="${this.d1}"></div>
         <div class="campo"><label>Hasta</label><input class="inp" type="date" id="cD2" value="${this.d2}"></div>
+        ${esEC ? `<div class="campo"><label>Unidad</label><select class="inp" id="cUni"><option value="">U1 y U2</option><option value="U1" ${this.uni === "U1" ? "selected" : ""}>Solo U1</option><option value="U2" ${this.uni === "U2" ? "selected" : ""}>Solo U2</option></select></div>` : ""}
         <div class="campo buscar" style="flex:1;min-width:220px"><label>Buscar</label>${B.ico("buscar", 'style="top:auto;bottom:11px;transform:none"')}<input class="inp" id="cQ" value="${U.esc(this.q)}" placeholder="Espacio, persona, INOP…"></div>
         ${sup && esEC && !B.modoLocal ? `<button class="btn dorado" id="cFus" disabled title="Marca con la casilla dos o más registros del mismo espacio">${B.ico("reutilizar")} Fusionar duplicados (0)</button>` : ""}
         ${sup ? `<button class="btn sec" id="cCsv">${B.ico("descargar")} Excel (CSV)</button><button class="btn sec" id="cImp">${B.ico("imprimir")} Imprimir</button><button class="btn" id="cPdf">${B.ico("pdf")} PDF</button>` : ""}
       </div>
-      <p class="muted peque" style="margin-top:-4px">${base.length} registro(s)${this.d1 || this.d2 ? " en el rango" : ""}. ${sup ? "Puedes corregir registros (con el lápiz también el <b># de espacio confinado</b> y su estatus), eliminarlos y, si un espacio se capturó dos veces, marcar las casillas y <b>fusionarlos</b> en uno solo. Los NO liberados no llevan número hasta que se liberan." : "Consulta de solo lectura."}</p>
+      <p class="muted peque" style="margin-top:-4px">${base.length} registro(s)${this.d1 || this.d2 ? " en el rango" : ""}. ${sup ? "Puedes corregir registros (con el lápiz también la <b>unidad</b>, el <b>folio</b> y su estatus), eliminarlos y, si un espacio se capturó dos veces, marcar las casillas y <b>fusionarlos</b> en uno solo. Los NO liberados no llevan número hasta que se liberan." : "Consulta de solo lectura."}</p>
       <div class="tabla-cont">${esEC ? this.tablaEC(base, sup, sup && !B.modoLocal ? (this.sel = new Set([...(this.sel || [])].filter(n => base.some(e => e.num === n)))) : null) : this.tablaVig(base, sup)}</div></div>`;
     c.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => { this.tab = b.dataset.tab; B.app.render(); });
     c.querySelector("#cD1").onchange = e => { this.d1 = e.target.value; B.app.render(); };
     c.querySelector("#cD2").onchange = e => { this.d2 = e.target.value; B.app.render(); };
+    const cU = c.querySelector("#cUni"); if (cU) cU.onchange = e => { this.uni = e.target.value; B.app.render(); };
     c.querySelector("#cQ").oninput = U.debounce(e => { this.q = e.target.value; const pos = e.target.selectionStart; B.app.render(); const i = document.getElementById("cQ"); i.focus(); i.setSelectionRange(pos, pos); }, 350);
     if (sup) {
-      const doc = () => esEC ? B.rep.concEC(base, this.d1, this.d2) : B.rep.concVig(base, this.d1, this.d2);
+      const doc = () => esEC ? B.rep.concEC(base, this.d1, this.d2, this.uni) : B.rep.concVig(base, this.d1, this.d2);
       c.querySelector("#cImp").onclick = () => B.rep.imprimir(doc());
       c.querySelector("#cPdf").onclick = e => B.rep.pdf(doc(), e.currentTarget);
       c.querySelector("#cCsv").onclick = () => esEC
-        ? U.csv("Concentrado EC " + B.estado.config.proyecto, ["#", "Espacio", "O2", "HR", "Temp", "LEL", "CO", "H2S", "Liberado", "Personal TSI", "Observaciones", "Fecha reporte", "Turno", "Capturó"],
+        ? U.csv("Concentrado EC " + B.estado.config.proyecto + (this.uni ? " " + this.uni : ""), ["#", "Espacio", "O2", "HR", "Temp", "LEL", "CO", "H2S", "Liberado", "Personal TSI", "Observaciones", "Fecha reporte", "Turno", "Capturó"],
           base.map(e => [B.dom.ecNum(e), e.esp, e.o2, e.hr, e.temp, e.lel, e.co, e.h2s, U.fh(e.lib), e.pers, e.obs, U.corta(e.fecha), e.turno, e.capt]))
         : U.csv("Concentrado vigilancias " + B.estado.config.proyecto, ["#", "Descripción", "Inicio", "INOP", "Ubicación", "Componente", "Retiro", "Estatus", "Observaciones", "Alta", "Retiro por", "Fecha reporte", "Turno"],
           base.map(v => [v.num, v.desc, U.fh(v.inicio), v.inop, v.ubic, v.comp, U.fh(v.retiro), v.est, v.obs, v.capAlta, v.capRet, U.corta(v.fecha), v.turno]));
@@ -3418,12 +3478,14 @@ V.concentrados = {
         ["tLig", "Estancia trabajo ligero"], ["tMod", "Estancia trabajo moderado"], ["tPes", "Estancia trabajo pesado"], ["tDesc", "Descanso"]]
       : [["desc", "Descripción"], ["inicio", "Inicio (AAAA-MM-DDTHH:MM)"], ["inop", "# INOP"], ["ubic", "Ubicación"], ["comp", "Componente"], ["retiro", "Retiro (AAAA-MM-DDTHH:MM, vacío = activa)"], ["obs", "Observaciones"],
         ["unidad", "Unidad (U1 o U2)"], ["edif", "Edificio"], ["nivel", "Nivel"], ["zona", "Zona de fuego"], ["tipoVig", "Tipo de vigilancia"]];
-    const extra = col === "ec" ? `<div class="campo"><label>Estatus del espacio</label>${ui.seg("ecEst", ["Liberado", "NO liberado"], x.noLib ? "NO liberado" : "Liberado")}
+    const extra = col === "ec" ? `<div class="campo"><label>Unidad</label><select class="inp" data-k="uni" style="max-width:220px">${["U1", "U2"].map(u => `<option value="${u}" ${B.dom.ecUni(x) === u ? "selected" : ""}>${u}</option>`).join("")}</select>
+          <span class="ayuda">Cada unidad lleva su propio folio (U1-#-año, U2-#-año). Si cambias la unidad, el espacio toma el siguiente folio de esa unidad en ${B.dom.ecAnio(x)}.</span></div>
+      <div class="campo"><label>Estatus del espacio</label>${ui.seg("ecEst", ["Liberado", "NO liberado"], x.noLib ? "NO liberado" : "Liberado")}
           <span class="ayuda">Corrige aquí un espacio que se marcó mal. <b>NO liberado</b>: deja de contar y de salir en el reporte de liberados (queda en Monitoreo de E.C.). <b>Liberado</b>: toma las lecturas y la hora de este registro.</span></div>
       <div class="grid2" style="background:var(--dorado-claro);border-radius:10px;padding:10px 12px 0;margin-bottom:12px${x.noLib ? ";display:none" : ""}">
-        <div class="campo"><label># de espacio confinado</label><input class="inp tnum" ${x.noLib ? "" : 'data-k="numNuevo"'} type="number" min="1" step="1" value="${x.num}"></div>
+        <div class="campo"><label>Folio (${U.esc(B.dom.ecUni(x))}-<b>#</b>-${B.dom.ecAnio(x)})</label><input class="inp tnum" ${x.noLib ? "" : 'data-k="folNuevo"'} type="number" min="1" step="1" value="${B.dom.ecFol(x) || ""}"></div>
         <div class="campo"><label>Marca (PR = pre-recarga; vacío = recarga)</label><input class="inp" data-k="pre" value="${U.esc(x.pre || "")}" maxlength="4" style="text-transform:uppercase" placeholder="vacío"></div></div>
-        <p class="muted peque" style="margin:-4px 0 12px">Si cambias el #, no puede repetirse con el de otro espacio. El siguiente registro nuevo toma el número más alto + 1.</p>` : "";
+        <p class="muted peque" style="margin:-4px 0 12px">Si cambias el folio, no puede repetirse con el de otro espacio de la misma unidad y año. El siguiente registro nuevo toma el folio más alto de su unidad + 1.</p>` : "";
     const r = await ui.modal({
       titulo: (col === "ec" ? "Corregir EC #" + B.dom.ecNum(x) : "Corregir VIG #" + num), icono: "editar",
       html: `${extra}<div class="grid2">${campos.map(([k, e]) => `<div class="campo"><label>${e}</label><input class="inp" data-k="${k}" value="${U.esc(x[k] ?? "")}"></div>`).join("")}</div>`, ancho: true,
@@ -3443,7 +3505,10 @@ V.concentrados = {
       const cambiaEst = "_nl" in r && r._nl !== !!x.noLib, aNL = r._nl; delete r._nl;
       if (cambiaEst && !(await ui.confirmar(aNL ? `El <b>EC #${U.esc(B.dom.ecNum(x))}</b> pasará a <b>NO LIBERADO</b>: deja de contar y de salir en los reportes de liberados. Su número queda reservado por si se vuelve a liberar.`
         : `El registro pasará a <b>LIBERADO</b> con las lecturas y la hora que tiene, y recibirá su número de espacio confinado.`, "Cambiar estatus del espacio", "Cambiar estatus", true))) return;
-      if (r.numNuevo && +r.numNuevo !== num && B.estado.ec.some(y => y.num === +r.numNuevo)) { ui.toast("El # " + U.esc(r.numNuevo) + " ya lo tiene otro espacio confinado. Elige otro número.", "error", 7000); return; }
+      // folio: solo se manda si se cambio; si cambia la unidad sin tocar el folio, toma el siguiente de esa unidad
+      if (r.folNuevo !== undefined && (r.folNuevo === "" || +r.folNuevo === B.dom.ecFol(x))) delete r.folNuevo;
+      if (r.folNuevo) { const uN = r.uni || B.dom.ecUni(x), an = B.dom.ecAnio(x);
+        if (B.estado.ec.some(y => y !== x && B.dom.ecUni(y) === uN && B.dom.ecAnio(y) === an && B.dom.ecFol(y) === +r.folNuevo)) { ui.toast("El folio " + U.esc(uN + "-" + r.folNuevo + "-" + an) + " ya lo tiene otro espacio confinado. Elige otro número.", "error", 7000); return; } }
       await ejecutar(async () => {
         await B.api.op("ec", "actualizar", r);
         if (cambiaEst) await B.api.op("ec", "estatus", { num: r.numNuevo && !x.noLib ? +r.numNuevo : num, noLib: aNL });
@@ -3649,7 +3714,7 @@ V.monitoreo = {
       } });
     if (!items) return;
     await ejecutar(() => B.api.op("ec", "monitoreo", { num: e.num, items, req }),
-      r => (r.liberado ? `<b>Prueba satisfactoria: el espacio quedó LIBERADO como EC #${r.liberado}</b> · ${U.esc(e.esp)}.<br>` : e.noLib ? `Prueba guardada. El espacio sigue <b>NO LIBERADO</b>${r.aviso ? ": " + U.esc(r.aviso) : " (hay lecturas fuera de rango o faltan lecturas requeridas)"}.<br>` : "") + `${r.n} registro(s) guardados en ${U.esc(D.ecNum(e))}.` + (r.repetidos && r.repetidos.length ? `<br>${r.repetidos.length} ya estaban capturados (misma fecha y hora) y no se duplicaron.` : ""));
+      r => (r.liberado ? `<b>Prueba satisfactoria: el espacio quedó LIBERADO como EC #${U.esc(r.folio || r.liberado)}</b> · ${U.esc(e.esp)}.<br>` : e.noLib ? `Prueba guardada. El espacio sigue <b>NO LIBERADO</b>${r.aviso ? ": " + U.esc(r.aviso) : " (hay lecturas fuera de rango o faltan lecturas requeridas)"}.<br>` : "") + `${r.n} registro(s) guardados en ${U.esc(D.ecNum(e))}.` + (r.repetidos && r.repetidos.length ? `<br>${r.repetidos.length} ya estaban capturados (misma fecha y hora) y no se duplicaron.` : ""));
   },
   /* Historial completo de un espacio: liberación + todos los monitoreos; corrige o elimina quien lo capturó o un supervisor */
   async historial(num) {
@@ -3715,7 +3780,7 @@ V.monitoreo = {
     const falt = req.filter(k => !r[k]); if (falt.length) { ui.toast("Faltan lecturas de la prueba satisfactoria: " + falt.map(k => k.toUpperCase()).join(", ") + ".", "error"); return; }
     const fuera = D.LECT.filter(([k]) => D.rango(k, r[k])).map(([k, et]) => et + " = " + r[k]);
     if (fuera.length && !(await ui.confirmar("Hay valores <b>fuera del rango</b> de referencia:<br><b>" + fuera.map(U.esc).join("<br>") + "</b><br><br>Si la prueba no fue satisfactoria, cancela y usa «Capturar otra prueba».", "¿Liberar con valores fuera de rango?", "Liberar de todos modos", true))) return;
-    await ejecutar(() => B.api.op("ec", "liberar", { num: e.num, ...r }), x => `Espacio liberado: <b>EC #${x.num}</b> · ${U.esc(e.esp)}.`);
+    await ejecutar(() => B.api.op("ec", "liberar", { num: e.num, ...r }), x => `Espacio liberado: <b>EC #${U.esc(x.folio || x.num)}</b> · ${U.esc(e.esp)}.`);
   },
   /* Supervisor: cierre de uno o varios espacios (dejan de requerir monitoreo) */
   async cerrar(lista, opciones) {
@@ -4194,7 +4259,7 @@ V.config = {
         ${cab("reloj", "d", "Horas extra - referencia del conteo automático")}
         <div class="grid2">${campo("heTurno", "Horas extra esperadas por turno", "number", "Valor inicial: 12 h de turno − 8 h de jornada")}${campo("heDescanso", "Horas extra por turno en día de DESCANSO", "number")}</div>
         ${campo("ecDiasSinMon", "Espacios confinados: días sin monitoreo para que aparezca la nota «SIN MONITOREO»", "number", "1 = turno de noche: valen los monitoreos del día anterior y del actual; turno de día: los del mismo día. 2 o más = se avisa hasta que pasen esos días sin monitoreo.")}
-        ${campo("ecInicio", "Espacios confinados: número con el que inicia el consecutivo del periodo", "number", "Ej. 123 si continúa la numeración de pre-recarga. Los registros nuevos toman el número más alto + 1.")}
+        <div class="grid3">${campo("ecInicioU1", "Espacios confinados U1: folio con el que inicia", "number", "Ej. 123 si continúa la numeración de pre-recarga. Los nuevos toman el folio más alto de la unidad + 1.")}${campo("ecInicioU2", "Espacios confinados U2: folio con el que inicia", "number", "Vacío o 1 = empieza en U2-1.")}${campo("ecIniAnio", "Año al que aplican esos inicios", "number", "Folio = U1-#-año. Cada unidad reinicia en 1 cada año nuevo.")}</div>
         ${campo("heJust", "Justificación general del tiempo extra (se propone al capturar y en el oficio)", "text", "Los técnicos pueden usarla tal cual o escribir otra.")}
         ${campo("carpetaPDF", "Carpeta para los PDF (vacío = carpeta REPORTES junto al sistema)", "text", "Se aplica al reiniciar el servidor.")}
         ${cab("doc", "g", "Oficio semanal de tiempo extra", "Encabezado y firmas del formato oficial. Cada trabajador captura su categoría y título.", "", "cfg-oficio")}
@@ -10853,7 +10918,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "4.17.1", servidorViejo: false,
+  info: {}, VERSION: "4.18", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -11040,7 +11105,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "procedimientos" ? '<span class="contador oculto" id="cntProc"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.17.1")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.18")}</div>
         </aside>
         <div class="principal">
           <header class="barra">

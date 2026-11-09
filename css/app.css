@@ -335,7 +335,7 @@ table.tabla { width: 100%; border-collapse: collapse; font-size: 13px; }
 .tour-ilustra { font-size: 40px; margin-bottom: 6px; }
 
 /* Captura de espacios confinados */
-.ec-fila { display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(0, 1fr) minmax(0, 1.1fr) auto; gap: 0 14px; align-items: end; border: 1px solid var(--borde); border-radius: 14px; padding: 14px 14px 2px; margin-bottom: 12px; background: #fff; }
+.ec-fila { display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(88px, .6fr) minmax(0, 1fr) minmax(0, 1.1fr) auto; gap: 0 14px; align-items: end; border: 1px solid var(--borde); border-radius: 14px; padding: 14px 14px 2px; margin-bottom: 12px; background: #fff; }
 .ec-fila:focus-within { border-color: var(--guinda-2); box-shadow: 0 0 0 4px rgba(159, 34, 65, .07); }
 .ec-fila .quitar { margin-bottom: 16px; }
 .ec-fila .lecturas { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0 12px; background: #FAF8F6; border-radius: 10px; padding: 10px 10px 0; margin-bottom: 12px; }
