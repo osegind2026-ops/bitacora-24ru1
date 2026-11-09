@@ -825,7 +825,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.18.1", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.19", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -2220,14 +2220,14 @@ B.rep.ecMonitoreos = function (lista, d1, d2, titulo) {
     (bloques.length ? bloques.map(({ e, mons }) => `<tr><td colspan="11" style="text-align:left;background:#E7E6E6;font-size:8pt;padding:4px 6px"><b>${e.noLib ? "S/N" : "EC #" + U.esc(D.ecNumRep(e))} · ${D.ecUni(e)} · ${U.esc(e.esp)}</b> &nbsp;—&nbsp; ${B.rep.ecEstado(e)} &nbsp;—&nbsp; ${mons.length} registro(s)</td></tr>` + B.rep.ecFilasMon(e, mons)).join("")
       : `<tr><td colspan="11">Sin monitoreos con ese filtro.</td></tr>`) + `</tbody></table>
     <div style="margin-top:6px;font-size:7pt;color:#595959">Rangos de referencia: O2 ${U.esc(c.o2Min)}–${U.esc(c.o2Max)} % · LEL ≤ ${U.esc(c.lelMax)} % · CO ≤ ${U.esc(c.coMax)} ppm · H2S ≤ ${U.esc(c.h2sMax)} ppm. En rojo, las lecturas fuera de rango.</div>`;
-  return { html: B.rep.documento("Monitoreo de espacios confinados", h), nombre: `MONITOREO ESPACIOS CONFINADOS ${c.proyecto} ${U.norm(titulo).replace(/[^A-Z0-9 ]/g, "")}${d1 ? " del " + U.corta(d1).replace(/\//g, ".") : ""}${d2 ? " al " + U.corta(d2).replace(/\//g, ".") : ""}`.trim(), carpeta: "ESPACIOS CONFINADOS", tipo: "concentrado" };
+  return { html: B.rep.documento("Monitoreo de espacios confinados", h), nombre: `MONITOREO ESPACIOS CONFINADOS ${c.proyecto} ${U.norm(titulo).replace(/[^A-Z0-9 ]/g, "").replace(/\s+/g, " ")}${d1 ? " del " + U.corta(d1).replace(/\//g, ".") : ""}${d2 ? " al " + U.corta(d2).replace(/\//g, ".") : ""}`.trim(), carpeta: "ESPACIOS CONFINADOS", tipo: "concentrado" };
 };
 /* Bitacora de seguimiento de los espacios NO LIBERADOS: los que siguen sin liberarse y los que lo estuvieron, con la fecha en que
    se liberaron, el numero que recibieron y cuanto tardaron. Despues, el detalle de cada prueba. */
-B.rep.ecSeguimientoNL = function (d1, d2) {
+B.rep.ecSeguimientoNL = function (d1, d2, uni) {      // uni = "U1" / "U2": solo los espacios de esa unidad
   const c = B.estado.config, D = B.dom, k = v => U.esc(v ?? ""), LEC = [["o2", "O2"], ["hr", "HR"], ["temp", "Temp"], ["lel", "LEL"], ["co", "CO"], ["h2s", "H2S"]];
   const dur = (a, b) => { const h = Math.max(0, Math.round((new Date(b + ":00") - new Date(a + ":00")) / 36e5)); return h >= 48 ? Math.round(h / 24) + " días" : h + " h"; };
-  const filas = B.estado.ec.filter(e => e.noLib || +e.nlNum > 0).map(e => {
+  const filas = B.estado.ec.filter(e => (e.noLib || +e.nlNum > 0) && (!uni || D.ecUni(e) === uni)).map(e => {
     const M = D.ecMons(e), nl = e.noLib ? M : M.filter(m => m.nl), prim = nl[0] || M[0], ult = nl[nl.length - 1] || prim;
     return { e, M, nl, prim, ult, sigue: !!e.noLib };
   }).filter(x => (!d1 || x.prim.fh.slice(0, 10) >= d1) && (!d2 || x.prim.fh.slice(0, 10) <= d2))
@@ -2235,7 +2235,7 @@ B.rep.ecSeguimientoNL = function (d1, d2) {
   const motivo = m => { const f = LEC.filter(([x]) => D.rango(x, m[x])).map(([x, n]) => n + " " + m[x]); return (f.length ? `<span class="fuera" style="padding:0 2px">${k(f.join(", "))}</span>` : "") + (m.obs ? (f.length ? " · " : "") + k(m.obs) : (f.length ? "" : "—")); };
   const lect = m => LEC.map(([x, n]) => m[x] === "" || m[x] == null ? "" : `<span class="${D.rango(x, m[x]) ? "fuera" : ""}" style="white-space:nowrap">${n} ${k(m[x])}</span>`).filter(Boolean).join(" · ");
   const ahora = U.ahoraISO(), nSig = filas.filter(x => x.sigue).length;
-  let h = `<h2 class="doc">BITÁCORA DE SEGUIMIENTO DE ESPACIOS CONFINADOS NO LIBERADOS</h2><div class="doc-sub">${U.esc(B.t.periodo().toUpperCase())}${d1 || d2 ? " &nbsp;|&nbsp; primera prueba " + (d1 ? "del " + U.corta(d1) : "") + (d2 ? " al " + U.corta(d2) : "") : ""}</div>
+  let h = `<h2 class="doc">BITÁCORA DE SEGUIMIENTO DE ESPACIOS CONFINADOS NO LIBERADOS</h2><div class="doc-sub">${uni ? uni + " &nbsp;|&nbsp; " : ""}${U.esc(B.t.periodo().toUpperCase())}${d1 || d2 ? " &nbsp;|&nbsp; primera prueba " + (d1 ? "del " + U.corta(d1) : "") + (d2 ? " al " + U.corta(d2) : "") : ""}</div>
     <div class="c" style="margin-bottom:6px;font-size:8pt">Espacios con prueba no satisfactoria: <b>${filas.length}</b> &nbsp;|&nbsp; Siguen NO LIBERADOS: <b>${nSig}</b> &nbsp;|&nbsp; Ya liberados: <b>${filas.length - nSig}</b> &nbsp;|&nbsp; Emitido: ${U.fh(ahora)}</div>
     <table class="dat"><thead><tr><th style="width:3%">No.</th><th style="width:4%">UNIDAD</th><th style="width:19%">ESPACIO CONFINADO</th><th style="width:9%">1ª PRUEBA</th><th style="width:15%">LECTURAS FUERA DE RANGO / OBSERVACIONES</th><th style="width:5%">PRUEBAS</th>
       <th style="width:15%">ÚLTIMA PRUEBA NO SATISFACTORIA</th><th style="width:9%">ESTATUS</th><th style="width:8%">LIBERADO EL</th><th style="width:5%">EC #</th><th style="width:8%">LIBERÓ</th><th>TIEMPO SIN LIBERAR</th></tr></thead><tbody>` +
@@ -2249,7 +2249,7 @@ B.rep.ecSeguimientoNL = function (d1, d2) {
       (x.sigue ? `<tr>${'<td style="height:17px"></td>'.repeat(11)}</tr>`.repeat(3) : "")).join("") + `</tbody></table>
     <div style="margin-top:6px;font-size:7pt;color:#595959">Un espacio NO LIBERADO no lleva número: lo recibe cuando una prueba resulta satisfactoria en todos sus parámetros. Los renglones en blanco son para anotar a mano las pruebas siguientes.
       Rangos: O2 ${k(c.o2Min)}–${k(c.o2Max)} % · LEL ≤ ${k(c.lelMax)} % · CO ≤ ${k(c.coMax)} ppm · H2S ≤ ${k(c.h2sMax)} ppm.</div>`;
-  return { html: B.rep.documento("Seguimiento de espacios no liberados", h, true), horizontal: true, nombre: `SEGUIMIENTO ESPACIOS NO LIBERADOS ${c.proyecto} ${U.corta(U.iso(new Date())).replace(/\//g, ".")}`, carpeta: "ESPACIOS CONFINADOS", tipo: "concentrado" };
+  return { html: B.rep.documento("Seguimiento de espacios no liberados", h, true), horizontal: true, nombre: `SEGUIMIENTO ESPACIOS NO LIBERADOS ${c.proyecto}${uni ? " " + uni : ""} ${U.corta(U.iso(new Date())).replace(/\//g, ".")}`, carpeta: "ESPACIOS CONFINADOS", tipo: "concentrado" };
 };
 
 /* ---------------------------------------------------------------- relatoria de un espacio confinado
@@ -3553,13 +3553,20 @@ V.monitoreo = {
   },
   render(c) {
     const { f, t } = T(), sup = B.dom.esSup(), D = B.dom;
-    const seg = D.ecSeguimiento(f, t), faltan = seg.filter(x => !x.ok);
-    const noLib = D.ecNoLiberados();
-    const cerrados = B.estado.ec.filter(e => e.cierre && !e.noLib).sort((a, b) => String(b.cierre).localeCompare(String(a.cierre))).slice(0, 12);
+    // filtro por unidad (se recuerda en este equipo): aplica a las listas, las bitacoras para llenar y los reportes de abajo
+    let uni = ""; try { uni = localStorage.getItem("b_mon_uni") || ""; } catch (e) { } if (uni !== "U1" && uni !== "U2") uni = "";
+    const deU = e => !uni || D.ecUni(e) === uni;
+    const segT = D.ecSeguimiento(f, t), seg = segT.filter(x => deU(x.e)), faltan = seg.filter(x => !x.ok);
+    const nlT = D.ecNoLiberados(), noLib = nlT.filter(deU);
+    const cerrados = B.estado.ec.filter(e => e.cierre && !e.noLib && deU(e)).sort((a, b) => String(b.cierre).localeCompare(String(a.cierre))).slice(0, 12);
+    const cuenta = u => segT.filter(x => !u || D.ecUni(x.e) === u).length + nlT.filter(e => !u || D.ecUni(e) === u).length;
     c.innerHTML = `
-      <div class="tarjeta" data-tour="mon-resumen">${cab("reloj", faltan.length ? "r" : "v", `Espacios que siguen liberados (${seg.length})`,
+      <div class="tarjeta" style="padding:10px 16px"><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><b style="font-size:13px">Unidad</b>
+        <div class="chips-ali" style="min-height:0">${[["", "Todas"], ["U1", "U1"], ["U2", "U2"]].map(([k, n]) => `<label class="chip-ali" title="Espacios que siguen liberados y no liberados"><input type="radio" name="monUni" value="${k}" ${uni === k ? "checked" : ""}><span>${n} (${cuenta(k)})</span></label>`).join("")}</div>
+        <span class="muted peque">${uni ? "Solo se muestran los espacios de <b>" + uni + "</b>; los reportes de abajo también salen solo de " + uni + "." : "Elige una unidad para ver y reportar solo sus espacios."}</span></div></div>
+      <div class="tarjeta" data-tour="mon-resumen">${cab("reloj", faltan.length ? "r" : "v", `Espacios que siguen liberados${uni ? " · " + uni : ""} (${seg.length})`,
         seg.length ? (faltan.length ? `<b style="color:var(--rojo)">${faltan.length} sin monitoreo</b> ${D.ecPlazoTxt(t)} · ${seg.length - faltan.length} al corriente.` : `Todos tienen monitoreo ${D.ecPlazoTxt(t)}.`)
-          : "No hay espacios confinados abiertos a esta fecha.",
+          : "No hay espacios confinados abiertos" + (uni ? " de " + uni : "") + " a esta fecha.",
         `${sup && seg.length ? `<button class="btn sec" id="mnBitTodas" title="Hojas en blanco para anotar a mano en campo">${B.ico("imprimir")} Bitácoras para llenar (${seg.length})</button>` : ""}
          ${sup && seg.length ? `<button class="btn sec" id="mnCerrarVarios">${B.ico("ok")} Cerrar varios…</button>` : ""}`)}
         <div class="aviso a">${B.ico("info")}<div>En campo anota cada monitoreo <b>a mano</b> en la bitácora impresa del espacio${sup ? "" : " (te la entrega el supervisor)"}. Al terminar el turno transcríbelos con <b>Capturar monitoreos</b>, cada uno con su fecha y hora real.
@@ -3581,7 +3588,7 @@ V.monitoreo = {
             </div>
           </div>`).join("") : ui.vacio("Sin espacios confinados abiertos.", "escudo")}</div>
       </div>
-      ${noLib.length ? `<div class="tarjeta" data-tour="mon-nolib">${cab("alerta", "r", `Espacios NO LIBERADOS (${noLib.length})`, "La prueba no fue satisfactoria. Sus lecturas quedan guardadas, pero no cuentan ni salen en el reporte de liberados. Se <b>liberan solos</b> al capturar una prueba con todos sus parámetros satisfactorios" + (sup ? "; como supervisor también puedes liberarlos manualmente." : "."))}
+      ${noLib.length ? `<div class="tarjeta" data-tour="mon-nolib">${cab("alerta", "r", `Espacios NO LIBERADOS${uni ? " · " + uni : ""} (${noLib.length})`, "La prueba no fue satisfactoria. Sus lecturas quedan guardadas, pero no cuentan ni salen en el reporte de liberados. Se <b>liberan solos</b> al capturar una prueba con todos sus parámetros satisfactorios" + (sup ? "; como supervisor también puedes liberarlos manualmente." : "."))}
         <div class="lista">${noLib.map(e => { const u = D.ecUltimoMon(e); return `<div class="item" data-num="${e.num}" style="flex-wrap:wrap;align-items:flex-start">
           <div class="cuerpo" style="min-width:240px;flex:1"><div class="tit">${U.esc(D.ecNum(e))} · ${U.esc(e.esp)}</div>
             <div class="meta"><span>primera prueba ${e.lib ? U.fh(e.lib) : U.corta(e.fecha)}</span><span>${U.esc(e.pers || e.capt || "")}</span><span>${D.ecMons(e).length} prueba(s)</span></div>
@@ -3599,12 +3606,12 @@ V.monitoreo = {
           ${sup ? `<button class="btn chico fantasma" data-a="rea">Reabrir</button><button class="btn chico fantasma" data-a="edi">${B.ico("editar")} Editar registro</button>` : ""}</div></div>`).join("")}</div></div>` : ""}`;
     if (sup) {
       // Reportes para imprimir o guardar en PDF: monitoreos de los espacios liberados o no liberados, y seguimiento de los no liberados
-      const R = this.rep = this.rep || { d1: "", d2: "", tipo: "todos" }, nNL = B.estado.ec.filter(e => e.noLib || +e.nlNum > 0).length;
+      const R = this.rep = this.rep || { d1: "", d2: "", tipo: "todos" }, nNL = B.estado.ec.filter(e => (e.noLib || +e.nlNum > 0) && deU(e)).length;
       const TIPOS = { todos: ["Todos los espacios", () => true], abiertos: ["Liberados que siguen abiertos", e => !e.noLib && !e.cierre], lib: ["Liberados (abiertos y cerrados)", e => !e.noLib], cerr: ["Liberados ya cerrados", e => !e.noLib && !!e.cierre], nolib: ["NO liberados (actuales)", e => !!e.noLib] };
       const caja = document.createElement("div"); caja.className = "tarjeta";
-      caja.innerHTML = `${cab("pdf", "g", "Reportes de monitoreo", "Para imprimir o guardar en PDF. El rango de fechas es opcional; vacío = toda la recarga.")}
+      caja.innerHTML = `${cab("pdf", "g", "Reportes de monitoreo" + (uni ? " · solo " + uni : ""), "Para imprimir o guardar en PDF. El rango de fechas es opcional; vacío = toda la recarga." + (uni ? " Salen solo los espacios de <b>" + uni + "</b> (cámbialo arriba, en Unidad)." : ""))}
         <div class="fila" style="align-items:flex-end"><div class="campo" style="flex:0 0 160px"><label>Desde</label><input class="inp" type="date" id="mrD1" value="${R.d1}"></div><div class="campo" style="flex:0 0 160px"><label>Hasta</label><input class="inp" type="date" id="mrD2" value="${R.d2}"></div>
-          <div class="campo" style="flex:1 1 240px"><label>Espacios del reporte de monitoreos</label><select class="inp" id="mrTipo">${Object.entries(TIPOS).map(([k, v]) => `<option value="${k}" ${R.tipo === k ? "selected" : ""}>${v[0]} (${B.estado.ec.filter(v[1]).length})</option>`).join("")}</select></div></div>
+          <div class="campo" style="flex:1 1 240px"><label>Espacios del reporte de monitoreos</label><select class="inp" id="mrTipo">${Object.entries(TIPOS).map(([k, v]) => `<option value="${k}" ${R.tipo === k ? "selected" : ""}>${v[0]} (${B.estado.ec.filter(e => deU(e) && v[1](e)).length})</option>`).join("")}</select></div></div>
         <div class="mon-reps"><div><b>Reporte de monitoreos</b><span>Cada espacio con todas sus lecturas: liberación, monitoreos y pruebas, con lo que esté fuera de rango en rojo.</span><p><button class="btn chico sec" data-r="mon" data-m="imp">${B.ico("imprimir")} Imprimir</button><button class="btn chico" data-r="mon" data-m="pdf">${B.ico("pdf")} PDF</button></p></div>
           <div><b>Bitácora de seguimiento de NO liberados (${nNL})</b><span>Los que siguen sin liberarse y los que ya se liberaron: primera prueba, motivo, cuándo se liberaron, con qué número y cuánto tardaron. Incluye el detalle de cada prueba.</span><p><button class="btn chico sec" data-r="nl" data-m="imp">${B.ico("imprimir")} Imprimir</button><button class="btn chico" data-r="nl" data-m="pdf">${B.ico("pdf")} PDF</button></p></div>
           <div><b>Hojas para llenar a mano (${noLib.length} no liberados)</b><span>Una hoja por cada espacio NO liberado, con sus pruebas ya capturadas y renglones en blanco para las siguientes.</span><p><button class="btn chico sec" data-r="hojas" data-m="imp" ${noLib.length ? "" : "disabled"}>${B.ico("imprimir")} Imprimir</button><button class="btn chico" data-r="hojas" data-m="pdf" ${noLib.length ? "" : "disabled"}>${B.ico("pdf")} PDF</button></p></div></div>`;
@@ -3612,8 +3619,8 @@ V.monitoreo = {
       caja.querySelector("#mrD1").onchange = e => R.d1 = e.target.value; caja.querySelector("#mrD2").onchange = e => R.d2 = e.target.value; caja.querySelector("#mrTipo").onchange = e => R.tipo = e.target.value;
       caja.querySelectorAll("[data-r]").forEach(b => b.onclick = ev => {
         if (R.d1 && R.d2 && R.d2 < R.d1) return ui.toast("La fecha «Hasta» no puede ser anterior a «Desde».", "error");
-        const doc = b.dataset.r === "mon" ? B.rep.ecMonitoreos(B.estado.ec.filter(TIPOS[R.tipo][1]).sort((x, y) => (!!x.noLib - !!y.noLib) || x.num - y.num), R.d1, R.d2, TIPOS[R.tipo][0])
-          : b.dataset.r === "nl" ? B.rep.ecSeguimientoNL(R.d1, R.d2) : B.rep.ecBitacora(noLib);
+        const doc = b.dataset.r === "mon" ? B.rep.ecMonitoreos(B.estado.ec.filter(e => deU(e) && TIPOS[R.tipo][1](e)).sort((x, y) => (!!x.noLib - !!y.noLib) || x.num - y.num), R.d1, R.d2, TIPOS[R.tipo][0] + (uni ? " · " + uni : ""))
+          : b.dataset.r === "nl" ? B.rep.ecSeguimientoNL(R.d1, R.d2, uni) : B.rep.ecBitacora(noLib);
         b.dataset.m === "pdf" ? B.rep.pdf(doc, ev.currentTarget) : B.rep.imprimir(doc);
       });
     }
@@ -3633,6 +3640,7 @@ V.monitoreo = {
       if (a === "edi") return V.concentrados.editar("ec", e.num);
       if (a === "rea") { if (await ui.confirmar(`¿Reabrir el <b>EC #${U.esc(D.ecNum(e))} · ${U.esc(e.esp)}</b>? Volverá a requerir un monitoreo por turno.`, "Reabrir espacio", "Reabrir")) await ejecutar(() => B.api.op("ec", "reabrir", { num: e.num }), "Espacio reabierto."); }
     });
+    c.querySelectorAll('input[name="monUni"]').forEach(r => r.onchange = () => { try { localStorage.setItem("b_mon_uni", r.value); } catch (e) { } B.app.render(); });
     const bt = c.querySelector("#mnBitTodas"); if (bt) bt.onclick = () => this.imprimir(seg.map(x => x.e), bt);
     const bc = c.querySelector("#mnCerrarVarios"); if (bc) bc.onclick = () => this.cerrar(null, seg.map(x => x.e));
   },
@@ -7159,7 +7167,7 @@ V.hoja = {
         s += idx.length === 1 ? `<circle cx="${cx}" cy="${cy}" r="${f((r + ri) / 2)}" fill="none" stroke="#${col}" stroke-width="${f(r - ri)}"/>`
           : `<path d="M${f(x0)},${f(y0)} A${r},${r} 0 ${big} 1 ${f(x1)},${f(y1)} L${f(u1)},${f(w1)} A${ri},${ri} 0 ${big} 0 ${f(u0)},${f(w0)} Z" fill="#${col}" stroke="#fff" stroke-width="${f(r * 0.022)}"/>`;
         // contenido de la rebanada: icono, nombre y porcentaje, centrados en la banda
-        const m = (a0 + a1) / 2, banda = r - ri, rm = ri + banda * 0.53, [x, y] = pt(m, rm), arco = (a1 - a0) * (ri + banda * 0.3) * 0.88, sn = Math.abs(Math.sin(m)), cs = Math.abs(Math.cos(m)), tc = claro(col) ? "#1b1b1b" : "#fff";
+        const m = (a0 + a1) / 2, banda = r - ri, rm = ri + banda * 0.53, [x, y] = pt(m, rm), arco = (a1 - a0) * (ri + banda * 0.3) * 0.88, sn = Math.abs(Math.sin(m)), cs = Math.abs(Math.cos(m)), tc = g.letras === "blanco" ? "#fff" : g.letras === "oscuro" ? "#1b1b1b" : claro(col) ? "#1b1b1b" : "#fff";
         // espacio disponible: arriba y abajo el arco es el ancho; en los lados el arco es el alto
         // en diagonal (arriba-izquierda, abajo-derecha...) el bloque se sale antes de la rebanada: se reduce el espacio
         const dg = 1 - 0.32 * Math.abs(Math.sin(2 * m)), anchoH = Math.min(sn * arco + cs * banda * 0.8, banda * 1.5) * dg, altoV = Math.min(cs * arco + sn * banda * 0.8, banda * 1.3) * dg;
@@ -7167,11 +7175,15 @@ V.hoja = {
         let fzN = Math.min(banda * 0.125, anchoH / (larga * 0.62)), fzP = Math.min(banda * 0.22, anchoH / 3.3), tamI = Math.min(banda * 0.32, anchoH * 0.4);
         const ic = BI ? BI.buscar(g.cats[i], g.dim) : null, ico = ic && (ic.s || IC[ic.k]), lin = [], max = Math.max(larga, Math.floor(anchoH / (fzN * 0.6)));
         for (const p of pal) { if (lin.length && (lin[lin.length - 1] + " " + p).length <= max) lin[lin.length - 1] += " " + p; else if (p) lin.push(p); }
-        let lineas = lin.slice(0, 3);
+        let lineas = lin;
         const k = Math.min(1, altoV / ((ico ? tamI + 3 : 0) + lineas.length * fzN * 1.05 + fzP * 1.2));
-        fzN *= k; fzP *= k; tamI *= k;
-        // si no cabe, se quita primero el icono y luego el nombre (el nombre siempre esta en la lista de al lado)
-        const conIco = ico && tamI >= 8; if (fzN < 6) { lineas = []; fzP = Math.min(banda * 0.22, anchoH / 3.3, altoV * 0.8); }
+        // el nombre va completo o no va: si no cabe (mas de 3 renglones o letra muy chica) queda solo el icono, mas grande, y el porcentaje
+        // (el nombre siempre esta en la lista de al lado)
+        if (lin.length > 3 || fzN * k < 7.5) {
+          lineas = []; fzP = Math.min(banda * 0.22, anchoH / 3.3); tamI = ico ? Math.min(banda * 0.42, anchoH * 0.62) : 0;
+          const k2 = Math.min(1, altoV / ((ico ? tamI + 3 : 0) + fzP * 1.05)); fzP *= k2; tamI *= k2;
+        } else { fzN *= k; fzP *= k; tamI *= k; }
+        const conIco = ico && tamI >= 7;
         const alto = (conIco ? tamI + 3 : 0) + lineas.length * fzN * 1.05 + fzP * (lineas.length ? 1.2 : 1.05);
         let yy = y - alto / 2;
         if (conIco) { txt += BI.dibujo(ic, IC[ic.k], x - tamI / 2, yy, tamI, tc, id + "f"); yy += tamI + 3; }
@@ -7233,7 +7245,7 @@ V.hoja = {
       for (const e of et) {
         const dentro = e.p >= (g.nombres ? 4 : 3.4), dist = dentro ? (dona ? (r + ri) / 2 : r * (e.p > 30 ? 0.55 : 0.68)) : r + 8 + (fuera++ % 2) * 11;
         let [x, y] = pt(e.m, dist); x = (+x + e.ox).toFixed(2); y = (+y + e.oy + (!dentro && d3 && Math.sin(e.m) > 0 ? dep : 0)).toFixed(2);
-        const fz = g.nombres ? (e.p >= 9 ? 13 : 10.5) : (e.p >= 9 ? 11 : 9.5), fill = dentro ? (claro(cols[e.i]) ? "#1b1b1b" : "#fff") : "#1b1b1b";
+        const fz = g.nombres ? (e.p >= 9 ? 13 : 10.5) : (e.p >= 9 ? 11 : 9.5), fill = dentro ? (g.letras === "blanco" ? "#fff" : g.letras === "oscuro" ? "#1b1b1b" : claro(cols[e.i]) ? "#1b1b1b" : "#fff") : "#1b1b1b";
         const nom = g.nombres && dentro && !dona && e.p >= 8 ? String(g.cats[e.i] || "") : "", pal = nom.split(" "), lin = [];
         for (const p of pal) { if (lin.length && (lin[lin.length - 1] + " " + p).length <= (e.p >= 20 ? 14 : 11)) lin[lin.length - 1] += " " + p; else if (p) lin.push(p); }
         const alto = fz * 0.95, y0 = +y - (lin.length * alto) / 2 + (nom ? 0 : fz * 0.35);
@@ -7249,7 +7261,7 @@ V.hoja = {
 <c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><c:date1904 val="0"/><c:roundedCorners val="0"/>
 <c:chart><c:autoTitleDeleted val="1"/>${est === "3d" ? `<c:view3D><c:rotX val="30"/><c:rotY val="0"/><c:rAngAx val="0"/></c:view3D>` : ""}<c:plotArea><c:layout/><c:${tag}><c:varyColors val="1"/><c:ser><c:idx val="0"/><c:order val="0"/><c:tx><c:strRef><c:f>Hoja1!$B$1</c:f><c:strCache><c:ptCount val="1"/><c:pt idx="0"><c:v>${esc(se.n)}</c:v></c:pt></c:strCache></c:strRef></c:tx>
 ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est === "destacado" && i === mayor ? '<c:explosion val="10"/>' : ""}<c:spPr><a:solidFill><a:srgbClr val="${cols[i] || "888888"}"/></a:solidFill><a:ln w="${est === "plano" ? 12700 : 25400}"><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill></a:ln>${est === "plano" ? "" : `<a:effectLst><a:outerShdw blurRad="50800" dist="25400" dir="5400000" algn="t" rotWithShape="0"><a:prstClr val="black"><a:alpha val="25000"/></a:prstClr></a:outerShdw></a:effectLst>`}</c:spPr></c:dPt>`).join("")}
-<c:dLbls><c:numFmt formatCode="0.0%" sourceLinked="0"/><c:spPr><a:noFill/><a:ln><a:noFill/></a:ln></c:spPr><c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="1100" b="1"><a:solidFill><a:srgbClr val="1B1B1B"/></a:solidFill></a:defRPr></a:pPr><a:endParaRPr lang="es-MX"/></a:p></c:txPr><c:showLegendKey val="0"/><c:showVal val="0"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="1"/><c:showBubbleSize val="0"/><c:showLeaderLines val="1"/></c:dLbls>
+<c:dLbls><c:numFmt formatCode="0.0%" sourceLinked="0"/><c:spPr><a:noFill/><a:ln><a:noFill/></a:ln></c:spPr><c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="1100" b="1"><a:solidFill><a:srgbClr val="${g.letras === "blanco" && tag === "doughnutChart" ? "FFFFFF" : "1B1B1B"}"/></a:solidFill></a:defRPr></a:pPr><a:endParaRPr lang="es-MX"/></a:p></c:txPr><c:showLegendKey val="0"/><c:showVal val="0"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="1"/><c:showBubbleSize val="0"/><c:showLeaderLines val="1"/></c:dLbls>
 <c:cat><c:strRef><c:f>Hoja1!$A$2:$A$${n + 1}</c:f><c:strCache><c:ptCount val="${n}"/>${g.cats.map((c, i) => `<c:pt idx="${i}"><c:v>${esc(c)}</c:v></c:pt>`).join("")}</c:strCache></c:strRef></c:cat>
 <c:val><c:numRef><c:f>Hoja1!$B$2:$B$${n + 1}</c:f><c:numCache><c:formatCode>General</c:formatCode><c:ptCount val="${n}"/>${se.v.map((v, i) => `<c:pt idx="${i}"><c:v>${v || 0}</c:v></c:pt>`).join("")}</c:numCache></c:numRef></c:val></c:ser>${est === "3d" ? "" : `<c:firstSliceAng val="0"/>`}${est === "dona" ? `<c:holeSize val="55"/>` : ""}</c:${tag}>
 <c:spPr><a:noFill/></c:spPr></c:plotArea><c:plotVisOnly val="1"/><c:dispBlanksAs val="gap"/></c:chart>
@@ -7303,6 +7315,10 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
       if (e.k === "tb") {
         const w = e.cols.reduce((a, b) => a + b, 0);
         return `<table style="left:${e.x}pt;top:${e.y}pt;width:${w}pt"><colgroup>${e.cols.map(c => `<col style="width:${c}pt">`).join("")}</colgroup>${e.celdas.map((f, i) => `<tr style="height:${e.filas[i]}pt">${f.map(c => c ? `<td${c.rs ? ` rowspan="${c.rs}"` : ""}${c.cs ? ` colspan="${c.cs}"` : ""} style="font-size:${c.sz}pt;${c.fill ? "background:#" + c.fill + ";" : "background:#fff;"}${c.u ? "text-decoration:underline;" : ""}">${esc(c.t)}</td>` : "").join("")}</tr>`).join("")}</table>`;
+      }
+      if (e.k === "ic") {      // icono de una categoria (lista de al lado de la infografia); en PowerPoint no se incluye
+        const BI = B.iconos, c = BI && BI.buscar(e.cat, e.dim), u = c && BI.lista(e.icos)[c.k], fid = "li" + (E1._gid = (E1._gid || 0) + 1), col = "#" + (e.col || "155B4E");
+        return c ? `<svg class="e" style="left:${e.x}pt;top:${e.y}pt;width:${e.w}pt;height:${e.h}pt;overflow:visible" viewBox="0 0 24 24"><defs>${BI.defs(fid, [col])}</defs>${BI.dibujo(c, u, 0, 0, 24, col, fid)}</svg>` : "";
       }
       if (e.k === "im") return `<img class="e" src="${esc(e.src)}" alt="" style="left:${e.x}pt;top:${e.y}pt;width:${e.w}pt;height:${e.h}pt;object-fit:contain">`;
       const p = e.pad || [0, 0, 0, 0];
@@ -7392,7 +7408,7 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
         const l = laminas[i], rl = [["rId1", "slideLayout", "../slideLayouts/slideLayout1.xml"], ["rId2", "image", `../media/${l.fondo}.jpg`]];
         let sp = "";
         for (const e of l.els) {
-          if (e.k === "im") continue;
+          if (e.k === "im" || e.k === "ic") continue;
           const id = ++nId, xf = (w, h) => `<a:off x="${EMU(e.x)}" y="${EMU(e.y)}"/><a:ext cx="${EMU(w)}" cy="${EMU(h)}"/>`;
           if (e.k === "g") {
             charts.push(e); const rid = "rId" + (rl.length + 1); rl.push([rid, "chart", `../charts/chart${charts.length}.xml`]);
@@ -7726,6 +7742,12 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
   const TJ = B.tj, E1 = B.e1, esc = s => U.esc(s);
   const VERDE = "155B4E", ROJO = "C8102E", NARANJA = "F28C1E", TXT = "262626";
   const PAL = ["0F5E4A", "9CCB5E", "D4A94E", "7B9CC9", "B9A0D0", "F2A04A", "A8A8B0", "9CC7EE", "E58F8F", "6FB7A8", "C9C36A", "8E8EC2"];
+  // paletas del pastel: la actual (mezcla de tonos), oscura (para letras blancas) y clara (para letras oscuras)
+  const PALS = { actual: PAL, oscura: ["0F5E4A", "1F5B8C", "8E2C48", "6A4C93", "B35A00", "2E7D32", "455A64", "00838F", "7A0019", "5D4037", "4A6FA5", "8D6E00"],
+    clara: ["9CCB5E", "9CC7EE", "F2C14E", "C9B8E0", "A8D5BA", "FFB866", "F4B6B6", "B0BEC5", "D4E157", "FFD180", "B2DFDB", "E6EE9C"] };
+  const PAL_NOM = [["actual", "Actual (tonos mezclados)"], ["oscura", "Tonos oscuros (letras blancas)"], ["clara", "Tonos claros (letras oscuras)"]];
+  const LETRAS = [["auto", "Automático (según el color)"], ["blanco", "Todas blancas"], ["oscuro", "Todas oscuras"]];
+  const lumi = h => { const x = parseInt(h || "888888", 16); return ((x >> 16) * 299 + ((x >> 8) & 255) * 587 + (x & 255) * 114) / 1000; };
   const DIMS = { std: "Estándar de seguridad", obsDepto: "Departamento observado", edif: "Edificio", turno: "Turno", energia: "Tipo de energía", uni: "Unidad" };
   const LAMS = [["estado", "Estado actual (totales, pastel y lista)"], ["top", "TOP 5 de hallazgos"], ["evol", "Evolución semana a semana"], ["std", "Estándares entre semanas"], ["depto", "Por departamento observado"], ["lugar", "Por turno, unidad y edificio"]];
   const pct = (n, t) => (t ? n / t * 100 : 0).toFixed(1) + "%";
@@ -7739,7 +7761,7 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
 
   const TD = B.tend = {
     F: null, G: {},
-    base() { return { estBar: "plana", estPie: "plano", modo: "sem", f1: "", f2: "", acum: false, desde: "", hasta: "", fu: "", subg: "", obsDepto: "", uni: "", turno: "", ae: false, dim: "std", max: 8, titulo: "", intro: "", lams: Object.fromEntries(LAMS.map(l => [l[0], true])) }; },
+    base() { return { estBar: "plana", estPie: "plano", modo: "sem", f1: "", f2: "", acum: false, desde: "", hasta: "", fu: "", subg: "", obsDepto: "", uni: "", turno: "", ae: false, dim: "std", max: 8, sinDato: "otros", paleta: "actual", letras: "auto", colores: {}, titulo: "", intro: "", lams: Object.fromEntries(LAMS.map(l => [l[0], true])) }; },
     esDeb: c => /^DEBIL/i.test(c.si || ""), esCum: c => /^CUMPLE/i.test(c.si || ""),
     pasa(c, F) {
       if (F.fu && !String(c.fu || "").split(",").includes(F.fu)) return false;
@@ -7809,8 +7831,15 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
       const cub = await this.cubetas(F, false, G), rango = cub.map(x => x.k), porSem = Object.fromEntries(cub.map(x => [x.k, x.L])), W = rango[rango.length - 1] || F.hasta;
       const L = F.acum ? cub.flatMap(x => x.L) : (porSem[W] || []), deb = L.filter(this.esDeb), cum = L.filter(this.esCum), nS = +W.slice(5), et = s => "SEM " + (+s.slice(5)), PER = this.periodo(F, rango);
       let g = this.contar(deb, F.dim); const mx = Math.max(2, Math.min(12, +F.max || 8));
-      if (g.length > mx) g = g.slice(0, mx - 1).concat([["Otros", g.slice(mx - 1).reduce((a, x) => a + x[1], 0)]]);
-      const grupos = g.map(([n, v], i) => ({ n, v, p: pct(v, deb.length), col: PAL[i % PAL.length] }));
+      // «Otros» junta lo que no cabe y la categoria «Otros» que ya traiga el Excel. Las de «Sin dato» (vacias en el Excel), segun se elija:
+      // juntarlas con «Otros», mostrarlas aparte o no incluirlas (entonces los porcentajes son sobre las que si tienen el dato)
+      const esO = k => /^OTROS?$/.test(U.norm(k).trim()), sd = F.sinDato || "otros"; let resto = 0, nomO = "Otros";
+      g = g.filter(([k, n]) => { if (k === "Sin dato" && sd === "quitar") return false; if (esO(k) || (sd === "otros" && k === "Sin dato")) { resto += n; if (esO(k)) nomO = k; return false; } return true; });
+      if (g.length + (resto ? 1 : 0) > mx) { resto += g.slice(mx - 1).reduce((a, x) => a + x[1], 0); g = g.slice(0, mx - 1); }
+      if (resto) g.push([nomO, resto]);
+      const pal = PALS[F.paleta] || PAL, cPro = F.colores || {};
+      const totG = g.reduce((a, x) => a + x[1], 0);
+      const grupos = g.map(([n, v], i) => ({ n, v, p: pct(v, totG), col: /^[0-9A-F]{6}$/.test(cPro[n] || "") ? cPro[n] : pal[i % pal.length] }));
       const todo = rango.flatMap(s => porSem[s]), debT = todo.filter(this.esDeb), cumT = todo.filter(this.esCum);
       const ult = rango.slice(-6), catsStd = this.contar(ult.flatMap(s => porSem[s].filter(this.esDeb)), F.dim).slice(0, 8).map(x => x[0]);
       const par = (dim, n) => { const c = this.contar(debT, dim).slice(0, n).map(x => x[0]), cu = new Map(this.contar(cumT, dim)), de = new Map(this.contar(debT, dim));
@@ -7819,7 +7848,7 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
       const dep = par("obsDepto", 12); dep.series[0].cols = dep.cats.map(k => U.norm(k).includes("SEGURIDAD INDUSTRIAL") ? "7A0019" : ROJO); dep.series[1].cols = dep.cats.map(k => U.norm(k).includes("SEGURIDAD INDUSTRIAL") ? "2E7D32" : "9CCB5E");
       const ant = !F.acum && rango.length > 1 ? porSem[rango[rango.length - 2]] : null;
       return {
-        W, nS, rango, L, etq: PER.etq, corto: PER.corto, estBar: F.estBar || "plana", estPie: F.estPie || "plano", n: L.length, deb: deb.length, cum: cum.length, grupos, dim: F.dim, debs: deb,
+        W, nS, rango, L, etq: PER.etq, corto: PER.corto, estBar: F.estBar || "plana", estPie: F.estPie || "plano", letras: F.letras || "auto", quitados: deb.length - totG, n: L.length, deb: deb.length, cum: cum.length, grupos, dim: F.dim, debs: deb,
         titulo: F.titulo || "Estado actual", intro: F.intro || this.introDef(), top: (G.top || []).filter(x => x && x.id), lams: F.lams || {}, encG: G.enc || "", txEvolG: G.txEvol || "",
         evol: { titulo: "Observaciones de Líderes en Campo por semana", cats: rango.map(et), etq: true, series: [{ n: "OBSERVACIONES", col: VERDE, v: rango.map(s => porSem[s].length) }, { n: "CUMPLEN LA EXPECTATIVA", col: "9CCB5E", v: rango.map(s => porSem[s].filter(this.esCum).length) }, { n: "DEBILIDADES", col: ROJO, v: rango.map(s => porSem[s].filter(this.esDeb).length) }] },
         txEvol: `En **${PER.etq}** se registraron **${L.length} observaciones**: ${cum.length} cumplieron la expectativa (${pct(cum.length, L.length)}) y **${deb.length} fueron debilidades (${pct(deb.length, L.length)})**.` +
@@ -7842,12 +7871,14 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
         c(y + hs[0] + gap, hs[1], "EAF6EC", "8CCB9B", VERDE, M.cum, ["Cumplieron", "la expectativa", "(" + pct(M.cum, M.n) + ")"]),
         c(y + hs[0] + hs[1] + 2 * gap, hs[2], "FDECEC", "F2A9A9", ROJO, M.deb, ["Debilidades", "(" + pct(M.deb, M.n) + ")"]));
     },
-    pastel(M, x, y, w, nombres) { return { k: "g", tipo: "pie", est: M.estPie, centro: "debilidades", centroTit: M.dim === "std" ? "Comportamientos más peligrosos" : DIMS[M.dim], centroSub: M.corto, dim: M.dim, icos: (TJ.datos.graf || {}).iconos, x, y, w, h: w, nombres, titulo: "", cats: M.grupos.map(g => g.n), series: [{ n: "Debilidades", v: M.grupos.map(g => g.v), cols: M.grupos.map(g => g.col) }] }; },
+    pastel(M, x, y, w, nombres) { return { k: "g", tipo: "pie", est: M.estPie, centro: M.quitados ? "con el dato" : "debilidades", centroTit: M.dim === "std" ? "Comportamientos más peligrosos" : DIMS[M.dim], centroSub: M.corto, dim: M.dim, icos: (TJ.datos.graf || {}).iconos, letras: M.letras, x, y, w, h: w, nombres, titulo: "", cats: M.grupos.map(g => g.n), series: [{ n: "Debilidades", v: M.grupos.map(g => g.v), cols: M.grupos.map(g => g.col) }] }; },
     lista(M, x, y, w, alto, sz) {
-      const n = M.grupos.length || 1, paso = Math.min(30, alto / n), els = [];
+      const n = M.grupos.length || 1, paso = Math.min(30, alto / n), els = [], conIco = M.estPie === "infografia" && !!B.iconos, ti = Math.min(19, paso * 0.68), dx = conIco ? ti + 5 : 0;
       M.grupos.forEach((g, i) => {
         const yy = y + i * paso;
-        els.push(T(x, yy, 26, paso, [P("l", [R("●", "Arial", Math.min(22, paso * 0.8), { col: g.col })])], { anc: "m" }), T(x + 32, yy, w - 132, paso, [P("l", [R(g.n, NS, sz, { col: TXT })])], { anc: "m" }),
+        // infografia: el icono de la rebanada a la derecha del color (los colores claros se oscurecen para que se vea sobre blanco)
+        if (conIco) els.push({ k: "ic", x: x + 27, y: yy + (paso - ti) / 2, w: ti, h: ti, cat: g.n, dim: M.dim, icos: (TJ.datos.graf || {}).iconos, col: lumi(g.col) > 160 ? E1.mezcla(g.col, -0.42).slice(1) : g.col });
+        els.push(T(x, yy, 26, paso, [P("l", [R("●", "Arial", Math.min(22, paso * 0.8), { col: g.col })])], { anc: "m" }), T(x + 32 + dx, yy, w - 132 - dx, paso, [P("l", [R(g.n, NS, sz, { col: TXT })])], { anc: "m" }),
           T(x + w - 100, yy, 34, paso, [P("r", [R(g.v, NS, sz, { b: 1, col: TXT })])], { anc: "m" }), T(x + w - 62, yy, 62, paso, [P("l", [R("(" + g.p + ")", NS, sz, { col: TXT })])], { anc: "m" }),
           T(x + 30, yy + paso - 1, w - 30, 0.8, [], { fill: "D9D9D9" }));
       });
@@ -7920,6 +7951,25 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
       return await new Promise((ok, mal) => { try { cv.toBlob(b => b ? ok(b) : mal(new Error("No se pudo generar la imagen.")), "image/png"); } catch (e) { mal(new Error("Este navegador no permite generar la imagen. Usa el PDF.")); } });
     },
 
+    /* ------------------------------------------------------------ color de cada rebanada (se guarda con la configuracion) */
+    async colores(F, M, alCambiar) {
+      const pal = PALS[F.paleta] || PAL, propios = Object.assign({}, F.colores || {});
+      const fila = (g, i) => { const base = pal[i % pal.length], cur = propios[g.n] || base;
+        return `<div class="fila" data-cn="${esc(g.n)}" data-base="${base}" style="align-items:center;gap:10px;margin-bottom:6px;flex-wrap:nowrap">
+          <input type="color" value="#${cur}" style="width:46px;height:34px;padding:0;border:1px solid var(--borde-2);border-radius:6px;background:none;cursor:pointer;flex:0 0 auto">
+          <span style="flex:1;min-width:0">${esc(g.n)} <span class="muted peque">(${g.v})</span></span>
+          <button class="btn chico fantasma" data-cr title="Volver al color de la paleta">Paleta</button></div>`; };
+      const r = await B.ui.modal({ titulo: "Color de cada rebanada", icono: "editar",
+        html: `<p class="muted peque" style="margin:0 0 10px">Toca el cuadro de color para cambiarlo. Los que no cambies toman la paleta elegida («${esc((PAL_NOM.find(p => p[0] === (F.paleta || "actual")) || PAL_NOM[0])[1])}»).
+          El color se recuerda por nombre (estándar, departamento…) y se guarda con <b>Guardar</b>.</p><div id="tdCols">${M.grupos.map(fila).join("")}</div>`,
+        alAbrir: v => v.querySelectorAll("[data-cr]").forEach(b => b.onclick = () => { const f = b.closest("[data-cn]"); f.querySelector("input").value = "#" + f.dataset.base; }),
+        botones: [{ t: "Cancelar", c: "fantasma", v: null }, { t: "Todos a la paleta", c: "sec", v: () => ({}) },
+          { t: "Aplicar", c: "verde", v: v => { const o = Object.assign({}, propios); v.querySelectorAll("[data-cn]").forEach(f => { const c = f.querySelector("input").value.replace("#", "").toUpperCase(); if (c === f.dataset.base.toUpperCase()) delete o[f.dataset.cn]; else o[f.dataset.cn] = c; }); return o; } }] });
+      if (!r) return;
+      F.colores = r; alCambiar();
+      B.ui.toast("Colores aplicados a la vista previa. Toca <b>Guardar</b> para conservarlos.", "ok");
+    },
+
     /* ------------------------------------------------------------ pantalla (pestana "Graficas y reportes") */
     async vista(Pv, c) {
       const D = TJ.datos, sems = Object.keys(D.semanas).sort();
@@ -7956,8 +8006,12 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
             ${sel("fu", "Archivo", [["SI", "Seguridad Industrial (SEGIND)"], ["AE", "Alta energía"]], "Ambos archivos")}
             <div class="campo" style="flex:1 1 200px"><label>Graficar las debilidades por</label><select class="inp" data-f="dim">${Object.entries(DIMS).map(([k, t]) => `<option value="${k}" ${F.dim === k ? "selected" : ""}>${t}</option>`).join("")}</select></div>
             <div class="campo" style="flex:0 0 130px"><label>Rebanadas (máx.)</label><input class="inp" type="number" min="3" max="12" data-f="max" value="${esc(F.max)}"></div>
+            <div class="campo" style="flex:1 1 200px"><label title="Debilidades que no traen ese dato en el Excel">Las de «Sin dato»</label><select class="inp" data-f="sinDato">${[["otros", "Juntarlas con «Otros»"], ["aparte", "Mostrarlas aparte"], ["quitar", "No incluirlas en el pastel"]].map(([k, t]) => `<option value="${k}" ${(F.sinDato || "otros") === k ? "selected" : ""}>${t}</option>`).join("")}</select></div>
             <div class="campo" style="flex:1 1 190px"><label>Estilo de las barras</label><select class="inp" data-f="estBar">${E1.EST_BAR.map(([k, t]) => `<option value="${k}" ${(F.estBar || "plana") === k ? "selected" : ""}>${t}</option>`).join("")}</select></div>
             <div class="campo" style="flex:1 1 190px"><label>Estilo del pastel</label><select class="inp" data-f="estPie">${E1.EST_PIE.map(([k, t]) => `<option value="${k}" ${(F.estPie || "plano") === k ? "selected" : ""}>${t}</option>`).join("")}</select></div>${F.estPie === "infografia" && B.iconos && !B.modoLocal ? `<div class="campo" style="flex:0 0 auto"><label>&nbsp;</label><button class="btn sec" id="tdIconos" title="Cambiar los íconos de la infografía por los tuyos">${B.ico("editar")} Íconos…</button></div>` : ""}</div>
+          <div class="fila"><div class="campo" style="flex:1 1 220px"><label>Colores del pastel</label><select class="inp" data-f="paleta">${PAL_NOM.map(([k, t]) => `<option value="${k}" ${(F.paleta || "actual") === k ? "selected" : ""}>${t}</option>`).join("")}</select></div>
+            <div class="campo" style="flex:1 1 200px"><label>Letras sobre el pastel</label><select class="inp" data-f="letras">${LETRAS.map(([k, t]) => `<option value="${k}" ${(F.letras || "auto") === k ? "selected" : ""}>${t}</option>`).join("")}</select></div>
+            <div class="campo" style="flex:0 0 auto"><label>&nbsp;</label><button class="btn sec" id="tdColores" title="Cambiar el color de cada rebanada" ${M.grupos.length ? "" : "disabled"}>${B.ico("editar")} Color de cada rebanada…${Object.keys(F.colores || {}).length ? " (" + Object.keys(F.colores).length + ")" : ""}</button></div></div>
           <div class="fila">${sel("subg", "Subgerencia observada", ops("subg"), "Todas")}${sel("obsDepto", "Departamento observado", ops("obsDepto"), "Todos")}${sel("uni", "Unidad", ops("uni"), "Todas")}${sel("turno", "Turno", ops("turno"), "Todos")}
             <label class="chip-ali" style="margin:0 0 14px"><input type="checkbox" data-f="ae" ${F.ae ? "checked" : ""}><span>Solo con peligros de alta energía</span></label></div>
           <div class="tj-kpis" style="margin:2px 0 12px"><div><b>${M.n}</b><span>observaciones en ${esc(M.etq)}${F.acum && M.n !== cruda.length ? " (de " + cruda.length + " del periodo)" : ""}</span></div><div><b style="color:var(--verde,#1E6B4A)">${M.cum}</b><span>cumplieron la expectativa (${pct(M.cum, M.n)})</span></div><div><b style="color:var(--rojo)">${M.deb}</b><span>debilidades (${pct(M.deb, M.n)})</span></div><div><b>${M.rango.length}</b><span>semana(s) en las tendencias${F.acum ? "" : " · totales y TOP de " + esc(M.etq)}</span></div></div>
@@ -8025,6 +8079,7 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
       const listo = async () => { M = await this.modelo(F, G); if (!this.laminas(M).length) { B.ui.toast("Marca al menos una lámina.", "error"); return false; } return true; };
       c.querySelector("#tdGuardar").onclick = () => guardar();
       const bIco = c.querySelector("#tdIconos"); if (bIco) bIco.onclick = () => B.iconos.editar(D, () => prev());
+      c.querySelector("#tdColores").onclick = () => this.colores(F, M, repinta);
       c.querySelector("#tdPdf").onclick = async e => { const b = e.currentTarget; if (await listo() && await guardar(true)) B.rep.pdf(this.doc(M), b); };
       c.querySelector("#tdPptx").onclick = async () => {
         if (!(await listo()) || !(await guardar(true))) return;
@@ -10925,7 +10980,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "4.18.1", servidorViejo: false,
+  info: {}, VERSION: "4.19", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -11112,7 +11167,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "procedimientos" ? '<span class="contador oculto" id="cntProc"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.18.1")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.19")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
