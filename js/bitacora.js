@@ -825,7 +825,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.19", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.19.1", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -7316,7 +7316,7 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
         const w = e.cols.reduce((a, b) => a + b, 0);
         return `<table style="left:${e.x}pt;top:${e.y}pt;width:${w}pt"><colgroup>${e.cols.map(c => `<col style="width:${c}pt">`).join("")}</colgroup>${e.celdas.map((f, i) => `<tr style="height:${e.filas[i]}pt">${f.map(c => c ? `<td${c.rs ? ` rowspan="${c.rs}"` : ""}${c.cs ? ` colspan="${c.cs}"` : ""} style="font-size:${c.sz}pt;${c.fill ? "background:#" + c.fill + ";" : "background:#fff;"}${c.u ? "text-decoration:underline;" : ""}">${esc(c.t)}</td>` : "").join("")}</tr>`).join("")}</table>`;
       }
-      if (e.k === "ic") {      // icono de una categoria (lista de al lado de la infografia); en PowerPoint no se incluye
+      if (e.k === "ic") {      // icono de una categoria (lista de al lado de la infografia); en PowerPoint va como imagen PNG
         const BI = B.iconos, c = BI && BI.buscar(e.cat, e.dim), u = c && BI.lista(e.icos)[c.k], fid = "li" + (E1._gid = (E1._gid || 0) + 1), col = "#" + (e.col || "155B4E");
         return c ? `<svg class="e" style="left:${e.x}pt;top:${e.y}pt;width:${e.w}pt;height:${e.h}pt;overflow:visible" viewBox="0 0 24 24"><defs>${BI.defs(fid, [col])}</defs>${BI.dibujo(c, u, 0, 0, 24, col, fid)}</svg>` : "";
       }
@@ -7335,6 +7335,21 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
     },
 
     /* ------------------------------------------------------------ PowerPoint (.pptx) */
+    // un elemento de la lamina como imagen PNG con fondo transparente, dibujado igual que en el PDF (iconos, dona tipo infografia)
+    async aPng(e, k) {
+      const dato = async url => { if (/^data:/.test(url)) return url; const b = await (await fetch(url)).blob(); return await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(b); }); };
+      const el = Object.assign({}, e, { x: 0, y: 0 }); if (el.k === "im") el.src = await dato(el.src);
+      const h = this.elHtml(el); if (!h) throw new Error("sin icono");      // categoria sin icono: no se agrega nada
+      const caja = document.createElement("div"); caja.className = "x";
+      caja.innerHTML = `<style>${this.css(".x")}</style><div class="s" style="width:${e.w}pt;height:${e.h}pt;overflow:visible">${h}</div>`;
+      caja.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
+      const pw = e.w * 4 / 3, ph = e.h * 4 / 3, W = Math.round(pw * k), H = Math.round(ph * k);
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${pw} ${ph}"><foreignObject x="0" y="0" width="${pw}" height="${ph}">${new XMLSerializer().serializeToString(caja)}</foreignObject></svg>`;
+      const img = new Image(); await new Promise((ok, mal) => { img.onload = ok; img.onerror = mal; img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg); });
+      const cv = document.createElement("canvas"); cv.width = W; cv.height = H; cv.getContext("2d").drawImage(img, 0, 0, W, H);
+      const b = await new Promise((ok, mal) => cv.toBlob(x => x ? ok(x) : mal(new Error("sin imagen")), "image/png"));
+      return new Uint8Array(await b.arrayBuffer());
+    },
     zip(arch) {
       const tabla = E1._crc || (E1._crc = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; }));
       const crc = d => { let c = 0xFFFFFFFF; for (let i = 0; i < d.length; i++) c = tabla[(c ^ d[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
@@ -7402,14 +7417,20 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
       const grupo = `<p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>`;
       const lado = t => `<a:${t} w="9525"><a:solidFill><a:srgbClr val="000000"/></a:solidFill></a:${t}>`;
       const arch = [], charts = [], slides = [];
-      let nId = 1;
+      let nId = 1, nImg = 0;
       const laminas = lam || this.laminas(M);
       for (let i = 0; i < laminas.length; i++) {
         const l = laminas[i], rl = [["rId1", "slideLayout", "../slideLayouts/slideLayout1.xml"], ["rId2", "image", `../media/${l.fondo}.jpg`]];
         let sp = "";
         for (const e of l.els) {
-          if (e.k === "im" || e.k === "ic") continue;
           const id = ++nId, xf = (w, h) => `<a:off x="${EMU(e.x)}" y="${EMU(e.y)}"/><a:ext cx="${EMU(w)}" cy="${EMU(h)}"/>`;
+          // iconos, imagenes y la dona tipo infografia (con sus iconos dentro) van como imagen: se ven igual que en el PDF
+          if (e.k === "im" || e.k === "ic" || (e.k === "g" && e.tipo === "pie" && e.est === "infografia")) {
+            let png; try { png = await this.aPng(e, e.k === "g" ? 4 : 8); } catch (x) { continue; }
+            nImg++; arch.push({ n: `ppt/media/img${nImg}.png`, d: png }); const rid = "rId" + (rl.length + 1); rl.push([rid, "image", `../media/img${nImg}.png`]);
+            sp += `<p:pic><p:nvPicPr><p:cNvPr id="${id}" name="${e.k === "g" ? "Grafica infografia" : e.k === "ic" ? "Icono " + esc(e.cat || "") : "Imagen " + id}"/><p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="${rid}"/><a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr><a:xfrm>${xf(e.w, e.h)}</a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>`;
+            continue;
+          }
           if (e.k === "g") {
             charts.push(e); const rid = "rId" + (rl.length + 1); rl.push([rid, "chart", `../charts/chart${charts.length}.xml`]);
             sp += `<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="${id}" name="Grafica ${charts.length}"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr><p:xfrm>${xf(e.w, e.h)}</p:xfrm><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart"><c:chart xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" r:id="${rid}"/></a:graphicData></a:graphic></p:graphicFrame>`;
@@ -7444,7 +7465,7 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
         <a:fontScheme name="E+1"><a:majorFont><a:latin typeface="Calibri"/><a:ea typeface=""/><a:cs typeface=""/></a:majorFont><a:minorFont><a:latin typeface="Calibri"/><a:ea typeface=""/><a:cs typeface=""/></a:minorFont></a:fontScheme>
         <a:fmtScheme name="E+1"><a:fillStyleLst>${tres('<a:solidFill><a:schemeClr val="phClr"/></a:solidFill>')}</a:fillStyleLst><a:lnStyleLst>${tres('<a:ln w="6350"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:ln>')}</a:lnStyleLst><a:effectStyleLst>${tres("<a:effectStyle><a:effectLst/></a:effectStyle>")}</a:effectStyleLst><a:bgFillStyleLst>${tres('<a:solidFill><a:schemeClr val="phClr"/></a:solidFill>')}</a:bgFillStyleLst></a:fmtScheme></a:themeElements></a:theme>`;
       const fijo = [
-        { n: "[Content_Types].xml", d: X + `<Types xmlns="${PK}/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="jpg" ContentType="image/jpeg"/><Default Extension="xlsx" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"/>
+        { n: "[Content_Types].xml", d: X + `<Types xmlns="${PK}/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="jpg" ContentType="image/jpeg"/><Default Extension="png" ContentType="image/png"/><Default Extension="xlsx" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"/>
           <Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/><Override PartName="/ppt/slideMasters/slideMaster1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"/><Override PartName="/ppt/slideLayouts/slideLayout1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/><Override PartName="/ppt/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>
           ${slides.map(i => `<Override PartName="/ppt/slides/slide${i}.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>`).join("")}${charts.map((c, i) => `<Override PartName="/ppt/charts/chart${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/>`).join("")}</Types>` },
         { n: "_rels/.rels", d: rels([["rId1", "officeDocument", "ppt/presentation.xml"]]) },
@@ -7873,14 +7894,28 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
     },
     pastel(M, x, y, w, nombres) { return { k: "g", tipo: "pie", est: M.estPie, centro: M.quitados ? "con el dato" : "debilidades", centroTit: M.dim === "std" ? "Comportamientos más peligrosos" : DIMS[M.dim], centroSub: M.corto, dim: M.dim, icos: (TJ.datos.graf || {}).iconos, letras: M.letras, x, y, w, h: w, nombres, titulo: "", cats: M.grupos.map(g => g.n), series: [{ n: "Debilidades", v: M.grupos.map(g => g.v), cols: M.grupos.map(g => g.col) }] }; },
     lista(M, x, y, w, alto, sz) {
-      const n = M.grupos.length || 1, paso = Math.min(30, alto / n), els = [], conIco = M.estPie === "infografia" && !!B.iconos, ti = Math.min(19, paso * 0.68), dx = conIco ? ti + 5 : 0;
-      M.grupos.forEach((g, i) => {
-        const yy = y + i * paso;
+      // cada renglon mide lo que ocupa su nombre (1, 2 o 3 lineas); si no caben todos, la letra baja de medio en medio punto (minimo 9)
+      const gs = M.grupos, n = gs.length || 1, els = [], conIco = M.estPie === "infografia" && !!B.iconos;
+      const nLin = (t, s, an) => Math.max(1, Math.round(E1.ajustar(t, an, 1e6, s, s).h / (s * 1.2)));
+      let s = sz, ti = 0, dx = 0, alt = [];
+      for (; ; s -= 0.5) {
+        ti = conIco ? Math.min(19, s * 1.45) : 0; dx = conIco ? ti + 5 : 0;
+        const an = (w - 132 - dx) * 0.94, min1 = Math.max(ti + 5, s * 1.2 + 7);
+        alt = gs.map(g => Math.max(min1, nLin(g.n, s, an) * s * 1.2 + 6));
+        if (alt.reduce((a, b) => a + b, 0) <= alto || s <= 9) break;
+      }
+      const suma = alt.reduce((a, b) => a + b, 0) || 1, uno = Math.min(...alt.concat([30]));
+      if (suma > alto) alt = alt.map(h => h * alto / suma);                         // ni a 9 puntos caben: se aprietan parejo
+      else { const mas = Math.min((alto - suma) / n, Math.max(0, 30 - uno)); alt = alt.map(h => h + mas); }   // lo que sobra se reparte (hasta 30 pt el renglon sencillo)
+      let yy = y;
+      gs.forEach((g, i) => {
+        const h = alt[i], tiR = Math.min(ti, h - 3);
         // infografia: el icono de la rebanada a la derecha del color (los colores claros se oscurecen para que se vea sobre blanco)
-        if (conIco) els.push({ k: "ic", x: x + 27, y: yy + (paso - ti) / 2, w: ti, h: ti, cat: g.n, dim: M.dim, icos: (TJ.datos.graf || {}).iconos, col: lumi(g.col) > 160 ? E1.mezcla(g.col, -0.42).slice(1) : g.col });
-        els.push(T(x, yy, 26, paso, [P("l", [R("●", "Arial", Math.min(22, paso * 0.8), { col: g.col })])], { anc: "m" }), T(x + 32 + dx, yy, w - 132 - dx, paso, [P("l", [R(g.n, NS, sz, { col: TXT })])], { anc: "m" }),
-          T(x + w - 100, yy, 34, paso, [P("r", [R(g.v, NS, sz, { b: 1, col: TXT })])], { anc: "m" }), T(x + w - 62, yy, 62, paso, [P("l", [R("(" + g.p + ")", NS, sz, { col: TXT })])], { anc: "m" }),
-          T(x + 30, yy + paso - 1, w - 30, 0.8, [], { fill: "D9D9D9" }));
+        if (conIco) els.push({ k: "ic", x: x + 27, y: yy + (h - tiR) / 2, w: tiR, h: tiR, cat: g.n, dim: M.dim, icos: (TJ.datos.graf || {}).iconos, col: lumi(g.col) > 160 ? E1.mezcla(g.col, -0.42).slice(1) : g.col });
+        els.push(T(x, yy, 26, h, [P("l", [R("●", "Arial", Math.min(22, s * 1.6), { col: g.col })])], { anc: "m" }), T(x + 32 + dx, yy, w - 132 - dx, h, [P("l", [R(g.n, NS, s, { col: TXT })])], { anc: "m" }),
+          T(x + w - 100, yy, 34, h, [P("r", [R(g.v, NS, s, { b: 1, col: TXT })])], { anc: "m" }), T(x + w - 62, yy, 62, h, [P("l", [R("(" + g.p + ")", NS, s, { col: TXT })])], { anc: "m" }),
+          T(x + 30, yy + h - 1, w - 30, 0.8, [], { fill: "D9D9D9" }));
+        yy += h;
       });
       return els;
     },
@@ -8022,7 +8057,7 @@ ${g.cats.map((c, i) => `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/>${est ===
         <div class="tarjeta"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start"><div><h2 style="margin:0;font-size:17px">TOP ${G.top.length} · hallazgos con mayor potencial de consecuencia</h2><p class="muted peque" style="margin:4px 0 0">Se proponen las debilidades que marcaste como acto o condición insegura y las de alta energía. Cambia cuáles van, su orden y resume los textos.</p></div>
             <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn chico sec" id="tdMas" ${G.top.length >= 5 || !M.debs.length ? "disabled" : ""}>${B.ico("mas")} Agregar</button><button class="btn chico sec" id="tdProp">${B.ico("reutilizar")} Proponer de nuevo</button></div></div>
           <div style="margin-top:12px">${G.top.length ? G.top.map(filaTop).join("") : `<p class="muted" style="margin:0">Sin hallazgos en el TOP: la lámina no se incluye.${M.debs.length ? "" : " No hay debilidades con este filtro."}</p>`}</div></div>
-        <div class="tarjeta"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start"><div><h2 style="margin:0;font-size:17px">Vista previa</h2><p class="muted peque" style="margin:4px 0 0"><b>Toca cualquier título o texto de la vista previa para corregirlo ahí mismo</b>; se guarda con <b>Guardar</b>. En PowerPoint los textos y las gráficas también se pueden editar (clic derecho en la gráfica → Modificar datos).</p></div>
+        <div class="tarjeta"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start"><div><h2 style="margin:0;font-size:17px">Vista previa</h2><p class="muted peque" style="margin:4px 0 0"><b>Toca cualquier título o texto de la vista previa para corregirlo ahí mismo</b>; se guarda con <b>Guardar</b>. En PowerPoint los textos y las gráficas también se pueden editar (clic derecho en la gráfica → Modificar datos); la dona tipo <b>infografía</b> y sus íconos van como imagen.</p></div>
             <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn sec" id="tdGuardar">${B.ico("ok")} Guardar</button><button class="btn" id="tdPdf">${B.ico("pdf")} ${B.modoLocal ? "Guardar PDF" : "Generar PDF"}</button><button class="btn dorado" id="tdPptx">${B.ico("descargar")} PowerPoint (.pptx)</button>
               <button class="btn sec" id="tdPngH" title="La lámina «Estado actual» como imagen 16:9">${B.ico("descargar")} Imagen horizontal</button><button class="btn sec" id="tdPngV" title="Infografía vertical para WhatsApp">${B.ico("descargar")} Imagen vertical</button></div></div>
           <style>${E1.css(".e1-doc")} #tdDoc [data-e],#tdVert [data-e]{cursor:text;border-radius:3px} #tdDoc [data-e]:hover,#tdVert [data-e]:hover{outline:2px dashed rgba(100,116,139,.7);outline-offset:1px} #tdDoc [data-e]:focus,#tdVert [data-e]:focus{outline:3px solid #2563EB;outline-offset:1px;background-color:rgba(255,255,255,.55)}</style><div class="e1-prev" style="margin-top:12px"><div class="e1-doc" id="tdDoc"></div></div>
@@ -10980,7 +11015,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "4.19", servidorViejo: false,
+  info: {}, VERSION: "4.19.1", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -11167,7 +11202,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "procedimientos" ? '<span class="contador oculto" id="cntProc"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.19")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.19.1")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
