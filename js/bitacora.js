@@ -825,7 +825,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.19.1", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.19.2", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -5014,6 +5014,13 @@ B.hoja = {
     const lista = forzarRol ? [...new Set([...D.personalDelTurno(f, t), ...pres])] : pres.length ? pres : D.personalDelTurno(f, t);
     return D.ordenados(lista).filter(i => { const p = D.persona(i); return p && cats.includes(D.catOrden(p.cat)); }).join(" / ");
   },
+  // Supervisor(es) del turno: quien elaboro y quien reviso, mas los supervisores marcados presentes (antes solo salia el que elaboro)
+  sups(f, t) {
+    const D = B.dom, td = D.turnoDatos(f, t) || {};
+    const l = [td.elab, td.rev].filter(Boolean).map(x => U.ini(x)).concat(this.presentesInis(f, t).filter(i => { const p = D.persona(i); return p && D.catOrden(p.cat) === 4; }));
+    const u = [...new Set(l)];
+    return u.length ? D.ordenados(u).join(" / ") : U.ini(B.usuario.ini);
+  },
   nueva(f, t) {
     const td = B.dom.turnoDatos(f, t) || {}, u = (etq) => ({ etq, dias: "", modo: "", pot: "", x1: "", x2: "", x3: "", y2: "", y3: "" });
     return {
@@ -5022,14 +5029,14 @@ B.hoja = {
       u1: u("Días de Recarga"), u2: { ...u("Días continuos en línea"), x1: "H2: ", x2: "IQ: ", x3: "TV: " },
       petar: [1, 2, 3, 4].map(() => ({ t: "PETAR ", l1: "", l2: "Dosis del día: ", l3: "Dosis de ayer: ", z: "" })),
       agenda: ["19:00 hrs Reunión Inicio de Turno (CECOR Sala 1)", "20:00 hrs Reunión de ALINEAMIENTO OPERATIVO", "20:10 hrs Reunión con personal técnico SGIND Y PCI", "05:30 hrs Reunión Cierre de Turno (CECOR Sala 1)"],
-      sup: U.ini(td.elab || td.rev || B.usuario.ini), vac: "", sitio: this.inis(f, t, [1, 2, 5]), incap: "N/A", comis: "N/A", espec: this.inis(f, t, [3]), sinmov: "N/A", persAuto: true,
+      sup: this.sups(f, t), supAuto: true, vac: "", sitio: this.inis(f, t, [1, 2, 5]), incap: "N/A", comis: "N/A", espec: this.inis(f, t, [3]), sinmov: "N/A", persAuto: true,
       extraU1: [], extraU2: [], inop1: [], inop2: []
     };
   },
   // hoja del turno: la guardada, o una nueva arrastrando los datos de la hoja anterior (los contadores de dias avanzan)
   base(f, t) {
     // hoja guardada: si se guardo antes de esta version (sin persAuto) se respeta tal cual su personal
-    const g = this.de(f, t); if (g) return JSON.parse(JSON.stringify({ ...this.nueva(f, t), ...g, persAuto: g.persAuto === true }));
+    const g = this.de(f, t); if (g) return JSON.parse(JSON.stringify({ ...this.nueva(f, t), ...g, persAuto: g.persAuto === true, supAuto: g.supAuto === true }));
     const n = this.nueva(f, t), a = this.anterior(f, t);
     if (!a) return n;
     const h = JSON.parse(JSON.stringify({ ...n, ...a }));
@@ -5044,7 +5051,7 @@ B.hoja = {
     h.sitio = n.sitio;
     h.espec = n.espec;
     h.persAuto = true;
-    h.sup = n.sup;
+    h.sup = n.sup; h.supAuto = true;
     h._mismo = m ? B.t.corto(m.fecha, m.turno) : "";
     const dias = U.dia(n.fechaHoja) - U.dia(a.fechaHoja || this.fechaHoja(a.fecha, a.turno));
     const mas = v => (String(v).trim() !== "" && /^\d+$/.test(String(v).trim()) && dias > 0) ? String(+v + dias) : v;
@@ -5188,6 +5195,7 @@ V.hoja = {
     const h = this.borr[k], e = U.esc, acts = H.actividades(f, t);
     // mientras no se corrijan a mano, las iniciales siguen a los presentes del turno (aunque se marquen despues de abrir la hoja)
     if (h.persAuto) { h.sitio = H.inis(f, t, [1, 2, 5]); h.espec = H.inis(f, t, [3]); }
+    if (h.supAuto) h.sup = H.sups(f, t);
     const inp = (ruta, et, o = {}) => `<div class="campo" style="${o.st || ""}"><label>${et}</label><input class="inp ${o.cl || ""}" data-h="${ruta}" type="${o.tipo || "text"}" value="${e(ruta.split(".").reduce((x, p) => (x == null ? "" : x[p]), h) ?? "")}" placeholder="${e(o.ph || "")}"></div>`;
     const area = (ruta, et) => `<div class="campo"><label>${et}</label><textarea class="inp" rows="2" data-h="${ruta}">${e(h[ruta] || "")}</textarea></div>`;
     const unidad = (u, n) => `<div class="hoja-sec">Unidad ${n}</div><div class="grid4">${inp(u + ".etq", "Etiqueta de días")}${inp(u + ".dias", "Días (avanza solo)")}${inp(u + ".modo", "Modo de operación COA")}${inp(u + ".pot", "Potencia eléctrica", { ph: "100% 762 MWe" })}
@@ -5209,14 +5217,14 @@ V.hoja = {
         <div class="grid4">${(h.petar || []).map((p, i) => `<div>${inp("petar." + i + ".t", "PETAR " + (i + 1), { ph: "PETAR 26-1R1014 (mR)" })}${inp("petar." + i + ".l1", "Acumulado", { ph: "0 de 14 sem" })}${inp("petar." + i + ".l2", "Dosis del día")}${inp("petar." + i + ".l3", "Dosis de ayer")}${inp("petar." + i + ".z", "Zona", { ph: "RX, TB Y RW (24RU1)" })}</div>`).join("")}</div>
       </div>
       <div class="cuadricula">
-        <div class="tarjeta c6">${cab("calendario", "a", "Reuniones y recurso", "Columna «Actividades pendientes de atender y recurso». Las iniciales del personal se colocan según los marcados presentes en el turno; puedes modificarlas o corregirlas a mano directamente en los campos.",
+        <div class="tarjeta c6">${cab("calendario", "a", "Reuniones y recurso", "Columna «Actividades pendientes de atender y recurso». Las iniciales del personal se colocan según los marcados presentes en el turno; los <b>supervisores</b> (quien elaboró, quien revisó y los marcados presentes) van en «Supervisor». Puedes modificarlas o corregirlas a mano directamente en los campos.",
           `<div style="display:flex;gap:6px;flex-wrap:wrap">
             <button class="btn chico verde" id="hjPres" title="Colocar las iniciales del personal marcado presente en este turno">${B.ico("usuarios")} Traer presentes del turno</button>
             <button class="btn chico sec" id="hjPers" title="Proponer con todo el personal programado en el rol más los marcados presentes (aunque sean de otro turno)">${B.ico("reutilizar")} Según el rol</button>
           </div>`)}
           <div class="hoja-sec" style="margin-top:0">Reuniones / pendientes de atender</div>${lista("agenda", "19:00 hrs Reunión…")}
           <div class="hoja-sec">Recurso</div>
-          <div class="grid2">${inp("sup", "Supervisor")}${inp("vac", "Vacaciones / permiso")}</div>${inp("sitio", "Personal laborando en sitio", { ph: "Iniciales separadas por / (ej. KMH / JRS)" })}
+          <div class="grid2">${inp("sup", "Supervisor", { ph: "Iniciales separadas por / (ej. CALH / EMR)" })}${inp("vac", "Vacaciones / permiso")}</div>${inp("sitio", "Personal laborando en sitio", { ph: "Iniciales separadas por / (ej. KMH / JRS)" })}
           <div class="grid2">${inp("espec", "Personal especializado", { ph: "Iniciales separadas por /" })}${inp("incap", "Personal incapacitado")}${inp("comis", "Personal comisionado")}${inp("sinmov", "Personal sin movimiento")}</div>
         </div>
         <div class="tarjeta c6" data-tour="hoja-acts">${cab("lista", "g", "Actividades (" + acts.length + ")", "Salen solas de la bitácora: solo las pendientes, en proceso, por asignar y recurrentes activas. Elige la unidad de cada una; las por asignar se pueden editar con el lápiz.", `<a class="btn chico sec" href="#/actividades">Asignar…</a>`)}
@@ -5244,7 +5252,7 @@ V.hoja = {
     const cambio = U.debounce(pintar, 350);
     // volver a dibujar SIN que la pagina salte al inicio (al agregar o quitar renglones)
     const rer = foco => { const y = window.scrollY; B.app.render(); window.scrollTo(0, y); if (foco) { const l = document.querySelectorAll(`[data-h^="${foco}."]`), i = l[l.length - 1]; if (i) i.focus({ preventScroll: true }); } };
-    c.querySelectorAll("[data-h]").forEach(i => i.addEventListener("input", () => { poner(i.dataset.h, i.value); if (i.dataset.h === "sitio" || i.dataset.h === "espec") h.persAuto = false; cambio(); }));
+    c.querySelectorAll("[data-h]").forEach(i => i.addEventListener("input", () => { poner(i.dataset.h, i.value); if (i.dataset.h === "sitio" || i.dataset.h === "espec") h.persAuto = false; if (i.dataset.h === "sup") h.supAuto = false; cambio(); }));
     c.querySelectorAll("[data-add]").forEach(b => b.onclick = () => { (h[b.dataset.add] = h[b.dataset.add] || []).push(b.dataset.obj ? { c: "", i: "", v: "" } : ""); rer(b.dataset.add); });
     c.querySelectorAll("[data-del]").forEach(b => b.onclick = () => { const [r, i] = b.dataset.del.split("."); h[r].splice(+i, 1); rer(); });
     ui.activarSeg(c, async (s, v) => {
@@ -5267,8 +5275,7 @@ V.hoja = {
       h.sitio = H.inis(f, t, [1, 2, 5]);
       h.espec = H.inis(f, t, [3]);
       h.persAuto = true;
-      const td = B.dom.turnoDatos(f, t) || {};
-      h.sup = U.ini(td.elab || td.rev || B.usuario.ini);
+      h.sup = H.sups(f, t); h.supAuto = true;
       rer();
       if (pres.length) {
         ui.toast(`Iniciales actualizadas con ${pres.length} persona(s) presente(s) en el turno. Puedes corregirlas a mano si lo requieres.`, "ok");
@@ -5281,8 +5288,7 @@ V.hoja = {
       h.sitio = H.inis(f, t, [1, 2, 5], true);
       h.espec = H.inis(f, t, [3], true);
       h.persAuto = false;
-      const td = B.dom.turnoDatos(f, t) || {};
-      h.sup = U.ini(td.elab || td.rev || B.usuario.ini);
+      h.sup = H.sups(f, t); h.supAuto = true;
       rer();
       ui.toast("Iniciales propuestas con el rol de turno más todos los marcados presentes.", "aviso");
     };
@@ -11015,7 +11021,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "4.19.1", servidorViejo: false,
+  info: {}, VERSION: "4.19.2", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -11202,7 +11208,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "procedimientos" ? '<span class="contador oculto" id="cntProc"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.19.1")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.19.2")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
