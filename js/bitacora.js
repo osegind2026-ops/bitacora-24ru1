@@ -431,13 +431,26 @@ B.dom = {
     return this.ecSeguimiento(f, t, soloAnteriores).flatMap(x => x.elevs.length ? x.elevs.map(v => ({ e: x.e, u: v.u, ok: v.ok, elev: v.elev })) : [{ e: x.e, u: x.u, ok: x.ok, elev: "" }]);
   },
 
+  /* Equipo de una actividad (mismo "grupo"). Recurrentes: la plantilla (por asignar) va sola y quienes la tomaron solo forman
+     equipo con los de su mismo turno; asi editar una no cambia la plantilla ni las de otros turnos (igual que el servidor). */
+  esPlantillaRecu(x) { return !x.ini && !!x.recurrente; },
+  grupoAct(a, L) {
+    if (!a.grupo || this.esPlantillaRecu(a)) return [a];
+    const l = (L || B.estado.actividades).filter(x => x.grupo === a.grupo);
+    const pl = l.find(x => this.esPlantillaRecu(x));
+    return pl ? l.filter(x => !this.esPlantillaRecu(x) && x.fecha === a.fecha && x.turno === a.turno) : l;
+  },
+  // plantilla recurrente de la que salio una actividad tomada (null si no viene de una recurrente)
+  plantillaDe(a) { return a.ini && a.grupo ? B.estado.actividades.find(x => x.grupo === a.grupo && this.esPlantillaRecu(x)) || null : null; },
+  // posicion de una actividad: la que le dio su responsable al ordenar Mis actividades (ord) o, si no, la de captura (id)
+  actOrden(a) { return a.ord != null && a.ord !== "" && !isNaN(+a.ord) ? +a.ord : +a.id; },
   /* Datos completos para el reporte del turno */
   reporte(f, t) {
     // ACTIVIDADES EN UN SOLO APARTADO: un renglon por actividad (iniciales de todos | actividad | estatus).
     // Entran: lo realizado/concluido en el turno, lo que sigue en proceso o pendiente (tambien de turnos
     // anteriores) y lo que esta por asignar. Los comentarios individuales se juntan; si son iguales, se unifican.
     const K = B.t.clave(f, t), filas = new Map(), ORDEN = ["Realizada", "Concluida", "En proceso", "Pendiente", "Por asignar"];
-    const acts = [...B.estado.actividades].sort((a, b) => a.id - b.id);
+    const acts = [...B.estado.actividades].sort((a, b) => this.actOrden(a) - this.actOrden(b));
     for (const a of acts) {
       const ck = B.t.clave(a.fecha, a.turno), zk = a.fCierre ? B.t.clave(a.fCierre, a.tCierre) : 0;
       let est;
@@ -508,7 +521,7 @@ B.dom = {
   // cada quien los suyos; el supervisor, los de cualquiera.
   comentarios(a) {
     const sup = this.esSup(), yoI = U.ini(B.usuario.ini), r = [];
-    const equipo = !!a.grupo && U.ini(a.ini) === yoI && this.todas().some(x => x.grupo === a.grupo && x.id !== a.id);      // actividad compartida: cualquiera del equipo edita
+    const equipo = !!a.grupo && U.ini(a.ini) === yoI && this.grupoAct(a, this.todas()).some(x => x.id !== a.id);      // actividad compartida: cualquiera del equipo edita
     if (String(a.com || "").trim()) { const por = U.ini(a.comPor); r.push({ tipo: "com", txt: a.com, por, ed: U.ini(a.comEd || ""), cuando: "", acc: "", puede: sup || equipo || !por || por === yoI }); }
     for (const l of String(a.seg || "").split("\n").filter(Boolean)) {
       const m = /^(\d{2}\/\d{2} T[12]) ([^:]+): (?:(CONCLUIDA|EN PROCESO|PENDIENTE)(?: - )?)?(.*)$/.exec(l);
@@ -825,7 +838,7 @@ B.local = {
   /* ---------------------------------------------------------- API equivalente al servidor */
   async llamar(ruta, b) {
     b = b || {};
-    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.19.3", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
+    if (ruta === "info") return { ok: true, proyecto: "24RU1", version: "4.20", enRed: false, urls: [], demo: this.sub === "datos_demo", local: true };
     if (ruta === "login") return this.login(b);
     if (ruta === "imagenes") { const im = (await this.leer("imagenes")) || {}; return { ok: true, membrete: im.membrete || "", pie: im.pie || "", ofIzq: im.ofIzq || "", ofDer: im.ofDer || "", ofPie: im.ofPie || "", ver: im.ver || "" }; }
     if (!this.sesion) this.sesion = this.leeSesion();
@@ -1198,7 +1211,7 @@ B.local = {
       : Math.max(L.map(x => +(x.noLib ? x.numLib : x.num) || 0).filter(n => n <= 900000).reduce((m, n) => Math.max(m, n), 0) + 1, inicio || 0);
     const key = col + "." + acc;
     // una actividad asignada a varias personas es UNA sola: sus registros comparten "grupo"
-    const grupoDe = (L, a) => a.grupo ? L.filter(x => x.grupo === a.grupo) : [a];
+    const grupoDe = (L, a) => B.dom.grupoAct(a, L);
     switch (key) {
       case "actividades.guardarTurno": {
         const ini = U.ini(d.ini);
@@ -1251,10 +1264,12 @@ B.local = {
           }
         };
         for (const id of d.borrar || []) { const i = L.findIndex(x => +x.id === +id && U.ini(x.ini) === ini); if (i >= 0) { L.splice(i, 1); nDel++; } }
+        const enOrden = [];
         for (const it of d.items || []) {
           const txt = String(it.txt || "").trim(), est = it.est || "Realizada"; if (!txt) continue;
           if (+it.id > 0) {
             const a = L.find(x => +x.id === +it.id && U.ini(x.ini) === ini); if (!a) continue;
+            enOrden.push(a);
             const grp = grupoDe(L, a), t2 = grp.length > 1 ? a.txt : txt;
             let cambio = false;
             if ("com" in it && (a.com || "") !== (it.com || "") && (sup || grp.length > 1 || !a.com || !a.comPor || U.ini(a.comPor) === s.ini)) { for (const x of grp) { x.com = it.com || ""; x.comPor = it.com ? s.ini : ""; } cambio = true; }
@@ -1265,9 +1280,11 @@ B.local = {
             const tg = planes.get(it);
             if (tg) { if (!(U.ini(tg.ini) === ini && tg.fecha === d.fecha && tg.turno === d.turno)) { unir(tg, est, it.com || ""); nUni++; } continue; }
             L.push({ id: sig(L, "id"), fecha: d.fecha, turno: d.turno, ini, nombre: per.nombre, txt, est, estOrig: est, seg: "", fCierre: "", tCierre: "", cerro: "", reg: ahora(), capturo: s.ini, ...(it.com ? { com: it.com, comPor: s.ini } : {}) });
-            nNew++;
+            nNew++; enOrden.push(L[L.length - 1]);
           }
         }
+        // orden de Mis actividades (igual que el servidor)
+        if (enOrden.length > 1) { const pos = x => x.ord != null && x.ord !== "" ? +x.ord : +x.id, cl = enOrden.map(pos).sort((a, b) => a - b); enOrden.forEach((x, i) => { if (pos(x) !== cl[i]) x.ord = cl[i]; }); }
         await this.escribir("actividades", L);
         return { ok: true, nuevas: nNew, modificadas: nUpd, eliminadas: nDel, unidas: nUni };
       }
@@ -1977,6 +1994,24 @@ B.ui = {
       s.querySelectorAll("button").forEach(x => x.classList.remove("on")); b.classList.add("on"); cb && cb(s, b.dataset.v);
     }));
   },
+  // listas que se ordenan arrastrando (desde el elemento .asa) o con los botones [data-mover="arriba|abajo"]; alCambiar() al soltar
+  ordenable(cont, sel, alCambiar) {
+    if (cont._ordenable) return; cont._ordenable = true;
+    let arr = null;
+    const items = () => [...cont.children].filter(x => x.matches(sel)), de = t => { const it = t && t.closest ? t.closest(sel) : null; return it && it.parentNode === cont ? it : null; };
+    cont.addEventListener("mousedown", e => { const it = e.target.closest(".asa") && de(e.target); if (it) it.draggable = true; });
+    cont.addEventListener("mouseup", e => { const it = de(e.target); if (it && !arr) it.draggable = false; });
+    cont.addEventListener("dragstart", e => { const it = de(e.target); if (!it || !it.draggable) return; arr = it; it.classList.add("arrastrando"); e.dataTransfer.effectAllowed = "move"; try { e.dataTransfer.setData("text/plain", ""); } catch (x) { } });
+    cont.addEventListener("dragend", () => { if (!arr) return; const it = arr; arr = null; it.draggable = false; it.classList.remove("arrastrando"); alCambiar(); });
+    cont.addEventListener("dragover", e => { if (!arr) return; e.preventDefault(); const it = de(e.target); if (!it || it === arr) return; const r = it.getBoundingClientRect(); cont.insertBefore(arr, e.clientY < r.top + r.height / 2 ? it : it.nextSibling); });
+    cont.addEventListener("drop", e => { if (arr) e.preventDefault(); });
+    cont.addEventListener("click", e => {
+      const b = e.target.closest("[data-mover]"), it = b && de(b); if (!it) return;
+      e.preventDefault(); const l = items(), i = l.indexOf(it), j = b.dataset.mover === "arriba" ? i - 1 : i + 1; if (j < 0 || j >= l.length) return;
+      if (j < i) cont.insertBefore(it, l[j]); else cont.insertBefore(l[j], it);
+      alCambiar(); b.focus();
+    });
+  },
   vacio(msg, ico) { return `<div class="vacio">${B.ico(ico || "info")}${msg}</div>`; },
   estatusBadge(est) {
     const c = { "Realizada": "v", "En proceso": "d", "Pendiente": "r", "Concluida": "a", "ACTIVA": "r", "RETIRADA": "n", "Liberado": "v" }[est] || "n";
@@ -2221,6 +2256,33 @@ B.rep.ecMonitoreos = function (lista, d1, d2, titulo) {
       : `<tr><td colspan="11">Sin monitoreos con ese filtro.</td></tr>`) + `</tbody></table>
     <div style="margin-top:6px;font-size:7pt;color:#595959">Rangos de referencia: O2 ${U.esc(c.o2Min)}–${U.esc(c.o2Max)} % · LEL ≤ ${U.esc(c.lelMax)} % · CO ≤ ${U.esc(c.coMax)} ppm · H2S ≤ ${U.esc(c.h2sMax)} ppm. En rojo, las lecturas fuera de rango.</div>`;
   return { html: B.rep.documento("Monitoreo de espacios confinados", h), nombre: `MONITOREO ESPACIOS CONFINADOS ${c.proyecto} ${U.norm(titulo).replace(/[^A-Z0-9 ]/g, "").replace(/\s+/g, " ")}${d1 ? " del " + U.corta(d1).replace(/\//g, ".") : ""}${d2 ? " al " + U.corta(d2).replace(/\//g, ".") : ""}`.trim(), carpeta: "ESPACIOS CONFINADOS", tipo: "concentrado" };
+};
+/* Concentrado con el ULTIMO monitoreo: un renglon por espacio (pozo seco: uno por elevacion) con sus lecturas mas recientes.
+   Rango opcional: el ultimo registro DENTRO del rango; sin rango, el ultimo que tenga. */
+B.rep.ecUltimos = function (lista, d1, d2, titulo) {
+  const c = B.estado.config, D = B.dom, k = v => U.esc(v ?? ""), enR = m => (!d1 || m.fh.slice(0, 10) >= d1) && (!d2 || m.fh.slice(0, 10) <= d2);
+  const filas = [];
+  for (const e of lista) {
+    const M = D.ecMons(e).filter(enR); if (!M.length) continue;
+    const elevs = D.ecElevs(e).filter(Boolean);
+    if (elevs.length) for (const el of elevs) { const l = M.filter(m => U.norm(m.elev || "") === U.norm(el)); if (l.length) filas.push({ e, u: l[l.length - 1], n: l.length, elev: el }); }
+    else filas.push({ e, u: M[M.length - 1], n: M.length, elev: "" });
+  }
+  const est = e => e.noLib ? `<td class="b" style="background:#FFD2D2;color:#C00000">NO LIBERADO</td>` : e.cierre ? `<td class="b">CERRADO<br><span class="gris" style="font-weight:400">${U.fh(e.cierre)}</span></td>` : `<td class="b" style="background:#E2F0D9;color:#1E6B4A">SIGUE LIBERADO</td>`;
+  const nEsp = new Set(filas.map(x => x.e.num)).size, nAb = new Set(filas.filter(x => !x.e.noLib && !x.e.cierre).map(x => x.e.num)).size, nNL = new Set(filas.filter(x => x.e.noLib).map(x => x.e.num)).size;
+  const nFuera = filas.filter(x => ["o2", "lel", "co", "h2s"].some(y => D.rango(y, x.u[y]))).length;
+  const h = `<h2 class="doc">CONCENTRADO DE ESPACIOS CONFINADOS · ÚLTIMO MONITOREO</h2><div class="doc-sub">${U.esc(B.t.periodo().toUpperCase())} &nbsp;|&nbsp; ${U.esc(titulo)}${d1 || d2 ? " &nbsp;|&nbsp; monitoreos " + (d1 ? "del " + U.corta(d1) : "") + (d2 ? " al " + U.corta(d2) : "") : ""}</div>
+    <div class="c" style="margin-bottom:6px;font-size:8pt">Espacios: <b>${nEsp}</b> &nbsp;|&nbsp; Siguen liberados: <b>${nAb}</b> &nbsp;|&nbsp; Cerrados: <b>${nEsp - nAb - nNL}</b> &nbsp;|&nbsp; No liberados: <b>${nNL}</b> &nbsp;|&nbsp; Con el último monitoreo fuera de rango: <b>${nFuera}</b> &nbsp;|&nbsp; Emitido: ${U.fh(U.ahoraISO())}</div>
+    <table class="dat"><thead><tr><th style="width:5%">#</th><th style="width:4.5%">UNIDAD</th><th style="width:19%">ESPACIO CONFINADO</th><th style="width:8.5%">LIBERADO</th><th style="width:8%">ESTATUS</th><th style="width:8.5%">ÚLTIMO MONITOREO</th>
+      <th>O2<br>(%)</th><th>HR<br>(%)</th><th>TEMP<br>(°C)</th><th>LEL<br>(%)</th><th>CO<br>(ppm)</th><th>H2S<br>(ppm)</th><th style="width:8%">INICIALES</th><th style="width:5%">REG.</th><th style="width:14%">OBSERVACIONES</th></tr></thead><tbody>` +
+    (filas.length ? filas.map(x => `<tr><td class="b">${x.e.noLib ? "S/N" : k(D.ecNumRep(x.e))}</td><td>${D.ecUni(x.e)}</td><td class="izq" style="text-align:left">${k(x.e.esp)}${x.elev ? `<div class="gris" style="font-size:7pt">Elev. ${k(x.elev)}</div>` : ""}</td>
+      <td>${x.e.noLib ? "" : U.fh(x.e.lib)}</td>${est(x.e)}<td>${U.fh(x.u.fh)}${x.u.lib ? `<div class="gris" style="font-size:6.5pt">${x.e.noLib ? "1ª prueba" : "liberación"}</div>` : ""}</td>` +
+      ["o2", "hr", "temp", "lel", "co", "h2s"].map(y => `<td class="${D.rango(y, x.u[y]) ? "fuera" : ""}">${k(x.u[y])}</td>`).join("") +
+      `<td>${k(x.u.pers)}</td><td>${x.n}</td><td class="izq" style="text-align:left;font-size:7pt">${k(x.u.obs)}</td></tr>`).join("")
+      : `<tr><td colspan="15">Sin espacios con ese filtro${d1 || d2 ? " ni monitoreos en ese rango" : ""}.</td></tr>`) + `</tbody></table>
+    <div style="margin-top:6px;font-size:7pt;color:#595959">Cada renglón lleva el último registro de lecturas del espacio${d1 || d2 ? " dentro del rango" : ""} (en pozo seco, de cada elevación). REG. = registros de lecturas${d1 || d2 ? " en el rango" : ""}.
+      Rangos de referencia: O2 ${k(c.o2Min)}–${k(c.o2Max)} % · LEL ≤ ${k(c.lelMax)} % · CO ≤ ${k(c.coMax)} ppm · H2S ≤ ${k(c.h2sMax)} ppm. En rojo, las lecturas fuera de rango.</div>`;
+  return { html: B.rep.documento("Concentrado EC último monitoreo", h, true), horizontal: true, nombre: `CONCENTRADO ULTIMO MONITOREO EC ${c.proyecto} ${U.norm(titulo).replace(/[^A-Z0-9 ]/g, "").replace(/\s+/g, " ")}${d1 ? " del " + U.corta(d1).replace(/\//g, ".") : ""}${d2 ? " al " + U.corta(d2).replace(/\//g, ".") : ""}`.trim(), carpeta: "ESPACIOS CONFINADOS", tipo: "concentrado" };
 };
 /* Bitacora de seguimiento de los espacios NO LIBERADOS: los que siguen sin liberarse y los que lo estuvieron, con la fecha en que
    se liberaron, el numero que recibieron y cuanto tardaron. Despues, el detalle de cada prueba. */
@@ -2586,7 +2648,7 @@ V.actividades = {
     const { f, t } = T(), sup = B.dom.esSup();
     if (!this.ini || !sup) this.ini = yo();
     const ini = this.ini;
-    const guardadas = B.estado.actividades.filter(a => a.fecha === f && a.turno === t && U.ini(a.ini) === ini).sort((a, b) => a.id - b.id);
+    const guardadas = B.estado.actividades.filter(a => a.fecha === f && a.turno === t && U.ini(a.ini) === ini).sort((a, b) => B.dom.actOrden(a) - B.dom.actOrden(b));
     const quien = sup ? `<div class="campo" style="margin:0;min-width:280px"><input class="inp" id="aQuien" value="${U.esc(ini + " - " + B.dom.nombre(ini))}" placeholder="Capturar como…"></div>` : "";
     const libres = sup ? [] : B.dom.porAsignar();
     c.innerHTML = `
@@ -2599,6 +2661,7 @@ V.actividades = {
         ${cab("lista", "g", "Captura de actividades", `${U.esc(B.app.textoTurno())}${ini !== yo() ? " · capturando como <b>" + U.esc(ini) + "</b>" : ""}`, quien)}
         <div class="aviso a">${B.ico("info")}<div>Escribe <b>una actividad por renglón</b> y elige su estatus. Lo <b>Pendiente</b> y <b>En proceso</b> aparece en los siguientes reportes
           hasta que lo marques como concluido en <a href="#/pendientes">Pendientes</a>. ¿Actividad repetida? Usa <b>Actividades anteriores</b>.
+          <br><b>Orden:</b> arrastra cada renglón desde su número (o usa ▲▼) y guarda: en ese orden salen en el reporte del turno.
           <br><b>No dupliques:</b> si la actividad ya la capturó un compañero o ya la tenías pendiente, al escribirla aparece abajo para que te <b>unas</b> a ella; el estatus y el comentario valen para todo el equipo.</div></div>
         <div id="renglones" data-tour="act-renglones"></div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -2617,6 +2680,7 @@ V.actividades = {
       await ejecutar(() => B.api.op("actividades", "tomar", { id: a.id, hecha, fecha: f, turno: t }), hecha ? "Actividad registrada en tu turno." : "Actividad agregada a tus pendientes.");
     });
     const cont = c.querySelector("#renglones");
+    ui.ordenable(cont, ".renglon", () => { numerar(); marcar(); });
     const borrar = [];
     let sucio = false;
     const marcar = () => { sucio = true; const e = c.querySelector("#aEstado"); e.textContent = "Cambios sin guardar"; e.classList.add("sucio"); };
@@ -2627,11 +2691,12 @@ V.actividades = {
       r.className = "renglon";
       if (a && a.id) r.dataset.id = a.id;
       // compartida: asignada por el supervisor o con mas personas en el mismo equipo (grupo)
-      const otros = a && a.id && a.grupo ? B.dom.ordenados([...new Set(B.dom.todas().filter(x => x.grupo === a.grupo && U.ini(x.ini) !== U.ini(a.ini) && x.ini).map(x => U.ini(x.ini)))]) : [];
-      const comp = !!(a && a.id && a.grupo && ((a.asig && U.ini(a.asig) !== U.ini(a.ini)) || otros.length));
+      const otros = a && a.id && a.grupo ? B.dom.ordenados([...new Set(B.dom.grupoAct(a, B.dom.todas()).filter(x => U.ini(x.ini) !== U.ini(a.ini) && x.ini).map(x => U.ini(x.ini)))]) : [];
+      // el texto se bloquea si es de un equipo o si la asigno el supervisor (salvo para supervisores y las tomadas de una recurrente)
+      const comp = !!(a && a.id && a.grupo && (otros.length || (a.asig && U.ini(a.asig) !== U.ini(a.ini) && !sup && !B.dom.plantillaDe(a))));
       const nCom = a && a.id ? B.dom.comentarios(a).length : 0;
       const ajeno = !!(a && a.id && a.com && a.comPor && U.ini(a.comPor) !== U.ini(B.usuario.ini) && !sup && !(a.grupo && otros.length));     // comentario escrito por otro del equipo
-      r.innerHTML = `<div class="num"></div><div><textarea rows="1" placeholder="Describe la actividad…" ${comp ? 'readonly style="background:#FAF8F6"' : ""}>${U.esc(a ? a.txt : "")}</textarea>
+      r.innerHTML = `<div class="mover"><div class="num asa" title="Arrastra para cambiar el orden"></div><button type="button" data-mover="arriba" title="Subir">▲</button><button type="button" data-mover="abajo" title="Bajar">▼</button></div><div><textarea rows="1" placeholder="Describe la actividad…" ${comp ? 'readonly style="background:#FAF8F6"' : ""}>${U.esc(a ? a.txt : "")}</textarea>
         ${a && a.id ? "" : `<div class="sug-act"></div>`}
         <input class="inp com" placeholder="Comentario (opcional): sale en el reporte junto a la actividad" value="${U.esc(a ? a.com || "" : "")}" style="margin-top:6px;padding:6px 10px;font-size:12.5px${ajeno ? ";background:#FAF8F6" : ""}" ${ajeno ? `readonly title="Comentario de ${U.esc(a.comPor)}: solo lo modifica quien lo escribió o un supervisor"` : ""}>
         ${a && a.id ? `<div class="guardado">Guardada · ID ${a.id}${nCom ? ` · <a href="#" data-coms="${a.id}">Comentarios (${nCom}): ver, agregar o editar</a>` : ` · <a href="#" data-coms="${a.id}">Agregar comentario</a>`}${a.seg && !nCom ? " · con seguimiento" : ""}${ajeno ? " · comentario de " + U.esc(a.comPor) : ""}${comp ? (a.asig && U.ini(a.asig) !== U.ini(a.ini) ? " · asignada por " + U.esc(a.asig) : "") + (otros.length ? " · en equipo con <b>" + U.esc(otros.join("/")) + "</b>" : "") + " · el estatus y el comentario valen para todo el equipo" + (otros.length ? " (cualquiera del equipo puede comentar o corregirlo)" : "") : ""}</div>` : ""}</div>
@@ -2834,7 +2899,7 @@ V.actividades = {
   /* Supervisor: reasignar o dejar sin asignar una actividad (pendiente, en proceso o realizada) */
   async reasignar(id) {
     const a = B.estado.actividades.find(x => x.id === id); if (!a) return;
-    const D = B.dom, grp = a.grupo ? B.estado.actividades.filter(x => x.grupo === a.grupo) : [a];
+    const D = B.dom, grp = D.grupoAct(a);
     const actuales = D.ordenados([...new Set(grp.map(x => U.ini(x.ini)).filter(Boolean))]), sel = new Set(actuales), lista = [...actuales];
     const r = await ui.modal({ titulo: "Reasignar actividad · ID " + a.id, icono: "usuarios", ancho: true,
       html: `<p style="margin:0 0 4px"><b>${U.esc(a.txt)}</b></p>
@@ -3126,7 +3191,8 @@ V.vigilancias = {
       <div class="tarjeta c7" data-tour="vig-activas">${cab("fuego", "r", "Vigilancias activas", "Aparecen en cada reporte de turno hasta que se registra su retiro.")}
         ${activas.length ? `<div class="lista">${activas.map(v => `<div class="item"><span class="badge r">VIG #${v.num}</span><div class="cuerpo"><div class="tit">${U.esc(v.desc)}</div>
           <div class="meta"><span>${U.esc(v.ubic)}${v.comp ? " / " + U.esc(v.comp) : ""}</span><span>INOP ${U.esc(v.inop)}</span><span>desde ${U.fh(v.inicio)}</span><span>alta: ${U.esc(v.capAlta)}${v.regPor ? " (registró " + U.esc(v.regPor) + ")" : ""}</span></div></div>
-          <button class="btn chico dorado" data-ret="${v.num}">Retirar</button></div>`).join("")}</div>` : ui.vacio("No hay vigilancias activas.", "fuego")}</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">${B.dom.esSup() ? `<button class="btn chico sec" data-edvig="${v.num}" title="Corregir descripción, INOP, ubicación, horas o datos del formato PAS-32-11">${B.ico("editar")} Editar</button>` : ""}<button class="btn chico dorado" data-ret="${v.num}">Retirar</button></div></div>`).join("")}</div>` : ui.vacio("No hay vigilancias activas.", "fuego")}
+        ${B.dom.esSup() && B.estado.vig.some(v => v.retiro) ? `<p class="muted peque" style="margin:10px 0 0">¿Corregir una ya retirada? <a href="#" id="vRetiradas">Ver las retiradas recientes</a>.</p>` : ""}</div>
       <div class="tarjeta c5" data-tour="vig-alta">${cab("mas", "d", "Alta de vigilancia", "Al elegirla del catálogo se llenan INOP, ubicación y componente.")}
         <div class="campo"><label>Descripción / vigilancia</label><input class="inp" id="vDesc" placeholder="Busca o escribe la vigilancia"></div>
         <div class="grid2"><div class="campo"><label># de INOP</label><input class="inp" id="vInop"></div><div class="campo"><label>Componente</label><input class="inp" id="vComp"></div></div>
@@ -3162,6 +3228,18 @@ V.vigilancias = {
       if (dup) { ui.toast(`Esa vigilancia ya está <b>activa</b>: VIG #${dup.num} (alta de ${U.esc(dup.capAlta)}). No se duplica.`, "error", 8000); return; }
       await ejecutar(() => B.api.op("vig", "crear", { fecha: f, turno: t, capt: vCapt === yo() ? "" : vCapt, items: [{ desc: g("#vDesc"), inop: g("#vInop"), ubic: g("#vUbic"), comp: g("#vComp"), obs: g("#vObs"), unidad: g("#vUnidad"), edif: g("#vEdif"), nivel: g("#vNivel"), zona: g("#vZona"), tipoVig: g("#vTipoVig"), inicio }] }),
         r => "Vigilancia registrada: VIG #" + r.nums[0] + (vCapt !== yo() ? " · asignada a " + vCapt : ""));
+    };
+    c.querySelectorAll("[data-edvig]").forEach(b => b.onclick = () => V.concentrados.editar("vig", +b.dataset.edvig));
+    const vr = c.querySelector("#vRetiradas");
+    if (vr) vr.onclick = async ev => {
+      ev.preventDefault();
+      const l = B.estado.vig.filter(v => v.retiro).sort((a, b) => String(b.retiro).localeCompare(String(a.retiro))).slice(0, 25);
+      let elegida = 0;
+      await ui.modal({ titulo: "Vigilancias retiradas recientemente", icono: "fuego", ancho: true,
+        html: `<div class="lista">${l.map(v => `<div class="item"><span class="badge n">VIG #${v.num}</span><div class="cuerpo"><div class="tit">${U.esc(v.desc)}</div><div class="meta"><span>INOP ${U.esc(v.inop)}</span><span>${U.fh(v.inicio)} → ${U.fh(v.retiro)}</span></div></div><button class="btn chico sec" data-e="${v.num}">${B.ico("editar")} Editar</button></div>`).join("")}</div>`,
+        alAbrir: m => m.querySelectorAll("[data-e]").forEach(x => x.onclick = () => { elegida = +x.dataset.e; m.querySelector("[data-x]").click(); }),
+        botones: [{ t: "Cerrar", c: "sec", v: null }] });
+      if (elegida) V.concentrados.editar("vig", elegida);
     };
     c.querySelectorAll("[data-ret]").forEach(b => b.onclick = async () => {
       const num = +b.dataset.ret;
@@ -3231,7 +3309,7 @@ V.vigilancias = {
     };
     const r = await ui.modal({
       titulo: "Formatos PAS-32-11 · " + B.t.corto(f, t), icono: "doc", ancho: true,
-      html: `${hayG ? `<div class="aviso v" style="margin-bottom:10px">${B.ico("ok")}<div>Formato de este turno <b>guardado</b> el ${U.fh(String(g0.reg || "").slice(0, 16))} por ${e(g0.por || "")}. Se muestra como se capturó.</div></div>` : ""}
+      html: `<div class="aviso v ${hayG ? "" : "oculto"}" id="pGuardado" style="margin-bottom:10px">${hayG ? `${B.ico("ok")}<div>Formato de este turno <b>guardado</b> el ${U.fh(String(g0.reg || "").slice(0, 16))} por ${e(g0.por || "")}. Se muestra como se capturó.</div>` : ""}</div>
         <div class="fila" style="align-items:flex-end;margin-bottom:10px"><div class="campo" style="flex:1 1 320px;margin:0"><label>Tipo de formato</label><select class="inp" id="pModo"><option value="global">Un solo formato con todas las vigilancias (una por renglón)</option><option value="hora" ${g0.modo === "hora" ? "selected" : ""}>Un formato por vigilancia, con un renglón por hora</option></select></div>
           <div class="campo" style="flex:0 0 150px;margin:0"><label>Fecha del formato</label><input class="inp tnum" id="pFecha" value="${e(g0.fmt || S.slice(0, 10).replace(/-/g, ""))}" maxlength="10"></div></div>
         <p style="margin:0 0 10px;line-height:1.55">Marca las vigilancias que van en el formato, ajusta su hora de inicio y de fin y anota en <b>Realizó</b> las iniciales de quien la hizo (se proponen según las actividades asignadas en el turno). En el turno nocturno el periodo sale por fecha. Si hay vigilancias de las dos unidades sale un formato por unidad.</p>
@@ -3241,12 +3319,21 @@ V.vigilancias = {
         <datalist id="pPers">${(B.estado.personal || []).filter(p => String(p.activo || "").toUpperCase() !== "NO").map(p => `<option value="${e(p.ini)}">${e(p.nombre)}</option>`).join("")}</datalist>
         <div class="fila" style="align-items:flex-end;margin-top:12px"><div class="campo" style="flex:0 0 130px;margin:0"><label>Revisión del PAS-32</label><input class="inp" id="pRev" value="${e(this.revPas())}"></div>
           <div class="campo" style="flex:1 1 300px;margin:0"><label>Leyenda de arriba · Se autoriza la impresión a</label><input class="inp" id="pImpA" value="${e(this.impA())}" readonly style="background:var(--fondo-2, #f2f2f2)" title="Solo el administrador puede cambiarla (botón Configurar)"></div></div>
-        <p class="muted peque" style="margin:8px 0 0">Todo sale en <b>una sola hoja carta</b>. Al guardar, imprimir o generar el PDF el formato queda guardado y entra al historial de vigilancias. Los nombres y firmas se ponen a mano.</p>`,
-      botones: [{ t: "Cancelar", c: "sec", v: null }, { t: "Guardar datos", c: "sec", antes: v => this.okPas(v), v: v => this.leePas(v, "") }, { t: "Guardar en PDF", c: "sec", antes: v => this.okPas(v), v: v => this.leePas(v, "pdf") }, { t: "Imprimir", antes: v => this.okPas(v), v: v => this.leePas(v, "imp") }]
+        <p class="muted peque" style="margin:8px 0 0">Todo sale en <b>una sola hoja carta</b>. Al guardar, imprimir o generar el PDF el formato queda guardado y entra al historial de vigilancias; <b>la ventana sigue abierta</b> para imprimir o sacar el PDF. Los nombres y firmas se ponen a mano.</p>`,
+      botones: [{ t: "Cerrar", c: "sec", v: null }, { t: "Guardar datos", c: "sec", antes: v => this.accionPas(v, "", f, t) }, { t: "Guardar en PDF", c: "sec", antes: (v, ev) => this.accionPas(v, "pdf", f, t, ev) }, { t: "Imprimir", antes: v => this.accionPas(v, "imp", f, t) }]
     });
-    if (!r) return;
-    if (r.modo) { const doc = B.rep.pas3211(r.hojas, { rev: r.rev, impA: r.impA, fecha: r.fecha, global: r.global, f, t }); r.modo === "pdf" ? B.rep.pdf(doc) : B.rep.imprimir(doc); }
-    await ejecutar(() => B.api.op("vig", "pasGuardar", { fecha: f, turno: t, fmt: r.fecha, modo: r.global ? "global" : "hora", items: r.filas }), "Formato del turno guardado (" + r.filas.filter(x => x.ok).length + " vigilancia(s)).");
+    if (this._pasCambio) { this._pasCambio = false; B.app.render(); }
+  },
+  // Guardar, PDF e Imprimir guardan lo capturado y la ventana NO se cierra: despues de guardar se puede imprimir o sacar el PDF
+  async accionPas(v, modo, f, t) {
+    const r = this.leePas(v, modo); if (r.error) { ui.toast(r.error, "error", 7000); return false; }
+    const n = r.filas.filter(x => x.ok).length;
+    try { await B.api.op("vig", "pasGuardar", { fecha: f, turno: t, fmt: r.fecha, modo: r.global ? "global" : "hora", items: r.filas }); await B.api.recargar(); this._pasCambio = true; }
+    catch (e) { ui.error(e); return false; }
+    if (modo) { const doc = B.rep.pas3211(r.hojas, { rev: r.rev, impA: r.impA, fecha: r.fecha, global: r.global, f, t }); if (modo === "pdf") await B.rep.pdf(doc, [...v.querySelectorAll(".modal-pie .btn")].find(b => /PDF/.test(b.textContent))); else B.rep.imprimir(doc); }
+    ui.toast("Formato del turno guardado (" + n + " vigilancia(s))." + (modo ? "" : " Puedes imprimirlo o guardarlo en PDF desde esta misma ventana."), "ok", 6000);
+    const av = v.querySelector("#pGuardado"); if (av) av.classList.remove("oculto"); if (av) av.innerHTML = `${B.ico("ok")}<div>Guardado el ${U.fh(U.ahoraISO())} por ${U.esc(B.usuario.ini)}.</div>`;
+    return false;
   },
   okPas(v) { const r = this.leePas(v); if (r.error) { ui.toast(r.error, "error", 7000); return false; } return true; },
   leePas(v, modo) {
@@ -3316,12 +3403,13 @@ V.pendientes = {
             <button class="btn chico sec" data-a="En proceso">En proceso</button>
             <button class="btn chico sec" data-a="Pendiente">Pendiente</button>
             <button class="btn chico fantasma" data-a="">Solo comentario</button>
-            ${sup ? `<button class="btn chico fantasma" data-reasig="${a.id}" title="Cambiar quién la tiene o dejarla sin asignar">${B.ico("usuarios")} Reasignar</button>` : ""}
+            ${sup ? `<button class="btn chico fantasma" data-edact="${a.id}" title="Corregir el texto, el estatus, la unidad o si es recurrente">${B.ico("editar")} Editar</button><button class="btn chico fantasma" data-reasig="${a.id}" title="Cambiar quién la tiene o dejarla sin asignar">${B.ico("usuarios")} Reasignar</button>` : ""}
             ${B.dom.comentarios(a).length ? `<button class="btn chico fantasma" data-coms="${a.id}" title="Editar o eliminar comentarios">${B.ico("editar")} Comentarios (${B.dom.comentarios(a).length})</button>` : ""}</div>
         </div>`).join("") : ui.vacio("No hay pendientes abiertos. ¡Bien!", "ok")}</div></div>`;
     if (sup) ui.combo(c.querySelector("#pFiltro"), { items: () => ui.personas(null, true), estricto: false, alElegir: v => { V.pendientes.filtro = v && B.dom.persona(v) ? v : ""; B.app.render(); } });
     c.querySelectorAll("button[data-coms]").forEach(b => b.onclick = () => V.actividades.comentarios(+b.dataset.coms));
     c.querySelectorAll("button[data-reasig]").forEach(b => b.onclick = () => V.actividades.reasignar(+b.dataset.reasig));
+    c.querySelectorAll("button[data-edact]").forEach(b => b.onclick = () => B.editarActividad(+b.dataset.edact));
     c.querySelectorAll(".item[data-id]").forEach(it => it.querySelectorAll("button[data-a]").forEach(b => b.onclick = async () => {
       const a = B.estado.actividades.find(x => x.id === +it.dataset.id), com = it.querySelector("input").value.trim();
       if (B.t.clave(a.fecha, a.turno) > B.t.clave(f, t)) { ui.toast("La actividad es de un turno posterior al turno de trabajo seleccionado. Cambia la fecha/turno arriba.", "error"); return; }
@@ -3373,22 +3461,24 @@ V.historial = {
 /* ===================================================================== CONCENTRADOS */
 V.concentrados = {
   titulo: "Concentrados generales",
-  tab: "ec", d1: "", d2: "", q: "", uni: "",
+  tab: "ec", d1: "", d2: "", q: "", uni: "", estEC: "",
   render(c) {
     const sup = B.dom.esSup(), esEC = this.tab === "ec";
     const tks = U.norm(this.q).split(" ").filter(Boolean);
     const enRango = f => (!this.d1 || f >= this.d1) && (!this.d2 || f <= this.d2);
     const base = (esEC ? B.estado.ec : B.estado.vig).filter(x => enRango(x.fecha)).filter(x => !tks.length || tks.every(k => U.norm(Object.values(x).join(" ")).includes(k)))
-      .filter(x => !esEC || !this.uni || B.dom.ecUni(x) === this.uni).sort(esEC ? B.dom.ecOrden : (a, b) => a.num - b.num);
+      .filter(x => !esEC || !this.uni || B.dom.ecUni(x) === this.uni)
+      .filter(x => !esEC || !this.estEC || (this.estEC === "abiertos" ? !x.noLib && !x.cierre : this.estEC === "cerrados" ? !x.noLib && !!x.cierre : !!x.noLib)).sort(esEC ? B.dom.ecOrden : (a, b) => a.num - b.num);
     c.innerHTML = `<div class="tarjeta">
       <div class="pestanas"><button data-tab="ec" class="${esEC ? "on" : ""}">Espacios confinados (${B.estado.ec.length})</button><button data-tab="vig" class="${!esEC ? "on" : ""}">Vigilancias C.I. (${B.estado.vig.length})</button></div>
       <div class="filtros" data-tour="conc-filtros">
         <div class="campo"><label>Desde (fecha reporte)</label><input class="inp" type="date" id="cD1" value="${this.d1}"></div>
         <div class="campo"><label>Hasta</label><input class="inp" type="date" id="cD2" value="${this.d2}"></div>
-        ${esEC ? `<div class="campo"><label>Unidad</label><select class="inp" id="cUni"><option value="">U1 y U2</option><option value="U1" ${this.uni === "U1" ? "selected" : ""}>Solo U1</option><option value="U2" ${this.uni === "U2" ? "selected" : ""}>Solo U2</option></select></div>` : ""}
+        ${esEC ? `<div class="campo"><label>Unidad</label><select class="inp" id="cUni"><option value="">U1 y U2</option><option value="U1" ${this.uni === "U1" ? "selected" : ""}>Solo U1</option><option value="U2" ${this.uni === "U2" ? "selected" : ""}>Solo U2</option></select></div>
+          <div class="campo"><label>Estatus</label><select class="inp" id="cEst">${[["", "Todos"], ["abiertos", "Siguen liberados (abiertos)"], ["cerrados", "Cerrados"], ["nolib", "No liberados"]].map(([v, t]) => `<option value="${v}" ${this.estEC === v ? "selected" : ""}>${t}</option>`).join("")}</select></div>` : ""}
         <div class="campo buscar" style="flex:1;min-width:220px"><label>Buscar</label>${B.ico("buscar", 'style="top:auto;bottom:11px;transform:none"')}<input class="inp" id="cQ" value="${U.esc(this.q)}" placeholder="Espacio, persona, INOP…"></div>
         ${sup && esEC && !B.modoLocal ? `<button class="btn dorado" id="cFus" disabled title="Marca con la casilla dos o más registros del mismo espacio">${B.ico("reutilizar")} Fusionar duplicados (0)</button>` : ""}
-        ${sup ? `<button class="btn sec" id="cCsv">${B.ico("descargar")} Excel (CSV)</button><button class="btn sec" id="cImp">${B.ico("imprimir")} Imprimir</button><button class="btn" id="cPdf">${B.ico("pdf")} PDF</button>` : ""}
+        ${sup ? `<button class="btn sec" id="cCsv">${B.ico("descargar")} Excel (CSV)</button><button class="btn sec" id="cImp">${B.ico("imprimir")} Imprimir</button><button class="btn" id="cPdf">${B.ico("pdf")} PDF</button>${esEC ? `<button class="btn sec" id="cUlt" title="Un renglón por espacio con su último monitoreo (con los filtros de arriba)">${B.ico("pdf")} Último monitoreo</button>` : ""}` : ""}
       </div>
       <p class="muted peque" style="margin-top:-4px">${base.length} registro(s)${this.d1 || this.d2 ? " en el rango" : ""}. ${sup ? "Puedes corregir registros (con el lápiz también la <b>unidad</b>, el <b>folio</b> y su estatus), eliminarlos y, si un espacio se capturó dos veces, marcar las casillas y <b>fusionarlos</b> en uno solo. Los NO liberados no llevan número hasta que se liberan." : "Consulta de solo lectura."}</p>
       <div class="tabla-cont">${esEC ? this.tablaEC(base, sup, sup && !B.modoLocal ? (this.sel = new Set([...(this.sel || [])].filter(n => base.some(e => e.num === n)))) : null) : this.tablaVig(base, sup)}</div></div>`;
@@ -3396,11 +3486,14 @@ V.concentrados = {
     c.querySelector("#cD1").onchange = e => { this.d1 = e.target.value; B.app.render(); };
     c.querySelector("#cD2").onchange = e => { this.d2 = e.target.value; B.app.render(); };
     const cU = c.querySelector("#cUni"); if (cU) cU.onchange = e => { this.uni = e.target.value; B.app.render(); };
+    const cE = c.querySelector("#cEst"); if (cE) cE.onchange = e => { this.estEC = e.target.value; B.app.render(); };
     c.querySelector("#cQ").oninput = U.debounce(e => { this.q = e.target.value; const pos = e.target.selectionStart; B.app.render(); const i = document.getElementById("cQ"); i.focus(); i.setSelectionRange(pos, pos); }, 350);
     if (sup) {
       const doc = () => esEC ? B.rep.concEC(base, this.d1, this.d2, this.uni) : B.rep.concVig(base, this.d1, this.d2);
       c.querySelector("#cImp").onclick = () => B.rep.imprimir(doc());
       c.querySelector("#cPdf").onclick = e => B.rep.pdf(doc(), e.currentTarget);
+      const bU = c.querySelector("#cUlt");
+      if (bU) bU.onclick = e => B.rep.pdf(B.rep.ecUltimos(base, "", "", [{ "": "Todos los espacios", abiertos: "Siguen liberados", cerrados: "Cerrados", nolib: "No liberados" }[this.estEC], this.uni, this.q ? "búsqueda «" + this.q + "»" : "", this.d1 || this.d2 ? "reporte " + (this.d1 ? "del " + U.corta(this.d1) : "") + (this.d2 ? " al " + U.corta(this.d2) : "") : ""].filter(Boolean).join(" · ")), e.currentTarget);
       c.querySelector("#cCsv").onclick = () => esEC
         ? U.csv("Concentrado EC " + B.estado.config.proyecto + (this.uni ? " " + this.uni : ""), ["#", "Unidad", "Espacio", "O2", "HR", "Temp", "LEL", "CO", "H2S", "Liberado", "Personal TSI", "Observaciones", "Fecha reporte", "Turno", "Capturó"],
           base.map(e => [B.dom.ecNumRep(e), B.dom.ecUni(e), e.esp, e.o2, e.hr, e.temp, e.lel, e.co, e.h2s, U.fh(e.lib), e.pers, e.obs, U.corta(e.fecha), e.turno, e.capt]))
@@ -3611,15 +3704,18 @@ V.monitoreo = {
       const caja = document.createElement("div"); caja.className = "tarjeta";
       caja.innerHTML = `${cab("pdf", "g", "Reportes de monitoreo" + (uni ? " · solo " + uni : ""), "Para imprimir o guardar en PDF. El rango de fechas es opcional; vacío = toda la recarga." + (uni ? " Salen solo los espacios de <b>" + uni + "</b> (cámbialo arriba, en Unidad)." : ""))}
         <div class="fila" style="align-items:flex-end"><div class="campo" style="flex:0 0 160px"><label>Desde</label><input class="inp" type="date" id="mrD1" value="${R.d1}"></div><div class="campo" style="flex:0 0 160px"><label>Hasta</label><input class="inp" type="date" id="mrD2" value="${R.d2}"></div>
-          <div class="campo" style="flex:1 1 240px"><label>Espacios del reporte de monitoreos</label><select class="inp" id="mrTipo">${Object.entries(TIPOS).map(([k, v]) => `<option value="${k}" ${R.tipo === k ? "selected" : ""}>${v[0]} (${B.estado.ec.filter(e => deU(e) && v[1](e)).length})</option>`).join("")}</select></div></div>
-        <div class="mon-reps"><div><b>Reporte de monitoreos</b><span>Cada espacio con todas sus lecturas: liberación, monitoreos y pruebas, con lo que esté fuera de rango en rojo.</span><p><button class="btn chico sec" data-r="mon" data-m="imp">${B.ico("imprimir")} Imprimir</button><button class="btn chico" data-r="mon" data-m="pdf">${B.ico("pdf")} PDF</button></p></div>
+          <div class="campo" style="flex:1 1 240px"><label>Espacios del reporte</label><select class="inp" id="mrTipo">${Object.entries(TIPOS).map(([k, v]) => `<option value="${k}" ${R.tipo === k ? "selected" : ""}>${v[0]} (${B.estado.ec.filter(e => deU(e) && v[1](e)).length})</option>`).join("")}</select></div></div>
+        <div class="mon-reps"><div><b>Concentrado · último monitoreo</b><span>Un renglón por espacio (en pozo seco, por elevación) con su <b>último</b> monitoreo: lecturas, quién y cuándo, y si sigue liberado o ya se cerró. Usa la <b>Unidad</b> de arriba y «Espacios del reporte» para filtrar.</span><p><button class="btn chico sec" data-r="ult" data-m="imp">${B.ico("imprimir")} Imprimir</button><button class="btn chico" data-r="ult" data-m="pdf">${B.ico("pdf")} PDF</button></p></div>
+          <div><b>Reporte de monitoreos</b><span>Cada espacio con todas sus lecturas: liberación, monitoreos y pruebas, con lo que esté fuera de rango en rojo.</span><p><button class="btn chico sec" data-r="mon" data-m="imp">${B.ico("imprimir")} Imprimir</button><button class="btn chico" data-r="mon" data-m="pdf">${B.ico("pdf")} PDF</button></p></div>
           <div><b>Bitácora de seguimiento de NO liberados (${nNL})</b><span>Los que siguen sin liberarse y los que ya se liberaron: primera prueba, motivo, cuándo se liberaron, con qué número y cuánto tardaron. Incluye el detalle de cada prueba.</span><p><button class="btn chico sec" data-r="nl" data-m="imp">${B.ico("imprimir")} Imprimir</button><button class="btn chico" data-r="nl" data-m="pdf">${B.ico("pdf")} PDF</button></p></div>
           <div><b>Hojas para llenar a mano (${noLib.length} no liberados)</b><span>Una hoja por cada espacio NO liberado, con sus pruebas ya capturadas y renglones en blanco para las siguientes.</span><p><button class="btn chico sec" data-r="hojas" data-m="imp" ${noLib.length ? "" : "disabled"}>${B.ico("imprimir")} Imprimir</button><button class="btn chico" data-r="hojas" data-m="pdf" ${noLib.length ? "" : "disabled"}>${B.ico("pdf")} PDF</button></p></div></div>`;
       c.appendChild(caja);
       caja.querySelector("#mrD1").onchange = e => R.d1 = e.target.value; caja.querySelector("#mrD2").onchange = e => R.d2 = e.target.value; caja.querySelector("#mrTipo").onchange = e => R.tipo = e.target.value;
       caja.querySelectorAll("[data-r]").forEach(b => b.onclick = ev => {
         if (R.d1 && R.d2 && R.d2 < R.d1) return ui.toast("La fecha «Hasta» no puede ser anterior a «Desde».", "error");
-        const doc = b.dataset.r === "mon" ? B.rep.ecMonitoreos(B.estado.ec.filter(e => deU(e) && TIPOS[R.tipo][1](e)).sort((x, y) => (!!x.noLib - !!y.noLib) || x.num - y.num), R.d1, R.d2, TIPOS[R.tipo][0] + (uni ? " · " + uni : ""))
+        const sel = () => B.estado.ec.filter(e => deU(e) && TIPOS[R.tipo][1](e)).sort((x, y) => (!!x.noLib - !!y.noLib) || B.dom.ecOrden(x, y));
+        const doc = b.dataset.r === "ult" ? B.rep.ecUltimos(sel(), R.d1, R.d2, TIPOS[R.tipo][0] + (uni ? " · " + uni : ""))
+          : b.dataset.r === "mon" ? B.rep.ecMonitoreos(B.estado.ec.filter(e => deU(e) && TIPOS[R.tipo][1](e)).sort((x, y) => (!!x.noLib - !!y.noLib) || x.num - y.num), R.d1, R.d2, TIPOS[R.tipo][0] + (uni ? " · " + uni : ""))
           : b.dataset.r === "nl" ? B.rep.ecSeguimientoNL(R.d1, R.d2, uni) : B.rep.ecBitacora(noLib);
         b.dataset.m === "pdf" ? B.rep.pdf(doc, ev.currentTarget) : B.rep.imprimir(doc);
       });
@@ -4436,7 +4532,7 @@ V.registros = {
 B.editarActividad = async function (id) {
       const a = B.estado.actividades.find(x => x.id === id); if (!a) return;
       const T0 = B.app.trabajo, ops = a.ini ? ["Realizada", "En proceso", "Pendiente", "Concluida"] : [...new Set(["Pendiente", a.est])];      // sin asignar: conserva su estatus o vuelve a pendiente
-      const esRecu = !!(a.recurrente && !a.recuFin);
+      const pl = B.dom.plantillaDe(a), base = pl || a, esRecu = !!(base.recurrente && !base.recuFin), grp = B.dom.grupoAct(a);
       const r = await ui.modal({
         titulo: "Editar actividad · ID " + a.id, icono: "editar", ancho: true,
         html: `<p class="muted peque" style="margin:0 0 10px">${a.ini ? "<b>" + U.esc(a.ini) + "</b> " + U.esc(B.dom.nombre(a.ini)) : "Por asignar"} · ${B.t.corto(a.fecha, a.turno)}</p>
@@ -4444,7 +4540,8 @@ B.editarActividad = async function (id) {
           <div class="campo"><label>Estatus</label>${ui.seg("eaEst", ops, a.est, "estatus")}</div>
           <div class="campo"><label>Unidad (hoja de asignación)</label>${ui.seg("eaUni", ["General", "Unidad 1", "Unidad 2"], { "": "General", U1: "Unidad 1", U2: "Unidad 2" }[a.uni || ""])}</div>
           <label class="chip-ali" style="margin:8px 0 0"><input type="checkbox" id="eaRecu" ${esRecu ? "checked" : ""}><span>Actividad <b>recurrente</b> (aparece en la hoja de asignación y por asignar en cada turno hasta desactivarla)</span></label>
-          ${a.grupo && B.estado.actividades.filter(x => x.grupo === a.grupo).length > 1 ? `<p class="muted peque" style="margin:0 0 8px">Actividad compartida con <b>${U.esc(B.estado.actividades.filter(x => x.grupo === a.grupo).map(x => x.ini).join("/"))}</b>: el cambio vale para todos.</p>` : ""}
+          ${pl ? `<p class="muted peque" style="margin:4px 0 8px">Se tomó de la actividad recurrente <b>ID ${pl.id}</b>: el texto y el estatus que cambies aquí son solo de esta (${B.t.corto(a.fecha, a.turno)}); la casilla «recurrente» es la de la actividad que aparece en cada turno. Para cambiar su texto usa <b>Por asignar → Editar / nota</b>.</p>` : ""}
+          ${grp.length > 1 ? `<p class="muted peque" style="margin:0 0 8px">Actividad compartida con <b>${U.esc(grp.map(x => x.ini).join("/"))}</b>: el cambio vale para todos.</p>` : ""}
           <p class="muted peque" style="margin:8px 0 0"><b>Realizada</b>: sale solo en el reporte de su turno. <b>En proceso / Pendiente</b>: se repite en cada reporte hasta concluirla.
           <b>Concluida</b>: se cierra en el turno de trabajo seleccionado (${B.t.corto(T0.f, T0.t)}).</p>`,
         alAbrir: v => ui.activarSeg(v),
@@ -4458,7 +4555,7 @@ B.editarActividad = async function (id) {
           await B.api.op("actividades", "estatus", { id: a.id, est: r.est, txt: r.txt, uni: r.uni, fecha: T0.f, turno: T0.t });
         }
         if (r.recurrente !== esRecu) {
-          await B.api.op("actividades", "recurrente", { id: a.id, activo: r.recurrente });
+          await B.api.op("actividades", "recurrente", { id: base.id, activo: r.recurrente });
         }
       }, "Actividad actualizada.");
 };
@@ -5098,8 +5195,16 @@ B.hoja = {
     return [...m.values()].map(g => ({ ...g, inis: B.dom.ordenados(g.inis).join("/"), col: g.uni || def, desde: g.ck < K && !g.recurrente }));
   },
 
+  // orden que el supervisor dio a las actividades (h.orden: textos normalizados). Lo que no esta en el orden va despues, como sale.
+  // El orden se copia a la hoja del siguiente turno junto con lo demas.
+  clave(a) { return U.norm(a.txt); },
+  ordenar(acts, h) {
+    const o = (h && h.orden) || []; if (!o.length) return acts;
+    const pos = new Map(o.map((k, i) => [k, i]));
+    return acts.map((a, i) => ({ a, i, p: pos.has(this.clave(a)) ? pos.get(this.clave(a)) : 1e6 + i })).sort((x, y) => x.p - y.p).map(x => x.a);
+  },
   documento(h, f, t) {
-    const e = U.esc, d = U.fecha(h.fechaHoja || this.fechaHoja(f, t)), acts = this.actividades(f, t);
+    const e = U.esc, d = U.fecha(h.fechaHoja || this.fechaHoja(f, t)), acts = this.ordenar(this.actividades(f, t), h);
     const img = n => new URL("img/" + n + ".png", location.href).href;
     const rojo = x => `<span class="r">${e(x)}</span>`;
     const ind = (et, quien, sig, o) => `<tr><td class="sb"><b>DÍAS SIN ACCIDENTES INDICADOR</b> (${quien})</td><td class="sb"><b>${sig}: ${e(o.n)}</b>${o.d ? " (" + e(o.d) + ")" : ""}</td></tr>`;
@@ -5192,7 +5297,7 @@ V.hoja = {
     if (!B.dom.esSup()) return this.consulta(c);
     const { f, t } = T(), H = B.hoja, k = f + t, guardada = H.de(f, t);
     if (!this.borr[k]) this.borr[k] = H.base(f, t);
-    const h = this.borr[k], e = U.esc, acts = H.actividades(f, t);
+    const h = this.borr[k], e = U.esc, acts = H.ordenar(H.actividades(f, t), h);
     // mientras no se corrijan a mano, las iniciales siguen a los presentes del turno (aunque se marquen despues de abrir la hoja)
     if (h.persAuto) { h.sitio = H.inis(f, t, [1, 2, 5]); h.espec = H.inis(f, t, [3]); }
     if (h.supAuto) h.sup = H.sups(f, t);
@@ -5227,9 +5332,10 @@ V.hoja = {
           <div class="grid2">${inp("sup", "Supervisor", { ph: "Iniciales separadas por / (ej. CALH / EMR)" })}${inp("vac", "Vacaciones / permiso")}</div>${inp("sitio", "Personal laborando en sitio", { ph: "Iniciales separadas por / (ej. KMH / JRS)" })}
           <div class="grid2">${inp("espec", "Personal especializado", { ph: "Iniciales separadas por /" })}${inp("incap", "Personal incapacitado")}${inp("comis", "Personal comisionado")}${inp("sinmov", "Personal sin movimiento")}</div>
         </div>
-        <div class="tarjeta c6" data-tour="hoja-acts">${cab("lista", "g", "Actividades (" + acts.length + ")", "Salen solas de la bitácora: solo las pendientes, en proceso, por asignar y recurrentes activas. Elige la unidad de cada una; las por asignar se pueden editar con el lápiz.", `<a class="btn chico sec" href="#/actividades">Asignar…</a>`)}
-          <div class="hoja-lista">${acts.length ? acts.map(a => `<div class="hoja-act"><div class="t"><b>${e(a.inis || (a.recurrente ? "RECURRENTE / POR ASIGNAR" : "POR ASIGNAR"))}</b> · ${e(a.txt)}${a.recurrente ? ` <span class="badge a peque" style="padding:1px 5px;font-size:10px">Recurrente</span>` : ""} <span class="muted peque">${e(a.est)}${a.desde ? " · de turnos anteriores" : ""}</span>${a.com ? `<div class="muted peque">↳ ${e(a.com)}</div>` : ""}</div>
-            ${a.libre ? `<button class="btn fantasma btn-icono" data-edlibre="${a.id}" title="Editar el texto o agregar una nota">${B.ico("editar")}</button>` : ""}${ui.seg("u" + a.id, ["U1", "U2"], a.col)}</div>`).join("") : ui.vacio("Sin actividades pendientes, en proceso ni por asignar.", "lista")}</div>
+        <div class="tarjeta c6" data-tour="hoja-acts">${cab("lista", "g", "Actividades (" + acts.length + ")", "Salen solas de la bitácora: solo las pendientes, en proceso, por asignar y recurrentes activas. Elige la unidad de cada una; las por asignar se pueden editar con el lápiz. <b>Arrástralas</b> (desde ⠿) o usa ▲▼ para darles prioridad: así salen en la hoja; se guarda con <b>Guardar</b>.", `<a class="btn chico sec" href="#/actividades">Asignar…</a>`)}
+          <div class="hoja-lista" id="hjActs">${acts.length ? acts.map(a => `<div class="hoja-act" data-k="${e(H.clave(a))}"><span class="asa" title="Arrastra para cambiar el orden">⠿</span><span class="mover"><button type="button" data-mover="arriba" title="Subir">▲</button><button type="button" data-mover="abajo" title="Bajar">▼</button></span><div class="t"><b>${e(a.inis || (a.recurrente ? "RECURRENTE / POR ASIGNAR" : "POR ASIGNAR"))}</b> · ${e(a.txt)}${a.recurrente ? ` <span class="badge a peque" style="padding:1px 5px;font-size:10px">Recurrente</span>` : ""} <span class="muted peque">${e(a.est)}${a.desde ? " · de turnos anteriores" : ""}</span>${a.com ? `<div class="muted peque">↳ ${e(a.com)}</div>` : ""}</div>
+            ${a.libre ? `<button class="btn fantasma btn-icono" data-edlibre="${a.id}" title="Editar el texto o agregar una nota">${B.ico("editar")}</button>` : `<button class="btn fantasma btn-icono" data-edact="${a.id}" title="Editar el texto, el estatus, la unidad o si es recurrente">${B.ico("editar")}</button>`}${ui.seg("u" + a.id, ["U1", "U2"], a.col)}</div>`).join("") : ui.vacio("Sin actividades pendientes, en proceso ni por asignar.", "lista")}</div>
+          <p class="peque oculto" id="hjOrdAviso" style="margin:8px 0 0;color:var(--guinda-2)"><b>Orden cambiado:</b> toca <b>Guardar</b> para conservarlo (también pasa a la hoja del siguiente turno).</p>
           <p class="muted peque" style="margin:10px 0 0">Las <b>notas extra</b> son de este turno (${t === "T1" ? "noche" : "día"}): se conservan en las siguientes hojas del mismo turno hasta que las quites, y no afectan a las del otro turno.</p>
           <div class="hoja-sec">Notas extra en Unidad 1</div>${lista("extraU1", "Texto libre para la columna de Unidad 1")}
           <div class="hoja-sec">Notas extra en Unidad 2</div>${lista("extraU2", "Texto libre para la columna de Unidad 2")}
@@ -5269,6 +5375,9 @@ V.hoja = {
     };
     const limpia = () => { const x = JSON.parse(JSON.stringify(h)); delete x._arrastrada; delete x._mismo; return x; };
     c.querySelectorAll("[data-edlibre]").forEach(b => b.onclick = () => V.actividades.editarLibre(+b.dataset.edlibre));
+    c.querySelectorAll("[data-edact]").forEach(b => b.onclick = () => B.editarActividad(+b.dataset.edact));
+    const lActs = c.querySelector("#hjActs");
+    if (lActs) ui.ordenable(lActs, ".hoja-act", () => { h.orden = [...lActs.querySelectorAll(".hoja-act")].map(x => x.dataset.k); cambio(); const s = c.querySelector("#hjOrdAviso"); if (s) s.classList.remove("oculto"); });
     const bPres = c.querySelector("#hjPres");
     if (bPres) bPres.onclick = () => {
       const pres = H.presentesInis(f, t);
@@ -10339,8 +10448,9 @@ B.nube = {
   async recibir(todos) {
     const n = this.cfg(); if (!n) throw new Error("El envío por internet no está configurado.");
     if (!this.segura()) throw new Error("Para recibir por internet abre la bitácora en la PC donde está instalada (dirección localhost).");
-    if (this.ocupado) throw new Error("Ya se están recibiendo capturas, espera un momento.");
+    if (this.ocupado && this._rec) { try { await this._rec; } catch (e) { } }
     this.ocupado = true;
+    let fin; this._rec = new Promise(r => fin = r);
     try {
       let items, porHoja = false;
       try { items = (await this.llamar(n, todos ? { accion: "lista", todos: "1" } : { accion: "lista" })).items || []; }
@@ -10357,7 +10467,7 @@ B.nube = {
       this.ultima = { fh: U.ahoraISO(), n: ok.length, porHoja }; this.error = "";
       return res;
     } catch (e) { this.error = e.message; throw e; }
-    finally { this.ocupado = false; }
+    finally { this.ocupado = false; fin(); }
   },
   // envios ya procesados en esta PC (para la lectura por la hoja, que no puede marcarlos)
   vistos(nuevos) {
@@ -10373,23 +10483,34 @@ B.nube = {
     return this.gviz(n.hoja, "Capturas", 1, "Revisa que tenga la pestaña «Capturas» (se crea con el primer envío).").then(F => F.map(c => ({ id: String(c[0]), f: c[1], n: c[2], d: c.slice(5).map(x => String(x).replace(/^~/, "")).join("") }))
       .filter(it => /^env-/.test(it.id) && /^B24X1:/.test(it.d)));
   },
-  // lee una pestana de la hoja por docs.google.com: devuelve los renglones como listas de valores (fechas en ISO)
-  gviz(hoja, pestana, encabezados, ayuda) {
+  // lee una pestana de la hoja por docs.google.com: devuelve los renglones como listas de valores (fechas en ISO).
+  // Google a veces contesta con un error temporal (500) o tarda: se reintenta 2 veces antes de dar la falla.
+  async gviz(hoja, pestana, encabezados, ayuda, tq) {
+    let ult;
+    for (let i = 0; i < 3; i++) {
+      if (i) await new Promise(r => setTimeout(r, i === 1 ? 2500 : 7000));
+      try { return await this.gviz1(hoja, pestana, encabezados, ayuda, tq); } catch (e) { ult = e; if (!e.hoja) throw e; }
+    }
+    throw ult;
+  },
+  gviz1(hoja, pestana, encabezados, ayuda, tq) {
     return new Promise((ok, mal) => {
       const cb = "b24Hoja" + Date.now() + Math.floor(Math.random() * 1e6), s = document.createElement("script");
       const fin = () => { clearTimeout(t); try { delete window[cb]; } catch (e) { window[cb] = undefined; } s.remove(); };
-      const noComp = () => Object.assign(new Error("No se pudo leer la hoja de Google desde este equipo. Revisa que esté compartida como «Cualquier persona con el enlace: Lector» y que la dirección de la hoja sea la correcta."), { hoja: true });
-      const t = setTimeout(() => { fin(); mal(noComp()); }, 25000);
+      const noComp = como => Object.assign(new Error((como === "lento" ? "Google tardó demasiado en contestar (pestaña «" + pestana + "»): la red está lenta o lo está frenando. Se reintentará sola."
+        : como === "acceso" ? "Google contestó con su página de acceso en lugar de la hoja (pestaña «" + pestana + "»). Revisa que siga compartida como «Cualquier persona con el enlace: Lector»; si esta PC tiene abierta una cuenta de Google de la empresa, prueba en otra ventana o cierra esa sesión."
+        : "No se pudo leer la hoja de Google (pestaña «" + pestana + "»): Google dio un error temporal o la red lo bloqueó. Se reintentará sola; si sigue igual por horas, revisa el internet de esta PC.")), { hoja: true, como });
+      const t = setTimeout(() => { fin(); mal(noComp("lento")); }, 30000);
       window[cb] = r => {
         fin();
         if (!r || r.status !== "ok") return mal(new Error("La hoja de Google respondió con error: " + ((r && r.errors && r.errors[0] && (r.errors[0].detailed_message || r.errors[0].message)) || "desconocido") + ". " + (ayuda || "")));
         const fecha = v => { const m = /Date\((\d+),(\d+),(\d+)(?:,(\d+),(\d+),(\d+))?\)/.exec(String(v || "")); return m ? new Date(+m[1], +m[2], +m[3], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0)).toISOString() : String(v || ""); };
         ok(((r.table && r.table.rows) || []).map(f => (f.c || []).map(x => x && x.v != null ? (/^Date\(/.test(String(x.v)) ? fecha(x.v) : x.v) : "")));
       };
-      s.onerror = () => { fin(); mal(noComp()); };
+      s.onerror = () => { fin(); mal(noComp("error")); };
       // si Google contesta con su pagina de acceso (hoja no compartida) el script carga pero nunca llama a la funcion
-      s.onload = () => setTimeout(() => { if (window[cb]) { fin(); mal(noComp()); } }, 300);
-      s.src = "https://docs.google.com/spreadsheets/d/" + encodeURIComponent(hoja) + "/gviz/tq?tqx=responseHandler:" + cb + "&sheet=" + encodeURIComponent(pestana) + "&headers=" + (encabezados ? 1 : 0) + "&tq=" + encodeURIComponent("select *") + "&_=" + Date.now();
+      s.onload = () => setTimeout(() => { if (window[cb]) { fin(); mal(noComp("acceso")); } }, 300);
+      s.src = "https://docs.google.com/spreadsheets/d/" + encodeURIComponent(hoja) + "/gviz/tq?tqx=responseHandler:" + cb + "&sheet=" + encodeURIComponent(pestana) + "&headers=" + (encabezados ? 1 : 0) + "&tq=" + encodeURIComponent(tq || "select *") + "&_=" + Date.now();
       document.head.appendChild(s);
     });
   },
@@ -10399,43 +10520,67 @@ B.nube = {
   PARTE: 30000,
   async formulario(n) {
     const m = {}; for (const f of await this.gviz(n.hoja, "Config", 0)) m[String(f[0])] = String(f[1] || "");
+    this.verScript = +m.version || 0;
     if (!/^https:\/\/docs\.google\.com\/forms\//.test(m.formResponse || "") || !m.e_id || !m.e_parte || !m.e_datos)
       throw new Error("La hoja todavía no tiene el formulario para mandar paquetes. En Apps Script elige la función «instalar» → Ejecutar (pasos en Celulares → Envío por internet).");
     return m;
   },
-  // paquetes en la hoja (del mas nuevo al mas viejo), con sus partes unidas cuando estan completos
+  // paquetes en la hoja (del mas nuevo al mas viejo): solo la lista de partes que llegaron (sin los datos, que pesan mucho)
   async paquetes(n) {
     const g = {};
-    for (const c of await this.gviz(n.hoja, "Paquetes", 1, "Revisa que la función «instalar» se haya ejecutado en Apps Script.")) {
+    for (const c of await this.gviz(n.hoja, "Paquetes", 1, "Revisa que la función «instalar» se haya ejecutado en Apps Script.", "select A,B,C")) {
       const id = String(c[1] || ""), m = /^(\d+)\/(\d+)$/.exec(String(c[2] || "").trim()); if (!/^paq-/.test(id) || !m) continue;
-      const p = g[id] || (g[id] = { id, f: c[0], total: +m[2], partes: {} }); p.partes[+m[1]] = String(c[3] || "").replace(/^~/, ""); if (c[0] > p.f) p.f = c[0];
+      const p = g[id] || (g[id] = { id, f: c[0], total: +m[2], partes: {} }); p.partes[+m[1]] = 1; if (c[0] > p.f) p.f = c[0];
     }
-    return Object.values(g).map(p => { const k = Object.keys(p.partes).length, completo = k >= p.total; return { id: p.id, f: p.f, total: p.total, llegaron: k, completo, d: completo ? Array.from({ length: p.total }, (_, i) => p.partes[i + 1] || "").join("") : "" }; })
+    return Object.values(g).map(p => { const k = Object.keys(p.partes).length; return { id: p.id, f: p.f, total: p.total, llegaron: k, completo: k >= p.total, faltan: Array.from({ length: p.total }, (_, i) => i + 1).filter(i => !p.partes[i]) }; })
       .sort((a, b) => String(b.f).localeCompare(String(a.f)));
+  },
+  // datos de un paquete completo: solo sus renglones, unidos en orden
+  async datos(p) {
+    const n = this.cfg(), partes = {};
+    for (const c of await this.gviz(n.hoja, "Paquetes", 1, "", "select C,D where B = '" + String(p.id).replace(/[^\w-]/g, "") + "'")) {
+      const m = /^(\d+)\/(\d+)$/.exec(String(c[0] || "").trim()); if (m) partes[+m[1]] = String(c[1] || "").replace(/^~/, "");
+    }
+    if (Object.keys(partes).length < p.total) throw new Error("El paquete de la PC llegó incompleto a la hoja. Se tomará el siguiente que mande la PC.");
+    p.d = Array.from({ length: p.total }, (_, i) => partes[i + 1] || "").join("");
+    return p;
   },
   // PC: manda el paquete (sin los documentos POE, que el celular ya conserva) y comprueba que haya llegado completo
   async enviarPaquete(prog, pre) {
     const n = this.cfg(); if (!n || !n.hoja) throw new Error("Falta la dirección de la hoja de cálculo (Celulares → Envío por internet).");
     if (!this.segura()) throw new Error("Abre la bitácora en la PC donde está instalada (dirección localhost).");
     const f = await this.formulario(n), texto = pre || (await B.inter.generarPaquete(false, true)).texto, huella = await this.huella(texto);
-    const d = await B.cod.cifrar(texto, n.clave), id = "paq-" + Date.now().toString(36), partes = [];
+    const d = await B.cod.cifrar(texto, n.clave), id = "paq-" + Date.now().toString(36), partes = []; this._reenv = 0;
     for (let i = 0; i < d.length; i += this.PARTE) partes.push(d.slice(i, i + this.PARTE));
-    for (let i = 0; i < partes.length; i++) {
-      if (prog) prog("Enviando parte " + (i + 1) + " de " + partes.length + "…");
-      const b = new URLSearchParams(); b.set(f.e_id, id); b.set(f.e_parte, (i + 1) + "/" + partes.length); b.set(f.e_datos, "~" + partes[i]);
-      try { await fetch(f.formResponse, { method: "POST", mode: "no-cors", body: b }); } catch (e) { throw new Error("No se pudo mandar al formulario de Google (parte " + (i + 1) + "). Revisa el internet de esta PC."); }
+    const mandar = async (lista, vuelta) => {
+      for (const i of lista) {
+        if (prog) prog((vuelta ? "Reenviando parte " : "Enviando parte ") + i + " de " + partes.length + "…");
+        const b = new URLSearchParams(); b.set(f.e_id, id); b.set(f.e_parte, i + "/" + partes.length); b.set(f.e_datos, "~" + partes[i - 1]);
+        let ok = false;
+        for (let k = 0; k < 3 && !ok; k++) { try { await fetch(f.formResponse, { method: "POST", mode: "no-cors", body: b }); ok = true; } catch (e) { await new Promise(r => setTimeout(r, 1500 * (k + 1))); } }
+        if (!ok) throw new Error("No se pudo mandar al formulario de Google (parte " + i + "). Revisa el internet de esta PC.");
+        await new Promise(r => setTimeout(r, 250));        // de una en una y con pausa: el formulario pierde respuestas si llegan muy juntas
+      }
+    };
+    await mandar(partes.map((_, i) => i + 1), 0);
+    // se lee la hoja (tarda unos segundos en mostrar las respuestas) y lo que no llego se vuelve a mandar
+    let p = null;
+    for (let vuelta = 1; vuelta <= 4; vuelta++) {
+      for (let k = 0; k < 4; k++) {
+        if (prog) prog("Comprobando que llegó completo…");
+        await new Promise(r => setTimeout(r, k ? 6000 : 4000));
+        p = (await this.paquetes(n)).find(x => x.id === id);
+        if (p && p.completo) { try { localStorage.setItem("b_paq_huella", huella); localStorage.setItem("b_paq_ult", U.ahoraISO()); } catch (e) { } return { id, partes: partes.length, kb: Math.round(d.length / 1024), reenviadas: this._reenv || 0 }; }
+      }
+      if (vuelta === 4) break;
+      const faltan = p ? p.faltan : partes.map((_, i) => i + 1);
+      this._reenv = (this._reenv || 0) + faltan.length;
+      await mandar(faltan, vuelta);
     }
-    // la hoja tarda unos segundos en mostrar las respuestas del formulario
-    for (let k = 0; k < 8; k++) {
-      if (prog) prog("Comprobando que llegó completo…");
-      await new Promise(r => setTimeout(r, k ? 5000 : 3000));
-      const p = (await this.paquetes(n)).find(x => x.id === id);
-      if (p && p.completo) { try { localStorage.setItem("b_paq_huella", huella); localStorage.setItem("b_paq_ult", U.ahoraISO()); } catch (e) { } return { id, partes: partes.length, kb: Math.round(d.length / 1024) }; }
-    }
-    throw new Error("Se mandó, pero la hoja todavía no muestra el paquete completo. Espera un par de minutos y vuelve a intentar; si sigue igual, revisa en la hoja que el formulario esté aceptando respuestas.");
+    throw new Error("Se mandó, pero la hoja no muestra el paquete completo" + (p ? " (llegaron " + p.llegaron + " de " + p.total + " partes)" : "") + ". " + (this.verScript < 4 ? "Actualiza el código de Apps Script (Configuración → «Copiar el código para Apps Script», pégalo, guarda y ejecuta «instalar»): la versión anterior borraba partes mientras llegaban." : "Vuelve a intentar en unos minutos."));
   },
   // celular: el paquete mas reciente que este completo (null si no hay)
-  async buscarPaquete() { const n = this.cfg(); if (!n || !n.hoja) return null; return (await this.paquetes(n)).find(p => p.completo) || null; },
+  async buscarPaquete() { const n = this.cfg(); if (!n || !n.hoja) return null; return (await this.paquetes(n)).find(p => p.completo) || null; },      // sin datos: usar datos(p)
   paqueteVisto(id) { try { if (id) localStorage.setItem("b_paq_nube", id); return localStorage.getItem("b_paq_nube") || ""; } catch (e) { return ""; } },
   minutos() { let m = 2; try { m = +localStorage.getItem("b_nube_min") || 2; } catch (e) { } return Math.min(60, Math.max(1, m)); },
   // revision automatica de la PC: se reprograma al cambiar los minutos
@@ -10481,6 +10626,7 @@ B.nube = {
     this.ocupadoCel = true; this.celUlt = Date.now();
     try {
       const p = await this.buscarPaquete(); if (!p || p.id === this.paqueteVisto()) return;
+      await this.datos(p);
       const txt = await B.cod.descifrar(p.d, n.clave);
       try { await B.inter.cargarPaquete(txt); } catch (e) { if (e.antiguo) { this.paqueteVisto(p.id); return; } throw e; }
       this.paqueteVisto(p.id);
@@ -10495,7 +10641,7 @@ B.nube = {
     return `// Bitacora 24RU1 - buzon de capturas de los celulares (Google Apps Script).
 // Pega TODO este codigo en Extensiones > Apps Script de una hoja de calculo nueva e implementalo como Aplicacion web.
 // Las capturas llegan cifradas: en la hoja solo se ve texto ilegible. Lo importado se borra a los 15 dias y todo a los 30.
-// Version 3 (bitacora 4.13). La PRIMERA vez elige la funcion "instalar" (lista de arriba) -> Ejecutar y autoriza:
+// Version 4 (bitacora 4.20). La PRIMERA vez (y al actualizar este codigo) elige la funcion "instalar" (lista de arriba) -> Ejecutar y autoriza:
 // crea el formulario por el que la PC manda el paquete de datos a los celulares.
 const TOKEN = "${token}";
 const HOJA = "Capturas", PARTE = 45000, DIAS = 15, DIAS_MAX = 30, PAQUETES = "Paquetes", CONFIG = "Config", PAQ_GUARDAR = 3;
@@ -10567,18 +10713,34 @@ function instalar() {
     .withItemResponse(it[2].asParagraphTextItem().createResponse("C3")).toPrefilledUrl();
   const campo = function (v) { let k = ""; (pre.split("?")[1] || "").split("&").forEach(function (x) { const kv = x.split("="); if (kv[1] === v) k = decodeURIComponent(kv[0]); }); return k; };
   let cfg = ss.getSheetByName(CONFIG); if (!cfg) cfg = ss.insertSheet(CONFIG);
-  cfg.clear(); cfg.getRange(1, 1, 5, 2).setValues([["formResponse", form.getPublishedUrl().split("/viewform")[0] + "/formResponse"], ["e_id", campo("A1")], ["e_parte", campo("B2")], ["e_datos", campo("C3")], ["version", "3"]]);
+  cfg.clear(); cfg.getRange(1, 1, 5, 2).setValues([["formResponse", form.getPublishedUrl().split("/viewform")[0] + "/formResponse"], ["e_id", campo("A1")], ["e_parte", campo("B2")], ["e_datos", campo("C3")], ["version", "4"]]);
   if (!ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === "alRecibirPaquete"; })) ScriptApp.newTrigger("alRecibirPaquete").forSpreadsheet(ss).onFormSubmit().create();
   Logger.log("Listo. Formulario: " + form.getPublishedUrl());
 }
-// al llegar cada parte: conserva solo los ultimos PAQ_GUARDAR paquetes
+// al llegar cada parte: se borran los paquetes ANTERIORES al ultimo que esta completo. Nunca se toca el ultimo completo ni
+// lo que llego despues (un paquete que se esta mandando). Con candado: antes, dos limpiezas a la vez borraban renglones equivocados.
 function alRecibirPaquete() {
-  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(PAQUETES); if (!sh || sh.getLastRow() < 2) return;
-  const v = sh.getRange(2, 2, sh.getLastRow() - 1, 1).getValues().map(function (r) { return String(r[0]); }), ids = [];
-  v.forEach(function (x) { if (ids.indexOf(x) < 0) ids.push(x); });
-  if (ids.length <= PAQ_GUARDAR) return;
-  const quitar = ids.slice(0, ids.length - PAQ_GUARDAR);
-  for (let i = v.length - 1; i >= 0; i--) if (quitar.indexOf(v[i]) >= 0) sh.deleteRow(i + 2);
+  const lock = LockService.getScriptLock(); if (!lock.tryLock(30000)) return;
+  try {
+    const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(PAQUETES); if (!sh || sh.getLastRow() < 2) return;
+    const v = sh.getRange(2, 2, sh.getLastRow() - 1, 2).getValues(), info = {}, orden = [];
+    v.forEach(function (r) {
+      const id = String(r[0]), m = /^(\\d+)\\/(\\d+)$/.exec(String(r[1]).trim());
+      if (!info[id]) { info[id] = { t: m ? +m[2] : 0, p: {} }; orden.push(id); }
+      if (m) info[id].p[m[1]] = 1;
+    });
+    let k = -1;
+    for (let i = orden.length - 1; i >= 0; i--) { const x = info[orden[i]]; if (x.t && Object.keys(x.p).length >= x.t) { k = i; break; } }
+    if (k <= 0) return;
+    const quitar = orden.slice(0, k);
+    // de abajo hacia arriba y por bloques de renglones seguidos
+    let fin = -1;
+    for (let i = v.length - 1; i >= -1; i--) {
+      const q = i >= 0 && quitar.indexOf(String(v[i][0])) >= 0;
+      if (q && fin < 0) fin = i;
+      if (!q && fin >= 0) { sh.deleteRows(i + 3, fin - i); fin = -1; }
+    }
+  } finally { lock.releaseLock(); }
 }
 `;
   }
@@ -10604,6 +10766,7 @@ V.celular = {
     if (!adm && !(n && sup)) return "";
     return `<div class="tarjeta" data-tour="cel-nube">${cab("subir", "a", "Envío por internet (hoja de Google)", n ? "Activo: los celulares mandan sus capturas cifradas a la hoja de Google y esta PC las recoge, sin WhatsApp." : "Opcional: que los celulares manden sus capturas por internet, sin WhatsApp. Lo configura el administrador una sola vez.")}
       ${!seg ? `<div class="aviso a">${B.ico("info")}<div>En este equipo la bitácora está abierta por la red. El envío por internet solo funciona en la PC donde está instalada (dirección <b>localhost</b>).</div></div>` : ""}
+      ${n && seg && B.nube.verScript && B.nube.verScript < 4 ? `<div class="aviso a">${B.ico("alerta")}<div><b>Actualiza el código de Apps Script de la hoja</b> (lo hace el administrador): la versión que tiene la hoja borraba partes de los paquetes mientras llegaban y por eso los celulares no los recibían completos. Pasos: Configuración (administrador) → <b>Copiar el código para Apps Script</b> → en Apps Script borra lo que haya, pega, guarda y ejecuta la función <b>instalar</b>. No hace falta volver a implementar.</div></div>` : ""}
       ${n && sup && seg ? `<div class="fila" style="align-items:center;gap:10px"><button class="btn verde" id="nubeRec">${B.ico("descargar")} Recibir capturas por internet</button>
           <label class="peque" style="display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" id="nubeAuto" ${B.nube.autoOn() ? "checked" : ""} style="width:18px;height:18px"> Revisar sola cada</label>
           <select class="inp" id="nubeMin" style="width:auto;min-height:0;padding:4px 8px">${[1, 2, 3, 5, 10, 15, 30, 60].map(m => `<option value="${m}" ${B.nube.minutos() === m ? "selected" : ""}>${m}</option>`).join("")}</select><span class="peque">minuto(s) mientras la bitácora esté abierta en esta PC</span></div>
@@ -10854,6 +11017,7 @@ V.celular = {
         try {
           if (!hallado) await revisar();
           if (!hallado) { bpn.disabled = false; return; }
+          if (!hallado.d) await B.nube.datos(hallado);
           const txt = await B.cod.descifrar(hallado.d, B.nube.cfg().clave);
           B.nube.paqueteVisto(hallado.id);
           await cargar(txt);
@@ -11021,7 +11185,7 @@ B.vistas = B.vistas || {};
 B.app = {
   trabajo: null,
   ruta: "inicio",
-  info: {}, VERSION: "4.19.3", servidorViejo: false,
+  info: {}, VERSION: "4.20", servidorViejo: false,
 
   async iniciar() {
     if (B.modoLocal) return this.iniciarLocal();
@@ -11208,7 +11372,7 @@ B.app = {
           <div class="marca"><div class="marca-logo">24RU1</div><div><b>Bitácora S.I.</b><span>${U.esc(B.t.periodo())}${B.estado.servidor.demo ? " · DEMO" : ""}</span></div></div>
           <nav class="nav">${enlaces.map(([g, ls]) => `<div class="nav-grupo">${g}</div>` + ls.map(([r, t, i]) =>
             `<a href="#/${r}" data-r="${r}" data-tour="nav-${r}">${B.ico(i)}<span>${t}</span>${r === "celular" ? '<span class="contador oculto" id="cntCel"></span>' : ""}${r === "monitoreo" ? '<span class="contador oculto" id="cntMon"></span>' : ""}${r === "tarjetas" ? '<span class="contador oculto" id="cntTarj"></span>' : ""}${r === "procedimientos" ? '<span class="contador oculto" id="cntProc"></span>' : ""}${r === "pendientes" ? '<span class="contador oculto" id="cntPend"></span>' : ""}</a>`).join("")).join("")}</nav>
-          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.19.3")}</div>
+          <div class="lateral-pie">${sup ? (u.admin ? "Administrador" : "Supervisor") : u.esp ? "Técnico especializado" : "Técnico"} · ${U.esc(u.ini)}<br>${B.modoMovil ? "Datos guardados en este celular" : "Datos guardados en la PC servidor"} · v${U.esc((this.info && this.info.version) || "4.20")}</div>
         </aside>
         <div class="principal">
           <header class="barra">
